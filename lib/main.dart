@@ -1,7 +1,23 @@
 import 'package:flutter/material.dart';
 import 'models/reference_category.dart';
+import 'screens/category_screen.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await dotenv.load(fileName: '.env');
+
+  final supabaseUrl = dotenv.env['SUPABASE_URL'];
+  final publishableKey = dotenv.env['SUPABASE_PUBLISHABLE_KEY'];
+
+  if (supabaseUrl == null || publishableKey == null) {
+    throw StateError('Supabase configuration is missing from .env');
+  }
+
+  await Supabase.initialize(url: supabaseUrl, publishableKey: publishableKey);
+
   runApp(const ArtReferenceApp());
 }
 
@@ -88,8 +104,13 @@ class CollectionCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () {
-          // Opening the category will be added later.
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) => CategoryScreen(category: category),
+            ),
+          );
         },
+
         child: Stack(
           fit: StackFit.expand,
           children: [

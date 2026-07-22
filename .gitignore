@@ -2,7 +2,7 @@
 *.class
 *.log
 *.pyc
-*.swp
+*.swpgit status
 .DS_Store
 .atom/
 .build/
@@ -43,3 +43,4 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+.env
