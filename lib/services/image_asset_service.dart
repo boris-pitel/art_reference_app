@@ -3,6 +3,8 @@ import 'dart:typed_data';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
+import '../models/reference_category.dart';
+
 class ImageAssetInfo {
   const ImageAssetInfo({required this.id, required this.dateAdded});
 
@@ -26,7 +28,10 @@ class ImageAssetService {
     );
   }
 
-  Future<String> uploadImage(Uint8List imageBytes) async {
+  Future<String> uploadImage(
+    Uint8List imageBytes,
+    ReferenceCategory category,
+  ) async {
     final response = await _supabase.functions.invoke(
       'upload-image',
       body: imageBytes,
@@ -34,6 +39,7 @@ class ImageAssetService {
         'Content-Type': 'application/octet-stream',
         'x-user-id': _userId,
         'x-user-email': _userEmail.trim().toLowerCase(),
+        'x-category-code': category.databaseCode,
       },
     );
 
@@ -48,11 +54,11 @@ class ImageAssetService {
     return data['id'] as String;
   }
 
-  Future<List<ImageAssetInfo>> listImages() async {
+  Future<List<ImageAssetInfo>> listImages(ReferenceCategory category) async {
     final response = await _supabase.functions.invoke(
       'list-images',
       method: HttpMethod.get,
-      headers: {'x-user-id': _userId},
+      headers: {'x-user-id': _userId, 'x-category-code': category.databaseCode},
     );
 
     final data = response.data;
@@ -91,7 +97,8 @@ class ImageAssetService {
     }
 
     throw StateError(
-      'The image function returned an unexpected response: ${data.runtimeType}',
+      'The image function returned an unexpected response: '
+      '${data.runtimeType}',
     );
   }
 }

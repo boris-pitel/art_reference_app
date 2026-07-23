@@ -44,8 +44,9 @@ class _CategoryScreenState extends State<CategoryScreen> {
     });
 
     try {
-      final imageInfoList = await _imageAssetService.listImages();
-
+      final imageInfoList = await _imageAssetService.listImages(
+        widget.category,
+      );
       final downloadedImages = <Uint8List>[];
 
       for (final imageInfo in imageInfoList) {
@@ -94,12 +95,10 @@ class _CategoryScreenState extends State<CategoryScreen> {
 
     setState(() {
       _isUploading = true;
-      _errorMessage = null;
     });
 
     try {
-      await _imageAssetService.uploadImage(bytes);
-
+      await _imageAssetService.uploadImage(bytes, widget.category);
       if (!mounted) {
         return;
       }
@@ -109,18 +108,28 @@ class _CategoryScreenState extends State<CategoryScreen> {
       ).showSnackBar(const SnackBar(content: Text('Photo reference saved.')));
 
       await _loadImages();
+    } on FunctionException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      final isDuplicate = error.status == 409;
+
+      final message = isDuplicate
+          ? 'This photo is already in your collection.'
+          : 'Unable to save the photo: ${error.details}';
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     } catch (error) {
       if (!mounted) {
         return;
       }
 
-      setState(() {
-        _errorMessage = error.toString();
-      });
-
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Unable to save image: $error')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to save the photo: $error')),
+      );
     } finally {
       if (mounted) {
         setState(() {

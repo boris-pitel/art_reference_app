@@ -1,49 +1,47 @@
 enum ReferenceCategory {
-  portrait,
-  landscape,
-  architecture,
-  stillLife,
-  abstract,
-  icon,
-}
+  portrait(
+    databaseCode: 'portrait',
+    displayName: 'Portraits',
+    thumbnailAsset: 'assets/category_thumbnails/portraits.jpg',
+  ),
 
-extension ReferenceCategoryExtension on ReferenceCategory {
-  String get displayName {
-    switch (this) {
-      case ReferenceCategory.portrait:
-        return 'Portraits';
-      case ReferenceCategory.landscape:
-        return 'Landscapes';
-      case ReferenceCategory.architecture:
-        return 'Architecture';
-      case ReferenceCategory.stillLife:
-        return 'Still Life';
-      case ReferenceCategory.abstract:
-        return 'Abstract';
-      case ReferenceCategory.icon:
-        return 'Icon';
-    }
-  }
+  landscape(
+    databaseCode: 'landscape',
+    displayName: 'Landscapes',
+    thumbnailAsset: 'assets/category_thumbnails/landscapes.jpg',
+  ),
 
-  String get thumbnailAsset {
-    switch (this) {
-      case ReferenceCategory.portrait:
-        return 'assets/category_thumbnails/portraits.jpg';
+  architecture(
+    databaseCode: 'architecture',
+    displayName: 'Architecture',
+    thumbnailAsset: 'assets/category_thumbnails/architecture.jpg',
+  ),
 
-      case ReferenceCategory.landscape:
-        return 'assets/category_thumbnails/landscapes.jpg';
+  stillLife(
+    databaseCode: 'still_life',
+    displayName: 'Still Life',
+    thumbnailAsset: 'assets/category_thumbnails/stilllife.jpg',
+  ),
 
-      case ReferenceCategory.architecture:
-        return 'assets/category_thumbnails/architecture.jpg';
+  abstract(
+    databaseCode: 'abstract',
+    displayName: 'Abstract',
+    thumbnailAsset: 'assets/category_thumbnails/abstract.jpg',
+  ),
 
-      case ReferenceCategory.stillLife:
-        return 'assets/category_thumbnails/stilllife.jpg';
+  icon(
+    databaseCode: 'icon',
+    displayName: 'Icon',
+    thumbnailAsset: 'assets/category_thumbnails/icon.jpg',
+  );
 
-      case ReferenceCategory.abstract:
-        return 'assets/category_thumbnails/abstract.jpg';
+  const ReferenceCategory({
+    required this.databaseCode,
+    required this.displayName,
+    required this.thumbnailAsset,
+  });
 
-      case ReferenceCategory.icon:
-        return 'assets/category_thumbnails/icon.jpg';
-    }
-  }
+  final String databaseCode;
+  final String displayName;
+  final String thumbnailAsset;
 }
