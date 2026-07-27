@@ -1,11 +1,22 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/reference_category.dart';
 import '../services/image_asset_service.dart';
+import 'image_details_screen.dart';
+
+class _LoadedImage {
+  const _LoadedImage({
+    required this.id,
+    required this.imageUrl,
+    required this.thumbnailUrl,
+  });
+
+  final String id;
+  final String imageUrl;
+  final String? thumbnailUrl;
+}
 
 class CategoryScreen extends StatefulWidget {
   const CategoryScreen({super.key, required this.category});
@@ -21,11 +32,13 @@ class _CategoryScreenState extends State<CategoryScreen> {
 
   late final ImageAssetService _imageAssetService;
 
-  final List<Uint8List> _images = [];
+  final List<_LoadedImage> _images = [];
 
   bool _isLoading = true;
   bool _isUploading = false;
 
+  String _uploadStatus = '';
+  String? _openingImageId;
   String? _errorMessage;
 
   @override
@@ -37,6 +50,20 @@ class _CategoryScreenState extends State<CategoryScreen> {
     _loadImages();
   }
 
+  Future<List<_LoadedImage>> _fetchImages() async {
+    final imageInfoList = await _imageAssetService.listImages(widget.category);
+
+    return imageInfoList
+        .map(
+          (imageInfo) => _LoadedImage(
+            id: imageInfo.id,
+            imageUrl: imageInfo.imageUrl,
+            thumbnailUrl: imageInfo.thumbnailUrl,
+          ),
+        )
+        .toList();
+  }
+
   Future<void> _loadImages() async {
     setState(() {
       _isLoading = true;
@@ -44,16 +71,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
     });
 
     try {
-      final imageInfoList = await _imageAssetService.listImages(
-        widget.category,
-      );
-      final downloadedImages = <Uint8List>[];
-
-      for (final imageInfo in imageInfoList) {
-        final bytes = await _imageAssetService.downloadImage(imageInfo.id);
-
-        downloadedImages.add(bytes);
-      }
+      final loadedImages = await _fetchImages();
 
       if (!mounted) {
         return;
@@ -62,7 +80,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
       setState(() {
         _images
           ..clear()
-          ..addAll(downloadedImages);
+          ..addAll(loadedImages);
 
         _isLoading = false;
       });
@@ -78,27 +96,90 @@ class _CategoryScreenState extends State<CategoryScreen> {
     }
   }
 
-  Future<void> _addPhotoReference() async {
-    final selectedImage = await _imagePicker.pickImage(
-      source: ImageSource.gallery,
-    );
+  Future<void> _refreshUntilImageAppears(String expectedImageId) async {
+    const maximumAttempts = 8;
+    const delayBetweenAttempts = Duration(milliseconds: 500);
 
-    if (selectedImage == null) {
-      return;
+    for (var attempt = 1; attempt <= maximumAttempts; attempt++) {
+      final loadedImages = await _fetchImages();
+
+      final imageIsVisible = loadedImages.any(
+        (image) => image.id == expectedImageId,
+      );
+
+      if (imageIsVisible || attempt == maximumAttempts) {
+        if (!mounted) {
+          return;
+        }
+
+        setState(() {
+          _images
+            ..clear()
+            ..addAll(loadedImages);
+
+          _isLoading = false;
+          _errorMessage = null;
+        });
+
+        return;
+      }
+
+      await Future<void>.delayed(delayBetweenAttempts);
     }
+  }
 
-    final bytes = await selectedImage.readAsBytes();
-
+  void _setUploadStatus(String status) {
     if (!mounted) {
       return;
     }
 
     setState(() {
+      _uploadStatus = status;
+    });
+  }
+
+  Future<void> _addPhotoReference() async {
+    if (_isUploading) {
+      return;
+    }
+
+    setState(() {
       _isUploading = true;
+      _uploadStatus = 'Opening photo library...';
     });
 
     try {
-      await _imageAssetService.uploadImage(bytes, widget.category);
+      final selectedImage = await _imagePicker.pickImage(
+        source: ImageSource.gallery,
+      );
+
+      if (selectedImage == null) {
+        return;
+      }
+
+      _setUploadStatus('Reading selected photo...');
+
+      final bytes = await selectedImage.readAsBytes();
+
+      if (!mounted) {
+        return;
+      }
+
+      _setUploadStatus('Preparing thumbnail and uploading photo...');
+
+      final imageId = await _imageAssetService.uploadImage(
+        bytes,
+        widget.category,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      _setUploadStatus('Updating ${widget.category.displayName}...');
+
+      await _refreshUntilImageAppears(imageId);
+
       if (!mounted) {
         return;
       }
@@ -106,18 +187,15 @@ class _CategoryScreenState extends State<CategoryScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Photo reference saved.')));
-
-      await _loadImages();
     } on FunctionException catch (error) {
       if (!mounted) {
         return;
       }
 
-      final isDuplicate = error.status == 409;
-
-      final message = isDuplicate
-          ? 'This photo is already in your collection.'
-          : 'Unable to save the photo: ${error.details}';
+      final message = error.status == 409
+          ? 'This photo is already in this category.'
+          : 'Unable to save the photo: '
+                '${error.details}';
 
       ScaffoldMessenger.of(
         context,
@@ -134,8 +212,32 @@ class _CategoryScreenState extends State<CategoryScreen> {
       if (mounted) {
         setState(() {
           _isUploading = false;
+          _uploadStatus = '';
         });
       }
+    }
+  }
+
+  Future<void> _openImageDetails(_LoadedImage image) async {
+    if (_openingImageId != null || _isUploading) {
+      return;
+    }
+
+    setState(() {
+      _openingImageId = image.id;
+    });
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) =>
+            ImageDetailsScreen(imageId: image.id, imageUrl: image.imageUrl),
+      ),
+    );
+
+    if (mounted) {
+      setState(() {
+        _openingImageId = null;
+      });
     }
   }
 
@@ -146,13 +248,18 @@ class _CategoryScreenState extends State<CategoryScreen> {
         title: Text(widget.category.displayName),
         actions: [
           IconButton(
-            onPressed: _isLoading ? null : _loadImages,
+            onPressed: _isLoading || _isUploading ? null : _loadImages,
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh',
           ),
         ],
       ),
-      body: _buildBody(),
+      body: Stack(
+        children: [
+          Positioned.fill(child: _buildBody()),
+          if (_isUploading) Positioned.fill(child: _buildUploadOverlay()),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _isUploading ? null : _addPhotoReference,
         icon: _isUploading
@@ -162,7 +269,44 @@ class _CategoryScreenState extends State<CategoryScreen> {
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
             : const Icon(Icons.add_photo_alternate_outlined),
-        label: Text(_isUploading ? 'Uploading...' : 'Add Photo Reference'),
+        label: Text(_isUploading ? 'Working...' : 'Add Photo Reference'),
+      ),
+    );
+  }
+
+  Widget _buildUploadOverlay() {
+    return ColoredBox(
+      color: Colors.black45,
+      child: Center(
+        child: Card(
+          margin: const EdgeInsets.all(32),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 28),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 360),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 20),
+                  Text(
+                    _uploadStatus.isEmpty ? 'Working...' : _uploadStatus,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'Large photographs may take a little while.',
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -215,11 +359,64 @@ class _CategoryScreenState extends State<CategoryScreen> {
         childAspectRatio: 1,
       ),
       itemBuilder: (context, index) {
-        return ClipRRect(
+        final image = _images[index];
+
+        final isOpening = _openingImageId == image.id;
+
+        return Material(
           borderRadius: BorderRadius.circular(12),
-          child: Image.memory(_images[index], fit: BoxFit.cover),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: isOpening ? null : () => _openImageDetails(image),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                _buildThumbnail(image),
+                if (isOpening)
+                  Container(
+                    color: Colors.black38,
+                    child: const Center(child: CircularProgressIndicator()),
+                  ),
+              ],
+            ),
+          ),
         );
       },
+    );
+  }
+
+  Widget _buildThumbnail(_LoadedImage image) {
+    final thumbnailUrl = image.thumbnailUrl;
+
+    if (thumbnailUrl == null || thumbnailUrl.isEmpty) {
+      return _buildThumbnailPlaceholder();
+    }
+
+    return Image.network(
+      thumbnailUrl,
+      fit: BoxFit.cover,
+      gaplessPlayback: true,
+      loadingBuilder: (context, child, loadingProgress) {
+        if (loadingProgress == null) {
+          return child;
+        }
+
+        return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+      },
+      errorBuilder: (context, error, stackTrace) {
+        return _buildThumbnailPlaceholder();
+      },
+    );
+  }
+
+  Widget _buildThumbnailPlaceholder() {
+    return Container(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: Icon(
+        Icons.image_not_supported_outlined,
+        size: 44,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
     );
   }
 }
