@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import 'models/reference_category.dart';
-import 'screens/category_screen.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+import 'models/reference_category.dart';
+import 'screens/category_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -54,7 +55,7 @@ class CollectionsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('My Art References'),
+        title: const Text('Art Reference'),
         centerTitle: false,
         actions: [
           IconButton(
@@ -78,6 +79,7 @@ class CollectionsScreen extends StatelessWidget {
           ),
           itemBuilder: (context, index) {
             final category = categories[index];
+
             return CollectionCard(category: category);
           },
         ),
@@ -110,7 +112,6 @@ class CollectionCard extends StatelessWidget {
             ),
           );
         },
-
         child: Stack(
           fit: StackFit.expand,
           children: [

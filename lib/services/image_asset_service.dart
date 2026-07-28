@@ -39,6 +39,7 @@ class ImageAssetService {
   final SupabaseClient _supabase;
 
   static const String _userEmail = 'borispitel1@gmail.com';
+
   static const String _bucketName = 'reference-images';
 
   String get _userId {
@@ -89,12 +90,6 @@ class ImageAssetService {
         throw const UnsupportedImageFormatException();
       }
 
-      /*
-       * Calculate SHA-256 using a platform-optimized implementation.
-       *
-       * Chrome uses the browser's native Web Crypto API.
-       * Other platforms use the package's appropriate implementation.
-       */
       final imageHash = await ImageHashService.calculateSha256(imageBytes);
 
       profiler.checkpoint('SHA-256 hash calculated');
@@ -115,8 +110,8 @@ class ImageAssetService {
 
       if (prepareData is! Map) {
         throw StateError(
-          'prepare-image-upload returned an unexpected response: '
-          '$prepareData',
+          'prepare-image-upload returned an '
+          'unexpected response: $prepareData',
         );
       }
 
@@ -124,53 +119,53 @@ class ImageAssetService {
 
       if (preparedImageId is! String || preparedImageId.isEmpty) {
         throw StateError(
-          'prepare-image-upload did not return a valid image ID. '
+          'prepare-image-upload did not return '
+          'a valid image ID. '
           'Response: $prepareData',
         );
       }
 
       final existingImage = prepareData['existing_image'] == true;
+
       final uploadRequired = prepareData['upload_required'] == true;
 
-      /*
-       * The physical image already exists.
-       *
-       * prepare-image-upload has added the requested category relationship.
-       * Do not upload another original or thumbnail.
-       */
       if (existingImage && !uploadRequired) {
-        profiler.finish('Existing image found; physical upload skipped');
+        profiler.finish(
+          'Existing image found; '
+          'physical upload skipped',
+        );
 
         return preparedImageId;
       }
 
       if (!uploadRequired) {
         throw StateError(
-          'prepare-image-upload returned an inconsistent response. '
+          'prepare-image-upload returned an '
+          'inconsistent response. '
           'Response: $prepareData',
         );
       }
 
       final storagePath = prepareData['storage_path'];
+
       final uploadToken = prepareData['upload_token'];
 
       if (storagePath is! String || storagePath.isEmpty) {
         throw StateError(
-          'prepare-image-upload did not return a valid Storage path. '
+          'prepare-image-upload did not return '
+          'a valid Storage path. '
           'Response: $prepareData',
         );
       }
 
       if (uploadToken is! String || uploadToken.isEmpty) {
         throw StateError(
-          'prepare-image-upload did not return a valid upload token. '
+          'prepare-image-upload did not return '
+          'a valid upload token. '
           'Response: $prepareData',
         );
       }
 
-      /*
-       * Upload the original directly from Flutter to Supabase Storage.
-       */
       await _supabase.storage
           .from(_bucketName)
           .uploadBinaryToSignedUrl(
@@ -185,12 +180,10 @@ class ImageAssetService {
           );
 
       profiler.checkpoint(
-        'Original image uploaded directly to Supabase Storage',
+        'Original image uploaded directly '
+        'to Supabase Storage',
       );
 
-      /*
-       * Tell the backend that the direct Storage upload completed.
-       */
       final finalizeResponse = await _supabase.functions.invoke(
         'finalize-image-upload',
         body: {
@@ -209,14 +202,16 @@ class ImageAssetService {
 
       if (finalizeData is! Map) {
         throw StateError(
-          'finalize-image-upload returned an unexpected response: '
+          'finalize-image-upload returned '
+          'an unexpected response: '
           '$finalizeData',
         );
       }
 
       if (finalizeData['finalized'] != true) {
         throw StateError(
-          'The original image was uploaded, but finalization failed. '
+          'The original image was uploaded, '
+          'but finalization failed. '
           'Response: $finalizeData',
         );
       }
@@ -225,28 +220,23 @@ class ImageAssetService {
 
       if (finalizedImageId is! String || finalizedImageId.isEmpty) {
         throw StateError(
-          'finalize-image-upload did not return a valid image ID. '
+          'finalize-image-upload did not '
+          'return a valid image ID. '
           'Response: $finalizeData',
         );
       }
 
       final imageAlreadyExisted = finalizeData['existing_image'] == true;
 
-      /*
-       * A simultaneous upload may have created the same image first.
-       */
       if (imageAlreadyExisted) {
         profiler.finish(
-          'Existing image found during finalization; '
-          'thumbnail upload skipped',
+          'Existing image found during '
+          'finalization; thumbnail upload skipped',
         );
 
         return finalizedImageId;
       }
 
-      /*
-       * Upload the small thumbnail.
-       */
       final thumbnailResponse = await _supabase.functions.invoke(
         'upload-thumbnail',
         body: thumbnailBytes,
@@ -263,8 +253,9 @@ class ImageAssetService {
 
       if (thumbnailData is! Map || thumbnailData['thumbnail_saved'] != true) {
         throw StateError(
-          'The original image was saved, but its thumbnail '
-          'could not be saved. Response: $thumbnailData',
+          'The original image was saved, '
+          'but its thumbnail could not be saved. '
+          'Response: $thumbnailData',
         );
       }
 
@@ -277,10 +268,38 @@ class ImageAssetService {
     }
   }
 
+  Future<void> removeImageFromCategory(
+    String imageId,
+    ReferenceCategory category,
+  ) async {
+    final response = await _supabase.functions.invoke(
+      'remove-image-from-category',
+      body: {
+        'user_id': _userId,
+        'image_id': imageId,
+        'category_code': category.databaseCode,
+      },
+    );
+
+    final data = response.data;
+
+    if (data is! Map) {
+      throw StateError(
+        'remove-image-from-category returned '
+        'an unexpected response: $data',
+      );
+    }
+
+    if (data['removed'] != true) {
+      throw StateError(
+        data['error']?.toString() ??
+            'The image was not removed '
+                'from the category.',
+      );
+    }
+  }
+
   String _detectContentType(Uint8List imageBytes) {
-    /*
-     * JPEG begins with FF D8 FF.
-     */
     if (imageBytes.length >= 3 &&
         imageBytes[0] == 0xff &&
         imageBytes[1] == 0xd8 &&
@@ -288,10 +307,6 @@ class ImageAssetService {
       return 'image/jpeg';
     }
 
-    /*
-     * PNG begins with:
-     * 89 50 4E 47 0D 0A 1A 0A
-     */
     if (imageBytes.length >= 8 &&
         imageBytes[0] == 0x89 &&
         imageBytes[1] == 0x50 &&
@@ -320,16 +335,17 @@ class ImageAssetService {
 
     if (data is! List) {
       throw StateError(
-        'The list-images function returned an '
-        'unexpected response: $data',
+        'The list-images function returned '
+        'an unexpected response: $data',
       );
     }
 
     return data.map((item) {
       if (item is! Map) {
         throw StateError(
-          'A list-images entry had an unexpected '
-          'type: ${item.runtimeType}',
+          'A list-images entry had an '
+          'unexpected type: '
+          '${item.runtimeType}',
         );
       }
 
@@ -341,19 +357,31 @@ class ImageAssetService {
       final thumbnailUrl = row['thumbnail_url'];
 
       if (id is! String || id.isEmpty) {
-        throw StateError('Invalid image ID in list response: $row');
+        throw StateError(
+          'Invalid image ID in list '
+          'response: $row',
+        );
       }
 
       if (dateAdded is! String || dateAdded.isEmpty) {
-        throw StateError('Invalid date_added in list response: $row');
+        throw StateError(
+          'Invalid date_added in list '
+          'response: $row',
+        );
       }
 
       if (imageUrl is! String || imageUrl.isEmpty) {
-        throw StateError('Missing image_url in list response: $row');
+        throw StateError(
+          'Missing image_url in list '
+          'response: $row',
+        );
       }
 
       if (thumbnailUrl != null && thumbnailUrl is! String) {
-        throw StateError('Invalid thumbnail_url in list response: $row');
+        throw StateError(
+          'Invalid thumbnail_url in '
+          'list response: $row',
+        );
       }
 
       return ImageAssetInfo(

@@ -39,7 +39,12 @@ class _CategoryScreenState extends State<CategoryScreen> {
 
   String _uploadStatus = '';
   String? _openingImageId;
+  String? _removingImageId;
   String? _errorMessage;
+
+  bool get _isBusy {
+    return _isUploading || _openingImageId != null || _removingImageId != null;
+  }
 
   @override
   void initState() {
@@ -139,7 +144,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
   }
 
   Future<void> _addPhotoReference() async {
-    if (_isUploading) {
+    if (_isBusy) {
       return;
     }
 
@@ -194,8 +199,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
 
       final message = error.status == 409
           ? 'This photo is already in this category.'
-          : 'Unable to save the photo: '
-                '${error.details}';
+          : 'Unable to save the photo: ${error.details}';
 
       ScaffoldMessenger.of(
         context,
@@ -219,7 +223,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
   }
 
   Future<void> _openImageDetails(_LoadedImage image) async {
-    if (_openingImageId != null || _isUploading) {
+    if (_isBusy) {
       return;
     }
 
@@ -241,6 +245,52 @@ class _CategoryScreenState extends State<CategoryScreen> {
     }
   }
 
+  Future<void> _removeFromCategory(_LoadedImage image) async {
+    if (_isBusy) {
+      return;
+    }
+
+    setState(() {
+      _removingImageId = image.id;
+    });
+
+    try {
+      await _imageAssetService.removeImageFromCategory(
+        image.id,
+        widget.category,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _images.removeWhere((existingImage) => existingImage.id == image.id);
+
+        _removingImageId = null;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Reference removed.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _removingImageId = null;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to remove reference: $error')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -248,7 +298,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
         title: Text(widget.category.displayName),
         actions: [
           IconButton(
-            onPressed: _isLoading || _isUploading ? null : _loadImages,
+            onPressed: _isLoading || _isBusy ? null : _loadImages,
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh',
           ),
@@ -261,7 +311,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _isUploading ? null : _addPhotoReference,
+        onPressed: _isBusy ? null : _addPhotoReference,
         icon: _isUploading
             ? const SizedBox(
                 width: 20,
@@ -362,20 +412,65 @@ class _CategoryScreenState extends State<CategoryScreen> {
         final image = _images[index];
 
         final isOpening = _openingImageId == image.id;
+        final isRemoving = _removingImageId == image.id;
 
         return Material(
           borderRadius: BorderRadius.circular(12),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
-            onTap: isOpening ? null : () => _openImageDetails(image),
+            onTap: isOpening || isRemoving
+                ? null
+                : () => _openImageDetails(image),
             child: Stack(
               fit: StackFit.expand,
               children: [
                 _buildThumbnail(image),
-                if (isOpening)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.35),
+                      shape: BoxShape.circle,
+                    ),
+                    child: IconButton(
+                      onPressed: isOpening || isRemoving
+                          ? null
+                          : () => _removeFromCategory(image),
+                      icon: const Icon(
+                        Icons.delete_outline,
+                        size: 18,
+                        color: Colors.white,
+                      ),
+                      padding: const EdgeInsets.all(4),
+                      constraints: const BoxConstraints(
+                        minWidth: 28,
+                        minHeight: 28,
+                      ),
+                      splashRadius: 18,
+                      tooltip: 'Remove reference',
+                    ),
+                  ),
+                ),
+                if (isOpening || isRemoving)
                   Container(
                     color: Colors.black38,
-                    child: const Center(child: CircularProgressIndicator()),
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const CircularProgressIndicator(),
+                          const SizedBox(height: 12),
+                          Text(
+                            isRemoving ? 'Removing...' : 'Opening...',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
               ],
             ),
