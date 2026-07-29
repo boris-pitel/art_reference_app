@@ -39,7 +39,6 @@ class ImageAssetService {
   final SupabaseClient _supabase;
 
   static const String _userEmail = 'borispitel1@gmail.com';
-
   static const String _bucketName = 'reference-images';
 
   String get _userId {
@@ -55,13 +54,52 @@ class ImageAssetService {
     return _userEmail.trim().toLowerCase();
   }
 
-  Future<String> uploadImage(
+  Future<String> uploadImage(Uint8List imageBytes, ReferenceCategory category) {
+    return _uploadImage(imageBytes: imageBytes, category: category);
+  }
+
+  Future<String> uploadAssociatedImage(
     Uint8List imageBytes,
-    ReferenceCategory category,
-  ) async {
-    final profiler = PerformanceProfiler('IMAGE UPLOAD');
+    String parentImageId,
+  ) {
+    final normalizedParentImageId = parentImageId.trim();
+
+    if (normalizedParentImageId.isEmpty) {
+      throw ArgumentError.value(
+        parentImageId,
+        'parentImageId',
+        'The parent image ID cannot be empty.',
+      );
+    }
+
+    return _uploadImage(
+      imageBytes: imageBytes,
+      parentImageId: normalizedParentImageId,
+    );
+  }
+
+  Future<String> _uploadImage({
+    required Uint8List imageBytes,
+    ReferenceCategory? category,
+    String? parentImageId,
+  }) async {
+    if ((category == null) == (parentImageId == null)) {
+      throw ArgumentError(
+        'Provide either a category or a parent image ID, but not both.',
+      );
+    }
+
+    final isAssociatedImage = parentImageId != null;
+
+    final profiler = PerformanceProfiler(
+      isAssociatedImage ? 'ASSOCIATED IMAGE UPLOAD' : 'IMAGE UPLOAD',
+    );
 
     try {
+      if (imageBytes.isEmpty) {
+        throw const UnsupportedImageFormatException();
+      }
+
       profiler.checkpoint(
         'Upload method started; original size: '
         '${(imageBytes.lengthInBytes / 1024 / 1024).toStringAsFixed(2)} MB',
@@ -94,12 +132,20 @@ class ImageAssetService {
 
       profiler.checkpoint('SHA-256 hash calculated');
 
+      final destinationBody = <String, dynamic>{};
+
+      if (category != null) {
+        destinationBody['category_code'] = category.databaseCode;
+      } else {
+        destinationBody['parent_image_id'] = parentImageId;
+      }
+
       final prepareResponse = await _supabase.functions.invoke(
         'prepare-image-upload',
         body: {
           'user_id': _userId,
           'user_email': _normalizedUserEmail,
-          'category_code': category.databaseCode,
+          ...destinationBody,
           'image_hash': imageHash,
         },
       );
@@ -131,8 +177,11 @@ class ImageAssetService {
 
       if (existingImage && !uploadRequired) {
         profiler.finish(
-          'Existing image found; '
-          'physical upload skipped',
+          isAssociatedImage
+              ? 'Existing image linked to parent; '
+                    'physical upload skipped'
+              : 'Existing image found; '
+                    'physical upload skipped',
         );
 
         return preparedImageId;
@@ -147,7 +196,6 @@ class ImageAssetService {
       }
 
       final storagePath = prepareData['storage_path'];
-
       final uploadToken = prepareData['upload_token'];
 
       if (storagePath is! String || storagePath.isEmpty) {
@@ -189,7 +237,7 @@ class ImageAssetService {
         body: {
           'user_id': _userId,
           'user_email': _normalizedUserEmail,
-          'category_code': category.databaseCode,
+          ...destinationBody,
           'image_hash': imageHash,
           'image_id': preparedImageId,
           'storage_path': storagePath,
@@ -230,8 +278,11 @@ class ImageAssetService {
 
       if (imageAlreadyExisted) {
         profiler.finish(
-          'Existing image found during '
-          'finalization; thumbnail upload skipped',
+          isAssociatedImage
+              ? 'Existing image linked during '
+                    'finalization; thumbnail upload skipped'
+              : 'Existing image found during '
+                    'finalization; thumbnail upload skipped',
         );
 
         return finalizedImageId;
@@ -272,11 +323,21 @@ class ImageAssetService {
     String imageId,
     ReferenceCategory category,
   ) async {
+    final normalizedImageId = imageId.trim();
+
+    if (normalizedImageId.isEmpty) {
+      throw ArgumentError.value(
+        imageId,
+        'imageId',
+        'The image ID cannot be empty.',
+      );
+    }
+
     final response = await _supabase.functions.invoke(
       'remove-image-from-category',
       body: {
         'user_id': _userId,
-        'image_id': imageId,
+        'image_id': normalizedImageId,
         'category_code': category.databaseCode,
       },
     );
@@ -297,6 +358,189 @@ class ImageAssetService {
                 'from the category.',
       );
     }
+  }
+
+  Future<void> removeAssociatedImage({
+    required String parentImageId,
+    required String childImageId,
+  }) async {
+    final normalizedParentImageId = parentImageId.trim();
+
+    final normalizedChildImageId = childImageId.trim();
+
+    if (normalizedParentImageId.isEmpty) {
+      throw ArgumentError.value(
+        parentImageId,
+        'parentImageId',
+        'The parent image ID cannot be empty.',
+      );
+    }
+
+    if (normalizedChildImageId.isEmpty) {
+      throw ArgumentError.value(
+        childImageId,
+        'childImageId',
+        'The associated image ID cannot be empty.',
+      );
+    }
+
+    if (normalizedParentImageId == normalizedChildImageId) {
+      throw ArgumentError(
+        'The parent image and associated image '
+        'cannot have the same ID.',
+      );
+    }
+
+    final response = await _supabase.functions.invoke(
+      'remove-associated-image',
+      method: HttpMethod.post,
+      headers: {
+        'x-user-id': _userId,
+        'x-parent-image-id': normalizedParentImageId,
+        'x-child-image-id': normalizedChildImageId,
+      },
+    );
+
+    final data = response.data;
+
+    if (data is! Map) {
+      throw StateError(
+        'remove-associated-image returned '
+        'an unexpected response: $data',
+      );
+    }
+
+    if (data['removed'] != true) {
+      throw StateError(
+        data['error']?.toString() ?? 'The associated image was not removed.',
+      );
+    }
+  }
+
+  Future<List<ImageAssetInfo>> listImages(ReferenceCategory category) async {
+    final cacheBuster = DateTime.now().millisecondsSinceEpoch;
+
+    final response = await _supabase.functions.invoke(
+      'list-images?refresh=$cacheBuster',
+      method: HttpMethod.get,
+      headers: {'x-user-id': _userId, 'x-category-code': category.databaseCode},
+    );
+
+    final data = response.data;
+
+    if (data is! List) {
+      throw StateError(
+        'The list-images function returned '
+        'an unexpected response: $data',
+      );
+    }
+
+    return _parseImageAssetList(data, responseName: 'list-images');
+  }
+
+  Future<List<ImageAssetInfo>> listAssociatedImages(
+    String parentImageId,
+  ) async {
+    final normalizedParentImageId = parentImageId.trim();
+
+    if (normalizedParentImageId.isEmpty) {
+      throw ArgumentError.value(
+        parentImageId,
+        'parentImageId',
+        'The parent image ID cannot be empty.',
+      );
+    }
+
+    final cacheBuster = DateTime.now().millisecondsSinceEpoch;
+
+    final response = await _supabase.functions.invoke(
+      'list-associated-images?refresh=$cacheBuster',
+      method: HttpMethod.get,
+      headers: {
+        'x-user-id': _userId,
+        'x-parent-image-id': normalizedParentImageId,
+      },
+    );
+
+    final data = response.data;
+
+    if (data is! List) {
+      throw StateError(
+        'The list-associated-images function '
+        'returned an unexpected response: $data',
+      );
+    }
+
+    return _parseImageAssetList(data, responseName: 'list-associated-images');
+  }
+
+  List<ImageAssetInfo> _parseImageAssetList(
+    List<dynamic> data, {
+    required String responseName,
+  }) {
+    return data.map((item) {
+      if (item is! Map) {
+        throw StateError(
+          'An entry returned by $responseName '
+          'had an unexpected type: '
+          '${item.runtimeType}',
+        );
+      }
+
+      final row = Map<String, dynamic>.from(item);
+
+      final id = row['id'];
+      final dateAdded = row['date_added'];
+      final imageUrl = row['image_url'];
+      final thumbnailUrl = row['thumbnail_url'];
+
+      if (id is! String || id.isEmpty) {
+        throw StateError(
+          'Invalid image ID returned by '
+          '$responseName: $row',
+        );
+      }
+
+      if (dateAdded is! String || dateAdded.isEmpty) {
+        throw StateError(
+          'Invalid date_added returned by '
+          '$responseName: $row',
+        );
+      }
+
+      if (imageUrl is! String || imageUrl.isEmpty) {
+        throw StateError(
+          'Missing image_url returned by '
+          '$responseName: $row',
+        );
+      }
+
+      if (thumbnailUrl != null && thumbnailUrl is! String) {
+        throw StateError(
+          'Invalid thumbnail_url returned by '
+          '$responseName: $row',
+        );
+      }
+
+      DateTime parsedDateAdded;
+
+      try {
+        parsedDateAdded = DateTime.parse(dateAdded);
+      } catch (error) {
+        throw StateError(
+          'Unable to parse date_added returned '
+          'by $responseName: $dateAdded. '
+          'Error: $error',
+        );
+      }
+
+      return ImageAssetInfo(
+        id: id,
+        dateAdded: parsedDateAdded,
+        imageUrl: imageUrl,
+        thumbnailUrl: thumbnailUrl as String?,
+      );
+    }).toList();
   }
 
   String _detectContentType(Uint8List imageBytes) {
@@ -320,76 +564,5 @@ class ImageAssetService {
     }
 
     return 'application/octet-stream';
-  }
-
-  Future<List<ImageAssetInfo>> listImages(ReferenceCategory category) async {
-    final cacheBuster = DateTime.now().millisecondsSinceEpoch;
-
-    final response = await _supabase.functions.invoke(
-      'list-images?refresh=$cacheBuster',
-      method: HttpMethod.get,
-      headers: {'x-user-id': _userId, 'x-category-code': category.databaseCode},
-    );
-
-    final data = response.data;
-
-    if (data is! List) {
-      throw StateError(
-        'The list-images function returned '
-        'an unexpected response: $data',
-      );
-    }
-
-    return data.map((item) {
-      if (item is! Map) {
-        throw StateError(
-          'A list-images entry had an '
-          'unexpected type: '
-          '${item.runtimeType}',
-        );
-      }
-
-      final row = Map<String, dynamic>.from(item);
-
-      final id = row['id'];
-      final dateAdded = row['date_added'];
-      final imageUrl = row['image_url'];
-      final thumbnailUrl = row['thumbnail_url'];
-
-      if (id is! String || id.isEmpty) {
-        throw StateError(
-          'Invalid image ID in list '
-          'response: $row',
-        );
-      }
-
-      if (dateAdded is! String || dateAdded.isEmpty) {
-        throw StateError(
-          'Invalid date_added in list '
-          'response: $row',
-        );
-      }
-
-      if (imageUrl is! String || imageUrl.isEmpty) {
-        throw StateError(
-          'Missing image_url in list '
-          'response: $row',
-        );
-      }
-
-      if (thumbnailUrl != null && thumbnailUrl is! String) {
-        throw StateError(
-          'Invalid thumbnail_url in '
-          'list response: $row',
-        );
-      }
-
-      return ImageAssetInfo(
-        id: id,
-        dateAdded: DateTime.parse(dateAdded),
-        imageUrl: imageUrl,
-        thumbnailUrl: thumbnailUrl as String?,
-      );
-    }).toList();
   }
 }
