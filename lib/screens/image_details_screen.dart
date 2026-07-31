@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -6,9 +7,73 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
+import '../models/reference_category.dart';
+import '../services/category_service.dart';
 import '../services/image_asset_service.dart';
+import '../widgets/image_keywords_section.dart';
 
 enum _AssociatedImageAction { open, delete }
+
+enum _ImageAction { move }
+
+class _AiAnalysis {
+  const _AiAnalysis({
+    required this.title,
+    required this.description,
+    required this.keywords,
+    required this.subjectType,
+    required this.lighting,
+    required this.composition,
+    required this.dominantColors,
+    required this.artNotes,
+  });
+
+  final String title;
+  final String description;
+  final List<String> keywords;
+  final String subjectType;
+  final String lighting;
+  final String composition;
+  final List<String> dominantColors;
+  final String artNotes;
+
+  factory _AiAnalysis.fromMap(Map<dynamic, dynamic> data) {
+    return _AiAnalysis(
+      title: _stringValue(data['title'] ?? data['ai_title']),
+      description: _stringValue(data['description'] ?? data['ai_description']),
+      keywords: _stringList(data['keywords'] ?? data['ai_keywords']),
+      subjectType: _stringValue(
+        data['subject_type'] ?? data['ai_subject_type'],
+      ),
+      lighting: _stringValue(data['lighting'] ?? data['ai_lighting']),
+      composition: _stringValue(data['composition'] ?? data['ai_composition']),
+      dominantColors: _stringList(
+        data['dominant_colors'] ?? data['ai_dominant_colors'],
+      ),
+      artNotes: _stringValue(data['art_notes'] ?? data['ai_art_notes']),
+    );
+  }
+
+  static String _stringValue(dynamic value) {
+    if (value is! String) {
+      return '';
+    }
+
+    return value.trim();
+  }
+
+  static List<String> _stringList(dynamic value) {
+    if (value is! List) {
+      return const [];
+    }
+
+    return value
+        .whereType<String>()
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+  }
+}
 
 class ImageDetailsScreen extends StatefulWidget {
   const ImageDetailsScreen({
@@ -39,13 +104,21 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
 
   bool _isLoadingMetadata = true;
   bool _isSavingMetadata = false;
+  bool _isMovingImage = false;
   bool _isFavorite = false;
+
+  bool _isAnalyzingImage = false;
 
   bool _isLoadingAssociatedImages = true;
   bool _isUploadingAssociatedImage = false;
 
   String? _metadataError;
+  String? _aiAnalysisError;
   String? _associatedImagesError;
+
+  String _aiAnalysisStatus = 'not_analyzed';
+
+  _AiAnalysis? _aiAnalysis;
 
   List<ImageAssetInfo> _associatedImages = [];
 
@@ -89,9 +162,14 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
   }
 
   Future<void> _loadMetadata() async {
+    if (!mounted) {
+      return;
+    }
+
     setState(() {
       _isLoadingMetadata = true;
       _metadataError = null;
+      _aiAnalysisError = null;
     });
 
     try {
@@ -105,14 +183,23 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
 
       if (data is! Map) {
         throw StateError(
-          'get-image-metadata returned an '
-          'unexpected response: $data',
+          'get-image-metadata returned an unexpected '
+          'response: $data',
         );
       }
 
       if (data['error'] != null) {
         throw StateError(data['error'].toString());
       }
+
+      final loadedAnalysis = _hasAiAnalysisData(data)
+          ? _AiAnalysis.fromMap(data)
+          : null;
+
+      final analysisStatus =
+          data['ai_analysis_status']?.toString().trim() ?? 'not_analyzed';
+
+      final storedAnalysisError = data['ai_analysis_error']?.toString().trim();
 
       if (!mounted) {
         return;
@@ -127,6 +214,13 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
       setState(() {
         _isFavorite = data['is_favorite'] == true;
 
+        _aiAnalysis = loadedAnalysis;
+        _aiAnalysisStatus = analysisStatus;
+
+        if (storedAnalysisError != null && storedAnalysisError.isNotEmpty) {
+          _aiAnalysisError = storedAnalysisError;
+        }
+
         _isLoadingMetadata = false;
       });
     } catch (error) {
@@ -136,10 +230,21 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
 
       setState(() {
         _isLoadingMetadata = false;
-
         _metadataError = 'Unable to load image details.\n$error';
       });
     }
+  }
+
+  bool _hasAiAnalysisData(Map<dynamic, dynamic> data) {
+    final aiTitle = data['ai_title'];
+
+    if (aiTitle is String && aiTitle.trim().isNotEmpty) {
+      return true;
+    }
+
+    final aiDescription = data['ai_description'];
+
+    return aiDescription is String && aiDescription.trim().isNotEmpty;
   }
 
   Future<void> _saveMetadata() async {
@@ -171,8 +276,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
 
       if (data is! Map) {
         throw StateError(
-          'save-image-metadata returned an '
-          'unexpected response: $data',
+          'save-image-metadata returned an unexpected '
+          'response: $data',
         );
       }
 
@@ -200,12 +305,82 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
 
       setState(() {
         _isSavingMetadata = false;
-
         _metadataError = 'Unable to save image details.\n$error';
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Unable to save image details.')),
+      );
+    }
+  }
+
+  Future<void> _analyzeImage() async {
+    if (_isAnalyzingImage) {
+      return;
+    }
+
+    setState(() {
+      _isAnalyzingImage = true;
+      _aiAnalysisStatus = 'analyzing';
+      _aiAnalysisError = null;
+    });
+
+    try {
+      final response = await _supabase.functions.invoke(
+        'analyze-image',
+        body: {'imageId': widget.imageId},
+      );
+
+      final data = response.data;
+
+      if (data is! Map) {
+        throw StateError(
+          'analyze-image returned an unexpected '
+          'response: $data',
+        );
+      }
+
+      if (data['success'] != true) {
+        throw StateError(
+          data['error']?.toString() ?? 'The AI analysis was not completed.',
+        );
+      }
+
+      final analysisData = data['analysis'];
+
+      if (analysisData is! Map) {
+        throw StateError('The AI response did not contain analysis data.');
+      }
+
+      final analysis = _AiAnalysis.fromMap(analysisData);
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _aiAnalysis = analysis;
+        _aiAnalysisStatus = 'completed';
+        _isAnalyzingImage = false;
+        _aiAnalysisError = null;
+      });
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('AI analysis completed.')));
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _isAnalyzingImage = false;
+        _aiAnalysisStatus = 'failed';
+        _aiAnalysisError = 'Unable to analyze this image.\n$error';
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to analyze this image.')),
       );
     }
   }
@@ -240,9 +415,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
 
       setState(() {
         _isLoadingAssociatedImages = false;
-        _associatedImagesError =
-            'Unable to load associated images.\n'
-            '$error';
+        _associatedImagesError = 'Unable to load associated images.\n$error';
       });
     }
   }
@@ -316,9 +489,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
 
       setState(() {
         _isUploadingAssociatedImage = false;
-        _associatedImagesError =
-            'Unable to add the associated image.\n'
-            '$error';
+        _associatedImagesError = 'Unable to add the associated image.\n$error';
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -334,9 +505,11 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
     switch (action) {
       case _AssociatedImageAction.open:
         _openAssociatedImage(image);
+        break;
 
       case _AssociatedImageAction.delete:
         await _confirmAndRemoveAssociatedImage(image);
+        break;
     }
   }
 
@@ -382,7 +555,6 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
 
     setState(() {
       _deletingAssociatedImageIds.add(image.id);
-
       _associatedImagesError = null;
     });
 
@@ -416,8 +588,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
         _deletingAssociatedImageIds.remove(image.id);
 
         _associatedImagesError =
-            'Unable to delete the associated '
-            'image.\n$error';
+            'Unable to delete the associated image.\n'
+            '$error';
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -427,88 +599,211 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
   }
 
   void _openAssociatedImage(ImageAssetInfo image) {
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) {
-        return Dialog(
-          insetPadding: const EdgeInsets.all(16),
-          clipBehavior: Clip.antiAlias,
-          child: SizedBox(
-            width: double.infinity,
-            height: MediaQuery.sizeOf(dialogContext).height * 0.9,
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: Container(
-                    color: Colors.black,
-                    child: InteractiveViewer(
-                      minScale: 1,
-                      maxScale: 6,
-                      child: Center(
-                        child: Image.network(
-                          image.imageUrl,
-                          width: double.infinity,
-                          height: double.infinity,
-                          fit: BoxFit.contain,
-                          gaplessPlayback: true,
-                          loadingBuilder: (context, child, loadingProgress) {
-                            if (loadingProgress == null) {
-                              return child;
+    _openZoomableImage(
+      imageUrl: image.imageUrl,
+      heroTag: 'associated-image-${image.id}',
+    );
+  }
+
+  void _openMainImage() {
+    _openZoomableImage(
+      imageUrl: widget.imageUrl,
+      heroTag: 'main-image-${widget.imageId}',
+    );
+  }
+
+  void _openZoomableImage({required String imageUrl, required String heroTag}) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) {
+          return _ZoomableImageScreen(imageUrl: imageUrl, heroTag: heroTag);
+        },
+      ),
+    );
+  }
+
+  Future<void> _moveImage() async {
+    if (_isMovingImage) {
+      return;
+    }
+
+    setState(() {
+      _isMovingImage = true;
+    });
+
+    try {
+      final categoryService = CategoryService(_supabase);
+      final results = await Future.wait<dynamic>([
+        categoryService.listCategories(),
+        _imageAssetService.listImageCategoryCodes(widget.imageId),
+      ]);
+
+      final allCategories = results[0] as List<ReferenceCategory>;
+      final currentCodes = (results[1] as List<String>).toSet();
+      final currentCategories = allCategories
+          .where((category) => currentCodes.contains(category.databaseCode))
+          .toList(growable: false);
+
+      if (!mounted) {
+        return;
+      }
+
+      if (currentCategories.isEmpty) {
+        throw StateError('This image is not assigned to any category.');
+      }
+
+      final moveSelection = await showDialog<({
+        ReferenceCategory from,
+        ReferenceCategory to,
+      })>(
+        context: context,
+        builder: (dialogContext) {
+          ReferenceCategory fromCategory = currentCategories.first;
+          ReferenceCategory? toCategory;
+
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              final destinationCategories = allCategories
+                  .where(
+                    (category) =>
+                        category.databaseCode != fromCategory.databaseCode,
+                  )
+                  .toList(growable: false);
+
+              if (toCategory != null &&
+                  toCategory!.databaseCode == fromCategory.databaseCode) {
+                toCategory = null;
+              }
+
+              return AlertDialog(
+                title: const Text('Move Reference'),
+                content: SizedBox(
+                  width: 420,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (currentCategories.length > 1) ...[
+                        const Text('Move from'),
+                        const SizedBox(height: 8),
+                        DropdownButtonFormField<ReferenceCategory>(
+                          initialValue: fromCategory,
+                          decoration: const InputDecoration(
+                            border: OutlineInputBorder(),
+                          ),
+                          items: currentCategories
+                              .map(
+                                (category) => DropdownMenuItem(
+                                  value: category,
+                                  child: Text(category.displayName),
+                                ),
+                              )
+                              .toList(growable: false),
+                          onChanged: (value) {
+                            if (value == null) {
+                              return;
                             }
 
-                            final expectedBytes =
-                                loadingProgress.expectedTotalBytes;
-
-                            final value = expectedBytes == null
-                                ? null
-                                : loadingProgress.cumulativeBytesLoaded /
-                                      expectedBytes;
-
-                            return Center(
-                              child: CircularProgressIndicator(value: value),
-                            );
-                          },
-                          errorBuilder: (context, error, stackTrace) {
-                            return const Center(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.broken_image_outlined,
-                                    size: 56,
-                                    color: Colors.white,
-                                  ),
-                                  SizedBox(height: 12),
-                                  Text(
-                                    'Unable to load image.',
-                                    style: TextStyle(color: Colors.white),
-                                  ),
-                                ],
-                              ),
-                            );
+                            setDialogState(() {
+                              fromCategory = value;
+                            });
                           },
                         ),
+                        const SizedBox(height: 18),
+                      ] else ...[
+                        Text(
+                          'Current category: ${fromCategory.displayName}',
+                          style: Theme.of(context).textTheme.bodyLarge,
+                        ),
+                        const SizedBox(height: 18),
+                      ],
+                      const Text('Move to'),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<ReferenceCategory>(
+                        initialValue: toCategory,
+                        decoration: const InputDecoration(
+                          hintText: 'Choose a destination category',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: destinationCategories
+                            .map(
+                              (category) => DropdownMenuItem(
+                                value: category,
+                                child: Text(category.displayName),
+                              ),
+                            )
+                            .toList(growable: false),
+                        onChanged: (value) {
+                          setDialogState(() {
+                            toCategory = value;
+                          });
+                        },
                       ),
-                    ),
+                    ],
                   ),
                 ),
-                Positioned(
-                  top: 8,
-                  right: 8,
-                  child: IconButton.filled(
-                    onPressed: () {
-                      Navigator.of(dialogContext).pop();
-                    },
-                    icon: const Icon(Icons.close),
-                    tooltip: 'Close',
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: const Text('Cancel'),
                   ),
-                ),
-              ],
-            ),
+                  FilledButton.icon(
+                    onPressed: toCategory == null
+                        ? null
+                        : () {
+                            Navigator.of(dialogContext).pop((
+                              from: fromCategory,
+                              to: toCategory!,
+                            ));
+                          },
+                    icon: const Icon(Icons.drive_file_move_outline),
+                    label: const Text('Move'),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+
+      if (moveSelection == null || !mounted) {
+        return;
+      }
+
+      await _imageAssetService.moveImageToCategory(
+        imageId: widget.imageId,
+        fromCategory: moveSelection.from,
+        toCategory: moveSelection.to,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Image moved to ${moveSelection.to.displayName}.',
           ),
-        );
-      },
-    );
+        ),
+      );
+
+      Navigator.of(context).pop(true);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to move image: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isMovingImage = false;
+        });
+      }
+    }
   }
 
   String? _normalizedNullableText(String value) {
@@ -551,6 +846,28 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
                 : const Icon(Icons.save_outlined),
             tooltip: 'Save',
           ),
+          PopupMenuButton<_ImageAction>(
+            enabled: !_isMovingImage,
+            tooltip: 'Image actions',
+            onSelected: (action) async {
+              switch (action) {
+                case _ImageAction.move:
+                  await _moveImage();
+              }
+            },
+            itemBuilder: (context) {
+              return const [
+                PopupMenuItem<_ImageAction>(
+                  value: _ImageAction.move,
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.drive_file_move_outline),
+                    title: Text('Move...'),
+                  ),
+                ),
+              ];
+            },
+          ),
         ],
       ),
       body: LayoutBuilder(
@@ -571,6 +888,12 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
               const SizedBox(height: 24),
               _buildMetadataSection(context),
               const SizedBox(height: 24),
+
+              ImageKeywordsSection(imageId: widget.imageId),
+
+              const SizedBox(height: 24),
+              _buildAiAnalysisSection(context),
+              const SizedBox(height: 24),
               _buildAssociatedImagesSection(context),
               const SizedBox(height: 24),
             ],
@@ -581,66 +904,107 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
   }
 
   Widget _buildImageViewer(BuildContext context, double imageHeight) {
-    return Container(
-      width: double.infinity,
-      height: imageHeight,
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
-      ),
+    final heroTag = 'main-image-${widget.imageId}';
+
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(16),
       clipBehavior: Clip.antiAlias,
-      child: InteractiveViewer(
-        minScale: 1,
-        maxScale: 5,
-        child: Center(
-          child: Image.network(
-            widget.imageUrl,
-            width: double.infinity,
-            height: imageHeight,
-            fit: BoxFit.contain,
-            gaplessPlayback: true,
-            loadingBuilder: (context, child, loadingProgress) {
-              if (loadingProgress == null) {
-                return child;
-              }
+      child: InkWell(
+        onTap: _openMainImage,
+        child: Container(
+          width: double.infinity,
+          height: imageHeight,
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerLowest,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: Theme.of(context).colorScheme.outlineVariant,
+            ),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Hero(
+                tag: heroTag,
+                child: Image.network(
+                  widget.imageUrl,
+                  width: double.infinity,
+                  height: imageHeight,
+                  fit: BoxFit.contain,
+                  gaplessPlayback: true,
+                  loadingBuilder: (context, child, loadingProgress) {
+                    if (loadingProgress == null) {
+                      return child;
+                    }
 
-              final expectedBytes = loadingProgress.expectedTotalBytes;
+                    final expectedBytes = loadingProgress.expectedTotalBytes;
 
-              final value = expectedBytes == null
-                  ? null
-                  : loadingProgress.cumulativeBytesLoaded / expectedBytes;
+                    final value = expectedBytes == null
+                        ? null
+                        : loadingProgress.cumulativeBytesLoaded / expectedBytes;
 
-              return Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    CircularProgressIndicator(value: value),
-                    const SizedBox(height: 16),
-                    const Text('Loading full image...'),
-                  ],
-                ),
-              );
-            },
-            errorBuilder: (context, error, stackTrace) {
-              return const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.broken_image_outlined, size: 52),
-                      SizedBox(height: 12),
-                      Text(
-                        'Unable to load the '
-                        'full image.',
-                        textAlign: TextAlign.center,
+                    return Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircularProgressIndicator(value: value),
+                          const SizedBox(height: 16),
+                          const Text('Loading full image...'),
+                        ],
                       ),
-                    ],
+                    );
+                  },
+                  errorBuilder: (context, error, stackTrace) {
+                    return const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.broken_image_outlined, size: 52),
+                            SizedBox(height: 12),
+                            Text(
+                              'Unable to load '
+                              'the full image.',
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              Positioned(
+                right: 12,
+                bottom: 12,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.open_in_full, size: 20, color: Colors.white),
+                        SizedBox(width: 7),
+                        Text(
+                          'Open image',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              );
-            },
+              ),
+            ],
           ),
         ),
       ),
@@ -682,19 +1046,11 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
           )
         else ...[
           if (_metadataError != null) ...[
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.errorContainer,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                _metadataError!,
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onErrorContainer,
-                ),
-              ),
+            _buildErrorContainer(
+              context,
+              _metadataError!,
+              actionLabel: 'Try Again',
+              onAction: _loadMetadata,
             ),
             const SizedBox(height: 16),
           ],
@@ -717,8 +1073,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
             decoration: const InputDecoration(
               labelText: 'Notes',
               hintText:
-                  'Add composition ideas, '
-                  'color notes, or painting plans',
+                  'Add composition ideas, color '
+                  'notes, or painting plans',
               border: OutlineInputBorder(),
               alignLabelWithHint: true,
               prefixIcon: Padding(
@@ -744,8 +1100,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
             contentPadding: EdgeInsets.zero,
             title: const Text('Favorite'),
             subtitle: const Text(
-              'Mark this image as an '
-              'important reference',
+              'Mark this image as an important '
+              'reference',
             ),
             value: _isFavorite,
             onChanged: _isSavingMetadata
@@ -773,6 +1129,289 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
           ),
         ],
       ],
+    );
+  }
+
+  Widget _buildAiAnalysisSection(BuildContext context) {
+    final analysis = _aiAnalysis;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Row(
+          children: [
+            Icon(Icons.auto_awesome_outlined),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'AI Art Analysis',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'AI analysis is optional. The image is sent '
+          'for analysis only when you press the button.',
+        ),
+        const SizedBox(height: 16),
+        if (_isLoadingMetadata)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 24),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else ...[
+          if (_aiAnalysisError != null) ...[
+            _buildErrorContainer(context, _aiAnalysisError!),
+            const SizedBox(height: 16),
+          ],
+          if (_isAnalyzingImage) ...[
+            const LinearProgressIndicator(),
+            const SizedBox(height: 12),
+            const Text(
+              'Analyzing subject, lighting, '
+              'composition, colors, and painting '
+              'notes...',
+            ),
+            const SizedBox(height: 16),
+          ],
+          if (analysis == null && !_isAnalyzingImage) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Column(
+                children: [
+                  Icon(Icons.psychology_alt_outlined, size: 44),
+                  SizedBox(height: 12),
+                  Text(
+                    'This image has not been '
+                    'analyzed.',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w500),
+                  ),
+                  SizedBox(height: 6),
+                  Text(
+                    'Nothing will happen '
+                    'automatically.',
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+          if (analysis != null) ...[
+            _buildAiAnalysisCard(context, analysis),
+            const SizedBox(height: 16),
+          ],
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: _isAnalyzingImage ? null : _analyzeImage,
+              icon: _isAnalyzingImage
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2.5),
+                    )
+                  : const Icon(Icons.auto_awesome),
+              label: Text(
+                _isAnalyzingImage
+                    ? 'Analyzing...'
+                    : analysis == null
+                    ? 'Analyze with AI'
+                    : 'Analyze Again',
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildAiAnalysisCard(BuildContext context, _AiAnalysis analysis) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (analysis.title.isNotEmpty) ...[
+            Text(
+              analysis.title,
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            const SizedBox(height: 16),
+          ],
+          _buildAiTextSection(
+            context,
+            title: 'Description',
+            value: analysis.description,
+            icon: Icons.description_outlined,
+          ),
+          _buildAiTextSection(
+            context,
+            title: 'Subject Type',
+            value: analysis.subjectType,
+            icon: Icons.category_outlined,
+          ),
+          _buildAiTextSection(
+            context,
+            title: 'Lighting',
+            value: analysis.lighting,
+            icon: Icons.light_mode_outlined,
+          ),
+          _buildAiTextSection(
+            context,
+            title: 'Composition',
+            value: analysis.composition,
+            icon: Icons.crop_outlined,
+          ),
+          if (analysis.keywords.isNotEmpty)
+            _buildAiChipSection(
+              context,
+              title: 'Keywords',
+              values: analysis.keywords,
+              icon: Icons.sell_outlined,
+            ),
+          if (analysis.dominantColors.isNotEmpty)
+            _buildAiChipSection(
+              context,
+              title: 'Dominant Colors',
+              values: analysis.dominantColors,
+              icon: Icons.palette_outlined,
+            ),
+          _buildAiTextSection(
+            context,
+            title: 'Notes for the Artist',
+            value: analysis.artNotes,
+            icon: Icons.brush_outlined,
+            isLast: true,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAiTextSection(
+    BuildContext context, {
+    required String title,
+    required String value,
+    required IconData icon,
+    bool isLast = false,
+  }) {
+    if (value.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: isLast ? 0 : 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          const SizedBox(height: 7),
+          SelectableText(value),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAiChipSection(
+    BuildContext context, {
+    required String title,
+    required List<String> values,
+    required IconData icon,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          const SizedBox(height: 9),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: values
+                .map(
+                  (value) => Chip(
+                    label: Text(value),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                )
+                .toList(growable: false),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorContainer(
+    BuildContext context,
+    String message, {
+    String? actionLabel,
+    VoidCallback? onAction,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            message,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onErrorContainer,
+            ),
+          ),
+          if (actionLabel != null) ...[
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: onAction,
+              icon: const Icon(Icons.refresh),
+              label: Text(actionLabel),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -843,32 +1482,11 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
         ],
         if (_associatedImagesError != null) ...[
           const SizedBox(height: 16),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.errorContainer,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _associatedImagesError!,
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onErrorContainer,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  onPressed: _isLoadingAssociatedImages
-                      ? null
-                      : _loadAssociatedImages,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Try Again'),
-                ),
-              ],
-            ),
+          _buildErrorContainer(
+            context,
+            _associatedImagesError!,
+            actionLabel: 'Try Again',
+            onAction: _isLoadingAssociatedImages ? null : _loadAssociatedImages,
           ),
         ],
         const SizedBox(height: 16),
@@ -905,8 +1523,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
                 ),
                 SizedBox(height: 6),
                 Text(
-                  'Use Gallery or Camera to '
-                  'add the first one.',
+                  'Use Gallery or Camera to add '
+                  'the first one.',
                   textAlign: TextAlign.center,
                 ),
               ],
@@ -1039,13 +1657,157 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
                 ),
               ),
             if (isDeleting)
-              Positioned.fill(
+              const Positioned.fill(
                 child: ColoredBox(
                   color: Colors.black54,
-                  child: const Center(child: CircularProgressIndicator()),
+                  child: Center(child: CircularProgressIndicator()),
                 ),
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ZoomableImageScreen extends StatefulWidget {
+  const _ZoomableImageScreen({required this.imageUrl, required this.heroTag});
+
+  final String imageUrl;
+  final String heroTag;
+
+  @override
+  State<_ZoomableImageScreen> createState() => _ZoomableImageScreenState();
+}
+
+class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
+  static const double _minimumScale = 1;
+  static const double _maximumScale = 8;
+  static const double _doubleTapScale = 3;
+
+  final TransformationController _transformationController =
+      TransformationController();
+
+  TapDownDetails? _doubleTapDetails;
+
+  @override
+  void dispose() {
+    _transformationController.dispose();
+    super.dispose();
+  }
+
+  void _handleDoubleTapDown(TapDownDetails details) {
+    _doubleTapDetails = details;
+  }
+
+  void _handleDoubleTap() {
+    final currentScale = _transformationController.value.getMaxScaleOnAxis();
+
+    if (currentScale > _minimumScale) {
+      _transformationController.value = Matrix4.identity();
+
+      return;
+    }
+
+    final tapPosition = _doubleTapDetails?.localPosition;
+
+    if (tapPosition == null) {
+      return;
+    }
+
+    final x = -tapPosition.dx * (_doubleTapScale - 1);
+
+    final y = -tapPosition.dy * (_doubleTapScale - 1);
+
+    _transformationController.value = Matrix4.identity()
+      ..translate(x, y)
+      ..scale(_doubleTapScale);
+  }
+
+  void _resetZoom() {
+    _transformationController.value = Matrix4.identity();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: const Text('Image'),
+        actions: [
+          IconButton(
+            onPressed: _resetZoom,
+            icon: const Icon(Icons.fit_screen_outlined),
+            tooltip: 'Reset zoom',
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onDoubleTapDown: _handleDoubleTapDown,
+          onDoubleTap: _handleDoubleTap,
+          child: InteractiveViewer(
+            transformationController: _transformationController,
+            minScale: _minimumScale,
+            maxScale: _maximumScale,
+            boundaryMargin: const EdgeInsets.all(120),
+            clipBehavior: Clip.none,
+            child: SizedBox.expand(
+              child: Center(
+                child: Hero(
+                  tag: widget.heroTag,
+                  child: Image.network(
+                    widget.imageUrl,
+                    width: double.infinity,
+                    height: double.infinity,
+                    fit: BoxFit.contain,
+                    gaplessPlayback: true,
+                    loadingBuilder: (context, child, loadingProgress) {
+                      if (loadingProgress == null) {
+                        return child;
+                      }
+
+                      final expectedBytes = loadingProgress.expectedTotalBytes;
+
+                      final value = expectedBytes == null
+                          ? null
+                          : loadingProgress.cumulativeBytesLoaded /
+                                expectedBytes;
+
+                      return Center(
+                        child: CircularProgressIndicator(
+                          value: value,
+                          color: Colors.white,
+                        ),
+                      );
+                    },
+                    errorBuilder: (context, error, stackTrace) {
+                      return const Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.broken_image_outlined,
+                              size: 64,
+                              color: Colors.white,
+                            ),
+                            SizedBox(height: 14),
+                            Text(
+                              'Unable to load image.',
+                              style: TextStyle(color: Colors.white),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );

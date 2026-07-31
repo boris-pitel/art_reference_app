@@ -12,6 +12,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/reference_category.dart';
 import '../services/image_asset_service.dart';
 import '../services/image_print_service.dart';
+import 'help_screen.dart';
 import 'image_details_screen.dart';
 
 class _LoadedImage {
@@ -186,6 +187,12 @@ class _CategoryScreenState extends State<CategoryScreen> {
     });
   }
 
+  Future<void> _openHelp() async {
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (context) => const HelpScreen()));
+  }
+
   Future<void> _addPhotoReference(ImageSource source) async {
     if (_isBusy) {
       return;
@@ -282,7 +289,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
 
     try {
       await Navigator.of(context).push(
-        MaterialPageRoute(
+        MaterialPageRoute<void>(
           builder: (context) =>
               ImageDetailsScreen(imageId: image.id, imageUrl: image.imageUrl),
         ),
@@ -301,8 +308,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError(
-        'Image download failed with status '
-        '${response.statusCode}.',
+        'Image download failed with status ${response.statusCode}.',
       );
     }
 
@@ -409,10 +415,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
         return;
       }
 
-      _showMessage(
-        'Unable to save the reference: '
-        '${error.type.message}',
-      );
+      _showMessage('Unable to save the reference: ${error.type.message}');
     } catch (error) {
       if (!mounted) {
         return;
@@ -710,6 +713,11 @@ class _CategoryScreenState extends State<CategoryScreen> {
         title: Text(widget.category.displayName),
         actions: [
           IconButton(
+            onPressed: _openHelp,
+            icon: const Icon(Icons.help_outline),
+            tooltip: 'Help and About',
+          ),
+          IconButton(
             onPressed: _isLoading || _isBusy ? null : _loadImages,
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh',
@@ -856,13 +864,9 @@ class _CategoryScreenState extends State<CategoryScreen> {
         final image = _images[index];
 
         final isOpening = _openingImageId == image.id;
-
         final isRemoving = _removingImageId == image.id;
-
         final isSharing = _sharingImageId == image.id;
-
         final isSaving = _savingImageId == image.id;
-
         final isPrinting = _printingImageId == image.id;
 
         final isWorking =

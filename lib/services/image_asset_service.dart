@@ -38,20 +38,25 @@ class ImageAssetService {
 
   final SupabaseClient _supabase;
 
-  static const String _userEmail = 'borispitel1@gmail.com';
   static const String _bucketName = 'reference-images';
 
-  String get _userId {
-    final normalizedEmail = _userEmail.trim().toLowerCase();
+  String get _normalizedUserEmail {
+    final email = _supabase.auth.currentUser?.email?.trim().toLowerCase();
 
-    return const Uuid().v5(
-      Namespace.url.value,
-      'art-reference-user:$normalizedEmail',
-    );
+    if (email == null || email.isEmpty) {
+      throw StateError(
+        'You must be signed in before accessing the image library.',
+      );
+    }
+
+    return email;
   }
 
-  String get _normalizedUserEmail {
-    return _userEmail.trim().toLowerCase();
+  String get _userId {
+    return const Uuid().v5(
+      Namespace.url.value,
+      'art-reference-user:$_normalizedUserEmail',
+    );
   }
 
   Future<String> uploadImage(Uint8List imageBytes, ReferenceCategory category) {
@@ -196,6 +201,7 @@ class ImageAssetService {
       }
 
       final storagePath = prepareData['storage_path'];
+
       final uploadToken = prepareData['upload_token'];
 
       if (storagePath is! String || storagePath.isEmpty) {
@@ -316,6 +322,74 @@ class ImageAssetService {
     } catch (error) {
       profiler.fail(error);
       rethrow;
+    }
+  }
+
+  Future<List<String>> listImageCategoryCodes(String imageId) async {
+    final normalizedImageId = imageId.trim();
+
+    if (normalizedImageId.isEmpty) {
+      throw ArgumentError.value(
+        imageId,
+        'imageId',
+        'The image ID cannot be empty.',
+      );
+    }
+
+    final response = await _supabase
+        .from('image_categories')
+        .select('category_code')
+        .eq('image_id', normalizedImageId);
+
+    return response
+        .map((row) => row['category_code'])
+        .whereType<String>()
+        .map((code) => code.trim())
+        .where((code) => code.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  Future<void> moveImageToCategory({
+    required String imageId,
+    required ReferenceCategory fromCategory,
+    required ReferenceCategory toCategory,
+  }) async {
+    final normalizedImageId = imageId.trim();
+
+    if (normalizedImageId.isEmpty) {
+      throw ArgumentError.value(
+        imageId,
+        'imageId',
+        'The image ID cannot be empty.',
+      );
+    }
+
+    if (fromCategory.databaseCode == toCategory.databaseCode) {
+      throw ArgumentError('The source and destination categories are the same.');
+    }
+
+    final response = await _supabase.functions.invoke(
+      'move-image-to-category',
+      body: {
+        'user_id': _userId,
+        'image_id': normalizedImageId,
+        'from_category_code': fromCategory.databaseCode,
+        'to_category_code': toCategory.databaseCode,
+      },
+    );
+
+    final data = response.data;
+
+    if (data is! Map) {
+      throw StateError(
+        'move-image-to-category returned an unexpected response: $data',
+      );
+    }
+
+    if (data['moved'] != true) {
+      throw StateError(
+        data['error']?.toString() ?? 'The image was not moved.',
+      );
     }
   }
 
