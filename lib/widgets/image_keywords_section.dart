@@ -4,15 +4,20 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/keyword_service.dart';
 
 class ImageKeywordsSection extends StatefulWidget {
-  const ImageKeywordsSection({super.key, required this.imageId});
+  const ImageKeywordsSection({
+    super.key,
+    required this.imageId,
+    this.onKeywordsChanged,
+  });
 
   final String imageId;
+  final ValueChanged<List<String>>? onKeywordsChanged;
 
   @override
-  State<ImageKeywordsSection> createState() => _ImageKeywordsSectionState();
+  State<ImageKeywordsSection> createState() => ImageKeywordsSectionState();
 }
 
-class _ImageKeywordsSectionState extends State<ImageKeywordsSection> {
+class ImageKeywordsSectionState extends State<ImageKeywordsSection> {
   final TextEditingController _keywordController = TextEditingController();
 
   final FocusNode _keywordFocusNode = FocusNode();
@@ -27,6 +32,84 @@ class _ImageKeywordsSectionState extends State<ImageKeywordsSection> {
   bool _isAdding = false;
 
   String? _errorMessage;
+
+  void _notifyKeywordsChanged() {
+    widget.onKeywordsChanged?.call(
+      _keywords.map((keyword) => keyword.keyword).toList(growable: false),
+    );
+  }
+
+  bool containsKeyword(String keyword) {
+    final normalized = keyword.trim().toLowerCase();
+
+    return _keywords.any(
+      (existingKeyword) =>
+          existingKeyword.keyword.trim().toLowerCase() == normalized,
+    );
+  }
+
+  Future<bool> addKeywordFromSuggestion(String keyword) async {
+    final normalizedKeyword = keyword.trim();
+
+    if (normalizedKeyword.isEmpty || _isAdding) {
+      return false;
+    }
+
+    if (containsKeyword(normalizedKeyword)) {
+      return false;
+    }
+
+    setState(() {
+      _isAdding = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final addedKeyword = await _keywordService.addKeyword(
+        imageId: widget.imageId,
+        keyword: normalizedKeyword,
+      );
+
+      if (!mounted) {
+        return false;
+      }
+
+      setState(() {
+        _keywords = [..._keywords, addedKeyword]
+          ..sort(
+            (left, right) => left.keyword.toLowerCase().compareTo(
+              right.keyword.toLowerCase(),
+            ),
+          );
+      });
+
+      _notifyKeywordsChanged();
+      return true;
+    } on DuplicateKeywordException {
+      if (!mounted) {
+        return false;
+      }
+
+      await _loadKeywords();
+      return false;
+    } catch (error) {
+      if (!mounted) {
+        return false;
+      }
+
+      setState(() {
+        _errorMessage = 'Unable to add the keyword.\n$error';
+      });
+
+      return false;
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isAdding = false;
+        });
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -43,6 +126,10 @@ class _ImageKeywordsSectionState extends State<ImageKeywordsSection> {
     _keywordFocusNode.dispose();
 
     super.dispose();
+  }
+
+  Future<void> reloadKeywords() async {
+    await _loadKeywords();
   }
 
   Future<void> _loadKeywords() async {
@@ -63,9 +150,11 @@ class _ImageKeywordsSectionState extends State<ImageKeywordsSection> {
       }
 
       setState(() {
-        _keywords = keywords;
+        _keywords = List<ImageKeyword>.of(keywords);
         _isLoading = false;
       });
+
+      _notifyKeywordsChanged();
     } catch (error) {
       if (!mounted) {
         return;
@@ -118,6 +207,7 @@ class _ImageKeywordsSectionState extends State<ImageKeywordsSection> {
 
       _keywordController.clear();
       _keywordFocusNode.requestFocus();
+      _notifyKeywordsChanged();
     } on DuplicateKeywordException catch (error) {
       if (!mounted) {
         return;
@@ -165,6 +255,8 @@ class _ImageKeywordsSectionState extends State<ImageKeywordsSection> {
 
         _deletingKeywordIds.remove(keyword.id);
       });
+
+      _notifyKeywordsChanged();
     } catch (error) {
       if (!mounted) {
         return;

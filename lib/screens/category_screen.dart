@@ -288,12 +288,16 @@ class _CategoryScreenState extends State<CategoryScreen> {
     });
 
     try {
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
+      final changed = await Navigator.of(context).push<bool>(
+        MaterialPageRoute<bool>(
           builder: (context) =>
               ImageDetailsScreen(imageId: image.id, imageUrl: image.imageUrl),
         ),
       );
+
+      if (changed == true && mounted) {
+        await _loadImages();
+      }
     } finally {
       if (mounted) {
         setState(() {

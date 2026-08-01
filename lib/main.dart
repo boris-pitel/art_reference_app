@@ -13,6 +13,7 @@ import 'screens/login_screen.dart';
 import 'screens/keyword_search_screen.dart';
 import 'screens/shared_image_import_screen.dart';
 import 'services/category_service.dart';
+import 'services/image_asset_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -273,8 +274,10 @@ class CollectionsScreen extends StatefulWidget {
 
 class _CollectionsScreenState extends State<CollectionsScreen> {
   late final CategoryService _categoryService;
+  late final ImageAssetService _imageAssetService;
 
   final List<ReferenceCategory> _categories = <ReferenceCategory>[];
+  final Map<String, int> _imageCountsByCategoryCode = <String, int>{};
 
   bool _isLoading = true;
   bool _isAddingCategory = false;
@@ -283,7 +286,11 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   @override
   void initState() {
     super.initState();
-    _categoryService = CategoryService(Supabase.instance.client);
+    final supabase = Supabase.instance.client;
+
+    _categoryService = CategoryService(supabase);
+    _imageAssetService = ImageAssetService(supabase);
+
     _loadCategories();
   }
 
@@ -296,6 +303,14 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     try {
       final categories = await _categoryService.listCategories();
 
+      final countEntries = await Future.wait(
+        categories.map((category) async {
+          final images = await _imageAssetService.listImages(category);
+
+          return MapEntry<String, int>(category.databaseCode, images.length);
+        }),
+      );
+
       if (!mounted) {
         return;
       }
@@ -304,6 +319,11 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         _categories
           ..clear()
           ..addAll(categories);
+
+        _imageCountsByCategoryCode
+          ..clear()
+          ..addEntries(countEntries);
+
         _isLoading = false;
       });
     } catch (error) {
@@ -394,6 +414,22 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     }
   }
 
+  Future<void> _openCategory(ReferenceCategory category) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) {
+          return CategoryScreen(category: category);
+        },
+      ),
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    await _loadCategories();
+  }
+
   Future<void> _openKeywordSearch() async {
     if (_isLoading || _categories.isEmpty) {
       return;
@@ -415,52 +451,12 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       return;
     }
 
-    final controller = TextEditingController();
-
     final categoryName = await showDialog<String>(
       context: context,
       builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Add Category'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            maxLength: 60,
-            textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(
-              labelText: 'Category name',
-              hintText: 'Animals',
-              border: OutlineInputBorder(),
-            ),
-            onSubmitted: (value) {
-              final trimmedValue = value.trim();
-              if (trimmedValue.isNotEmpty) {
-                Navigator.of(dialogContext).pop(trimmedValue);
-              }
-            },
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(dialogContext).pop();
-              },
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final trimmedValue = controller.text.trim();
-                if (trimmedValue.isNotEmpty) {
-                  Navigator.of(dialogContext).pop(trimmedValue);
-                }
-              },
-              child: const Text('Add'),
-            ),
-          ],
-        );
+        return const _AddCategoryDialog();
       },
     );
-
-    controller.dispose();
 
     if (categoryName == null || !mounted) {
       return;
@@ -479,6 +475,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
 
       setState(() {
         _categories.add(newCategory);
+        _imageCountsByCategoryCode[newCategory.databaseCode] = 0;
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -636,32 +633,115 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
           childAspectRatio: 1,
         ),
         itemBuilder: (context, index) {
-          return CollectionCard(category: _categories[index]);
+          final category = _categories[index];
+
+          return CollectionCard(
+            category: category,
+            imageCount: _imageCountsByCategoryCode[category.databaseCode] ?? 0,
+            onTap: () => _openCategory(category),
+          );
         },
       ),
     );
   }
 }
 
+class _AddCategoryDialog extends StatefulWidget {
+  const _AddCategoryDialog();
+
+  @override
+  State<_AddCategoryDialog> createState() => _AddCategoryDialogState();
+}
+
+class _AddCategoryDialogState extends State<_AddCategoryDialog> {
+  final TextEditingController _controller = TextEditingController();
+
+  bool get _canSubmit => _controller.text.trim().isNotEmpty;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_handleTextChanged);
+  }
+
+  void _handleTextChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _submit() {
+    final value = _controller.text.trim();
+
+    if (value.isEmpty) {
+      return;
+    }
+
+    Navigator.of(context).pop(value);
+  }
+
+  @override
+  void dispose() {
+    _controller
+      ..removeListener(_handleTextChanged)
+      ..dispose();
+
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Add Category'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        maxLength: 60,
+        textCapitalization: TextCapitalization.words,
+        textInputAction: TextInputAction.done,
+        decoration: const InputDecoration(
+          labelText: 'Category name',
+          hintText: 'Animals',
+          border: OutlineInputBorder(),
+        ),
+        onSubmitted: (_) {
+          _submit();
+        },
+      ),
+      actions: [
+        TextButton(
+          onPressed: () {
+            Navigator.of(context).pop();
+          },
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _canSubmit ? _submit : null,
+          child: const Text('Add'),
+        ),
+      ],
+    );
+  }
+}
+
 class CollectionCard extends StatelessWidget {
-  const CollectionCard({required this.category, super.key});
+  const CollectionCard({
+    required this.category,
+    required this.imageCount,
+    required this.onTap,
+    super.key,
+  });
 
   final ReferenceCategory category;
+  final int imageCount;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return Card(
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: () {
-          Navigator.of(context).push(
-            MaterialPageRoute<void>(
-              builder: (context) {
-                return CategoryScreen(category: category);
-              },
-            ),
-          );
-        },
+        onTap: onTap,
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -691,7 +771,7 @@ class CollectionCard extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    '0 images',
+                    '$imageCount ${imageCount == 1 ? 'image' : 'images'}',
                     style: Theme.of(
                       context,
                     ).textTheme.bodyMedium?.copyWith(color: Colors.white70),

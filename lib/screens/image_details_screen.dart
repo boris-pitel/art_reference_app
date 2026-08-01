@@ -10,6 +10,7 @@ import 'package:uuid/uuid.dart';
 import '../models/reference_category.dart';
 import '../services/category_service.dart';
 import '../services/image_asset_service.dart';
+import '../services/keyword_service.dart';
 import '../widgets/image_keywords_section.dart';
 
 enum _AssociatedImageAction { open, delete }
@@ -101,6 +102,10 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
   final ImagePicker _imagePicker = ImagePicker();
 
   final Set<String> _deletingAssociatedImageIds = <String>{};
+  final GlobalKey<ImageKeywordsSectionState> _keywordsSectionKey =
+      GlobalKey<ImageKeywordsSectionState>();
+  final Set<String> _addingAiKeywords = <String>{};
+  final Set<String> _attachedKeywords = <String>{};
 
   bool _isLoadingMetadata = true;
   bool _isSavingMetadata = false;
@@ -125,6 +130,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
   SupabaseClient get _supabase => Supabase.instance.client;
 
   ImageAssetService get _imageAssetService => ImageAssetService(_supabase);
+
+  KeywordService get _keywordService => KeywordService(_supabase);
 
   String get _userId {
     final normalizedEmail = _userEmail.trim().toLowerCase();
@@ -652,119 +659,116 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
         throw StateError('This image is not assigned to any category.');
       }
 
-      final moveSelection = await showDialog<({
-        ReferenceCategory from,
-        ReferenceCategory to,
-      })>(
-        context: context,
-        builder: (dialogContext) {
-          ReferenceCategory fromCategory = currentCategories.first;
-          ReferenceCategory? toCategory;
+      final moveSelection =
+          await showDialog<({ReferenceCategory from, ReferenceCategory to})>(
+            context: context,
+            builder: (dialogContext) {
+              ReferenceCategory fromCategory = currentCategories.first;
+              ReferenceCategory? toCategory;
 
-          return StatefulBuilder(
-            builder: (context, setDialogState) {
-              final destinationCategories = allCategories
-                  .where(
-                    (category) =>
-                        category.databaseCode != fromCategory.databaseCode,
-                  )
-                  .toList(growable: false);
+              return StatefulBuilder(
+                builder: (context, setDialogState) {
+                  final destinationCategories = allCategories
+                      .where(
+                        (category) =>
+                            category.databaseCode != fromCategory.databaseCode,
+                      )
+                      .toList(growable: false);
 
-              if (toCategory != null &&
-                  toCategory!.databaseCode == fromCategory.databaseCode) {
-                toCategory = null;
-              }
+                  if (toCategory != null &&
+                      toCategory!.databaseCode == fromCategory.databaseCode) {
+                    toCategory = null;
+                  }
 
-              return AlertDialog(
-                title: const Text('Move Reference'),
-                content: SizedBox(
-                  width: 420,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (currentCategories.length > 1) ...[
-                        const Text('Move from'),
-                        const SizedBox(height: 8),
-                        DropdownButtonFormField<ReferenceCategory>(
-                          initialValue: fromCategory,
-                          decoration: const InputDecoration(
-                            border: OutlineInputBorder(),
-                          ),
-                          items: currentCategories
-                              .map(
-                                (category) => DropdownMenuItem(
-                                  value: category,
-                                  child: Text(category.displayName),
-                                ),
-                              )
-                              .toList(growable: false),
-                          onChanged: (value) {
-                            if (value == null) {
-                              return;
-                            }
-
-                            setDialogState(() {
-                              fromCategory = value;
-                            });
-                          },
-                        ),
-                        const SizedBox(height: 18),
-                      ] else ...[
-                        Text(
-                          'Current category: ${fromCategory.displayName}',
-                          style: Theme.of(context).textTheme.bodyLarge,
-                        ),
-                        const SizedBox(height: 18),
-                      ],
-                      const Text('Move to'),
-                      const SizedBox(height: 8),
-                      DropdownButtonFormField<ReferenceCategory>(
-                        initialValue: toCategory,
-                        decoration: const InputDecoration(
-                          hintText: 'Choose a destination category',
-                          border: OutlineInputBorder(),
-                        ),
-                        items: destinationCategories
-                            .map(
-                              (category) => DropdownMenuItem(
-                                value: category,
-                                child: Text(category.displayName),
+                  return AlertDialog(
+                    title: const Text('Move Reference'),
+                    content: SizedBox(
+                      width: 420,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (currentCategories.length > 1) ...[
+                            const Text('Move from'),
+                            const SizedBox(height: 8),
+                            DropdownButtonFormField<ReferenceCategory>(
+                              initialValue: fromCategory,
+                              decoration: const InputDecoration(
+                                border: OutlineInputBorder(),
                               ),
-                            )
-                            .toList(growable: false),
-                        onChanged: (value) {
-                          setDialogState(() {
-                            toCategory = value;
-                          });
-                        },
+                              items: currentCategories
+                                  .map(
+                                    (category) => DropdownMenuItem(
+                                      value: category,
+                                      child: Text(category.displayName),
+                                    ),
+                                  )
+                                  .toList(growable: false),
+                              onChanged: (value) {
+                                if (value == null) {
+                                  return;
+                                }
+
+                                setDialogState(() {
+                                  fromCategory = value;
+                                });
+                              },
+                            ),
+                            const SizedBox(height: 18),
+                          ] else ...[
+                            Text(
+                              'Current category: ${fromCategory.displayName}',
+                              style: Theme.of(context).textTheme.bodyLarge,
+                            ),
+                            const SizedBox(height: 18),
+                          ],
+                          const Text('Move to'),
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<ReferenceCategory>(
+                            initialValue: toCategory,
+                            decoration: const InputDecoration(
+                              hintText: 'Choose a destination category',
+                              border: OutlineInputBorder(),
+                            ),
+                            items: destinationCategories
+                                .map(
+                                  (category) => DropdownMenuItem(
+                                    value: category,
+                                    child: Text(category.displayName),
+                                  ),
+                                )
+                                .toList(growable: false),
+                            onChanged: (value) {
+                              setDialogState(() {
+                                toCategory = value;
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        child: const Text('Cancel'),
+                      ),
+                      FilledButton.icon(
+                        onPressed: toCategory == null
+                            ? null
+                            : () {
+                                Navigator.of(
+                                  dialogContext,
+                                ).pop((from: fromCategory, to: toCategory!));
+                              },
+                        icon: const Icon(Icons.drive_file_move_outline),
+                        label: const Text('Move'),
                       ),
                     ],
-                  ),
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.of(dialogContext).pop(),
-                    child: const Text('Cancel'),
-                  ),
-                  FilledButton.icon(
-                    onPressed: toCategory == null
-                        ? null
-                        : () {
-                            Navigator.of(dialogContext).pop((
-                              from: fromCategory,
-                              to: toCategory!,
-                            ));
-                          },
-                    icon: const Icon(Icons.drive_file_move_outline),
-                    label: const Text('Move'),
-                  ),
-                ],
+                  );
+                },
               );
             },
           );
-        },
-      );
 
       if (moveSelection == null || !mounted) {
         return;
@@ -782,9 +786,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'Image moved to ${moveSelection.to.displayName}.',
-          ),
+          content: Text('Image moved to ${moveSelection.to.displayName}.'),
         ),
       );
 
@@ -794,13 +796,85 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
         return;
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Unable to move image: $error')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Unable to move image: $error')));
     } finally {
       if (mounted) {
         setState(() {
           _isMovingImage = false;
+        });
+      }
+    }
+  }
+
+  void _handleKeywordsChanged(List<String> keywords) {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _attachedKeywords
+        ..clear()
+        ..addAll(keywords.map((keyword) => keyword.trim().toLowerCase()));
+    });
+  }
+
+  Future<void> _addAiKeyword(String keyword) async {
+    final normalizedKeyword = keyword.trim();
+    final normalizedKey = normalizedKeyword.toLowerCase();
+
+    if (normalizedKeyword.isEmpty ||
+        _addingAiKeywords.contains(normalizedKey) ||
+        _attachedKeywords.contains(normalizedKey)) {
+      return;
+    }
+
+    setState(() {
+      _addingAiKeywords.add(normalizedKey);
+    });
+
+    try {
+      await _keywordService.addKeyword(
+        imageId: widget.imageId,
+        keyword: normalizedKeyword,
+      );
+
+      await _keywordsSectionKey.currentState?.reloadKeywords();
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _attachedKeywords.add(normalizedKey);
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Keyword "$normalizedKeyword" added.')),
+      );
+    } on DuplicateKeywordException {
+      await _keywordsSectionKey.currentState?.reloadKeywords();
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _attachedKeywords.add(normalizedKey);
+      });
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to add "$normalizedKeyword".\n$error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _addingAiKeywords.remove(normalizedKey);
         });
       }
     }
@@ -889,7 +963,11 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
               _buildMetadataSection(context),
               const SizedBox(height: 24),
 
-              ImageKeywordsSection(imageId: widget.imageId),
+              ImageKeywordsSection(
+                key: _keywordsSectionKey,
+                imageId: widget.imageId,
+                onKeywordsChanged: _handleKeywordsChanged,
+              ),
 
               const SizedBox(height: 24),
               _buildAiAnalysisSection(context),
@@ -1284,6 +1362,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
               title: 'Keywords',
               values: analysis.keywords,
               icon: Icons.sell_outlined,
+              allowAddingAsKeyword: true,
             ),
           if (analysis.dominantColors.isNotEmpty)
             _buildAiChipSection(
@@ -1344,6 +1423,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
     required String title,
     required List<String> values,
     required IconData icon,
+    bool allowAddingAsKeyword = false,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 18),
@@ -1362,17 +1442,59 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
               ),
             ],
           ),
+          if (allowAddingAsKeyword) ...[
+            const SizedBox(height: 5),
+            const Text('Tap a tag to add it to your keywords.'),
+          ],
           const SizedBox(height: 9),
           Wrap(
             spacing: 8,
             runSpacing: 8,
             children: values
-                .map(
-                  (value) => Chip(
-                    label: Text(value),
-                    visualDensity: VisualDensity.compact,
-                  ),
-                )
+                .map((value) {
+                  if (!allowAddingAsKeyword) {
+                    return Chip(
+                      label: Text(value),
+                      visualDensity: VisualDensity.compact,
+                    );
+                  }
+
+                  final normalizedKey = value.trim().toLowerCase();
+                  final isAdded = _attachedKeywords.contains(normalizedKey);
+                  final isAdding = _addingAiKeywords.contains(normalizedKey);
+
+                  return SizedBox(
+                    height: 52,
+                    child: OutlinedButton.icon(
+                      onPressed: isAdded || isAdding
+                          ? null
+                          : () async {
+                              await _addAiKeyword(value);
+                            },
+                      icon: isAdding
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.2,
+                              ),
+                            )
+                          : Icon(isAdded ? Icons.check : Icons.add, size: 22),
+                      label: Text(
+                        value,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(110, 52),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 12,
+                        ),
+                        shape: const StadiumBorder(),
+                      ),
+                    ),
+                  );
+                })
                 .toList(growable: false),
           ),
         ],

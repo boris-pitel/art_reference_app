@@ -365,7 +365,9 @@ class ImageAssetService {
     }
 
     if (fromCategory.databaseCode == toCategory.databaseCode) {
-      throw ArgumentError('The source and destination categories are the same.');
+      throw ArgumentError(
+        'The source and destination categories are the same.',
+      );
     }
 
     final response = await _supabase.functions.invoke(
@@ -373,8 +375,8 @@ class ImageAssetService {
       body: {
         'user_id': _userId,
         'image_id': normalizedImageId,
-        'from_category_code': fromCategory.databaseCode,
-        'to_category_code': toCategory.databaseCode,
+        'from_category': fromCategory.databaseCode,
+        'to_category': toCategory.databaseCode,
       },
     );
 
@@ -387,9 +389,7 @@ class ImageAssetService {
     }
 
     if (data['moved'] != true) {
-      throw StateError(
-        data['error']?.toString() ?? 'The image was not moved.',
-      );
+      throw StateError(data['error']?.toString() ?? 'The image was not moved.');
     }
   }
 
