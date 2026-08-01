@@ -91,8 +91,6 @@ class ImageDetailsScreen extends StatefulWidget {
 }
 
 class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
-  static const String _userEmail = 'borispitel1@gmail.com';
-
   final TextEditingController _titleController = TextEditingController();
 
   final TextEditingController _notesController = TextEditingController();
@@ -134,7 +132,15 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
   KeywordService get _keywordService => KeywordService(_supabase);
 
   String get _userId {
-    final normalizedEmail = _userEmail.trim().toLowerCase();
+    final normalizedEmail = _supabase.auth.currentUser?.email
+        ?.trim()
+        .toLowerCase();
+
+    if (normalizedEmail == null || normalizedEmail.isEmpty) {
+      throw StateError(
+        'You must be signed in before accessing image details.',
+      );
+    }
 
     return const Uuid().v5(
       Namespace.url.value,

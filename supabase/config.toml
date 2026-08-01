@@ -1,0 +1,32 @@
+project_id = "bbcgcrbvxmertipdjczu"
+
+[functions.upload-image]
+verify_jwt = false
+[functions.list-images]
+verify_jwt = false
+[functions.get-image]
+verify_jwt = false
+[functions.upload-thumbnail]
+verify_jwt = false
+[functions.get-thumbnail]
+verify_jwt = false
+[functions.prepare-image-upload]
+verify_jwt = false
+[functions.finalize-image-upload]
+verify_jwt = false
+[functions.get-image-metadata]
+verify_jwt = false
+[functions.save-image-metadata]
+verify_jwt = false
+[functions.remove-image-from-category]
+verify_jwt = false
+[functions.list-associated-images]
+verify_jwt = false
+[functions.remove-associated-image]
+verify_jwt = false
+[functions.analyze-image]
+verify_jwt = false
+[functions.move-image-to-category]
+verify_jwt = false
+[functions.search-images]
+verify_jwt = false

@@ -1,0 +1,21 @@
+{
+  "project_ref": "bbcgcrbvxmertipdjczu",
+  "exported_at": "2026-08-01",
+  "functions": [
+    {"name":"upload-image","version":15,"verify_jwt":false,"live_hash":"1172f3e9b0bf8529d6f50ce4571a0268893517425582f7df4423db180e21b7bc","artifact":"output_upload-image.eszip","artifact_sha256":"2025b6b891f7fc0df16d9e4efbe1e3536b7f231498782aebfd2a3030992622c3"},
+    {"name":"list-images","version":9,"verify_jwt":false,"live_hash":"13b7671c2af1a6e49a6fb2fe69fa868c63ce628794210db5af2c639835adef5c","artifact":"output_list-images.eszip","artifact_sha256":"0c577ce8d80bbf99cca2f629711dac3a2de1ccb228991ee49dea8cf9abe61cc9"},
+    {"name":"get-image","version":4,"verify_jwt":false,"live_hash":"7be2c5fb323d31e6c3756c15f94c10fdb0798799e83f2d45155091a6e2b1f712","artifact":"output_get-image.eszip","artifact_sha256":"e8abeac8ec68934b4e944bc11e4868f42963b3a19218ea0ae53d3dc51be726d9"},
+    {"name":"upload-thumbnail","version":5,"verify_jwt":false,"live_hash":"ec475aabc65e41e4ab8ccda33c048d7bf354db2ba6e1042dae76745ead2cdab8","artifact":"output_upload-thumbnail.eszip","artifact_sha256":"af7c273302eaa08946e1f198fb733045a92ef1cfea4a22336fb61ce87292e37a"},
+    {"name":"get-thumbnail","version":4,"verify_jwt":false,"live_hash":"32bb566830f2b19b7e5d2415f0b37ea6de4231b6f4da250ae22bb0d27151f65f","artifact":"output_get-thumbnail.eszip","artifact_sha256":"9a16915f14d4e6d3d66c09a9944ca14cbf708fe13eae9c488ed18ed804f7df86"},
+    {"name":"prepare-image-upload","version":3,"verify_jwt":false,"live_hash":"0249c82e8b8504190b7202b6c2ef22c72beede1172f628cf8a85774e4bdee459","artifact":"output_prepare-image-upload.eszip","artifact_sha256":"0a061318f5d5b853fd6061e21de01defb5379de129f3d045367eec7a25bbe9ff"},
+    {"name":"finalize-image-upload","version":4,"verify_jwt":false,"live_hash":"e150056327b3dbe94b398d491f373129f4daa792f77e2c33563d00257928c60a","artifact":"output_finalize-image-upload.eszip","artifact_sha256":"e21e25e3386678d35754ab5042c22a24b6de98fdedf8aea7faf92818734ba415"},
+    {"name":"get-image-metadata","version":3,"verify_jwt":false,"live_hash":"ede50cce2d32ca87ac83ca7c459c283ed6780c3fabdf6f5740f091059397fd1b","artifact":"output_get-image-metadata.eszip","artifact_sha256":"9ced74d29e2b0f35866e68742f569c56dcd06283fec6e1ae14d5ecaad41ca1c3"},
+    {"name":"save-image-metadata","version":2,"verify_jwt":false,"live_hash":"3a4a9826936b188017203eeca973774e4f0c00eef37b27407bac7f13ff58610a","artifact":"output_save-image-metadata.eszip","artifact_sha256":"f928debf8c551353cfe42fa97286017f5a328a808d0e8d08512de680e23e0cf3"},
+    {"name":"remove-image-from-category","version":4,"verify_jwt":false,"live_hash":"a508fbc5c74ad4bc7d3d08ff6161e5e52a9b4959d94b2e614baabb9112086c11","artifact":"output_remove-image-from-category.eszip","artifact_sha256":"0b119df9589c62238233e8bfdf068eb4a7cbbd23490bb2e069bb6df2b25b0ac5"},
+    {"name":"list-associated-images","version":2,"verify_jwt":false,"live_hash":"f6866e9c28d9888d27959ada4acf44649ef47aaa147b27c7ca234c36d9290f9b","artifact":"output_list-associated-images.eszip","artifact_sha256":"2e25a1e7ee70067aae344d6d13d3ef7c6c8348b6d03595d5ce092af3c7066b4e"},
+    {"name":"remove-associated-image","version":2,"verify_jwt":false,"live_hash":"1f0d9f49691c3d183b49894d1792213d4beedbfa5a1e47611e39ee593eeac251","artifact":"output_remove-associated-image.eszip","artifact_sha256":"c4434f5ea935b3bb30d85e61a7ce76b63ee59ef8575afa597da31203f57356cb"},
+    {"name":"analyze-image","version":7,"verify_jwt":false,"live_hash":"1e928289a4c8781d3f94e7ce524ea9337adb35a1e4c09acfeec9bc4ee6417e43","artifact":"output_analyze-image.eszip","artifact_sha256":"527df020fd8de3bbaeaba42c97eb1c1c69986ecf90cb2d646e83ff50b951ce23"},
+    {"name":"move-image-to-category","version":1,"verify_jwt":false,"live_hash":"10b21948bf6f27deffed447f6826b3458494aa9bebdef476655c84be2eae8b83","artifact":"output_move-image-to-category.eszip","artifact_sha256":"a946d9f13cf45dc1890ea2b782cc17877f662aedf36878f20733db7e7bf2d868"},
+    {"name":"search-images","version":4,"verify_jwt":false,"live_hash":"767396551a68da9c4041ab4495d57d5717a0fe1e4d1e0dec975e3740fc7620be","artifact":"output_search-images.eszip","artifact_sha256":"96f59d4bc099ce2cab679e591af24e2f017695704a96d1b780d29c633cea0337"}
+  ]
+}
