@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
@@ -7,6 +9,7 @@ class CategoryService {
   CategoryService(this._supabase);
 
   final SupabaseClient _supabase;
+  static const String _coverBucket = 'category-covers';
 
   String get _normalizedUserEmail {
     final email = _supabase.auth.currentUser?.email?.trim().toLowerCase();
@@ -31,14 +34,25 @@ class CategoryService {
         .select()
         .or('is_builtin.eq.true,user_id.eq.$_userId')
         .order('id', ascending: true);
+    return Future.wait(
+      response.map(
+        (row) => _withResolvedCover(
+          ReferenceCategory.fromJson(Map<String, dynamic>.from(row)),
+        ),
+      ),
+    );
+  }
 
-    return response
-        .map(
-          (row) => ReferenceCategory.fromJson(
-            Map<String, dynamic>.from(row),
-          ),
-        )
-        .toList();
+  Future<ReferenceCategory> _withResolvedCover(
+    ReferenceCategory category,
+  ) async {
+    const prefix = 'storage://category-covers/';
+    final stored = category.thumbnailAsset;
+    if (stored == null || !stored.startsWith(prefix)) return category;
+    final url = await _supabase.storage
+        .from(_coverBucket)
+        .createSignedUrl(stored.substring(prefix.length), 3600);
+    return category.copyWith(thumbnailAsset: url);
   }
 
   Future<ReferenceCategory> addCategory(String name) async {
@@ -84,9 +98,118 @@ class CategoryService {
         .select()
         .single();
 
-    return ReferenceCategory.fromJson(
-      Map<String, dynamic>.from(response),
+    return ReferenceCategory.fromJson(Map<String, dynamic>.from(response));
+  }
+
+  Future<ReferenceCategory> renameCategory(
+    ReferenceCategory category,
+    String name,
+  ) async {
+    _checkOwnedCategory(category);
+    final value = _validateName(name);
+    final duplicate = (await listCategories()).any(
+      (item) =>
+          item.id != category.id &&
+          item.displayName.toLowerCase() == value.toLowerCase(),
     );
+    if (duplicate) {
+      throw StateError('A category with this name already exists.');
+    }
+    final row = await _supabase
+        .from('reference_categories')
+        .update({'display_name': value})
+        .eq('id', category.id)
+        .eq('user_id', _userId)
+        .eq('is_builtin', false)
+        .select()
+        .single();
+    return _withResolvedCover(
+      ReferenceCategory.fromJson(Map<String, dynamic>.from(row)),
+    );
+  }
+
+  Future<ReferenceCategory> uploadCover(
+    ReferenceCategory category,
+    Uint8List bytes,
+  ) async {
+    _checkOwnedCategory(category);
+    if (bytes.isEmpty) throw ArgumentError('The selected image is empty.');
+    final authId = _supabase.auth.currentUser?.id;
+    if (authId == null) throw StateError('You must be signed in.');
+    final path = '$authId/${category.id}/cover.jpg';
+    await _supabase.storage
+        .from(_coverBucket)
+        .uploadBinary(
+          path,
+          bytes,
+          fileOptions: const FileOptions(
+            contentType: 'image/jpeg',
+            upsert: true,
+          ),
+        );
+    final coverUrl = 'storage://category-covers/$path';
+    final row = await _supabase
+        .from('reference_categories')
+        .update({'thumbnail_asset': coverUrl})
+        .eq('id', category.id)
+        .eq('user_id', _userId)
+        .eq('is_builtin', false)
+        .select()
+        .single();
+    return _withResolvedCover(
+      ReferenceCategory.fromJson(Map<String, dynamic>.from(row)),
+    );
+  }
+
+  Future<void> deleteCategory(ReferenceCategory category) async {
+    _checkOwnedCategory(category);
+    final ownedImages = await _supabase
+        .from('image_assets')
+        .select('id')
+        .eq('user_id', _userId);
+    final ids = ownedImages.map((row) => row['id'] as String).toList();
+    if (ids.isNotEmpty) {
+      await _supabase
+          .from('image_categories')
+          .delete()
+          .eq('category_code', category.databaseCode)
+          .inFilter('image_id', ids);
+    }
+    await _supabase
+        .from('reference_categories')
+        .delete()
+        .eq('id', category.id)
+        .eq('user_id', _userId)
+        .eq('is_builtin', false);
+    final authId = _supabase.auth.currentUser?.id;
+    if (authId != null) {
+      try {
+        await _supabase.storage.from(_coverBucket).remove([
+          '$authId/${category.id}/cover.jpg',
+        ]);
+      } catch (_) {}
+    }
+  }
+
+  String _validateName(String name) {
+    final value = name.trim();
+    if (value.isEmpty) {
+      throw ArgumentError.value(name, 'name', 'Category name cannot be empty.');
+    }
+    if (value.length > 60) {
+      throw ArgumentError.value(
+        name,
+        'name',
+        'Category name cannot be longer than 60 characters.',
+      );
+    }
+    return value;
+  }
+
+  void _checkOwnedCategory(ReferenceCategory category) {
+    if (category.isBuiltIn || category.userId != _userId) {
+      throw StateError('Built-in categories cannot be changed.');
+    }
   }
 
   String _createUniqueCode(String name, Set<String> existingCodes) {

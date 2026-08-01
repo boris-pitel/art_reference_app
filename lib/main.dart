@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -498,6 +499,95 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     }
   }
 
+  Future<void> _renameCategory(ReferenceCategory category) async {
+    final name = await showDialog<String>(
+      context: context,
+      builder: (_) => _AddCategoryDialog(
+        title: 'Rename Category',
+        actionLabel: 'Rename',
+        initialValue: category.displayName,
+      ),
+    );
+    if (name == null || !mounted) return;
+    try {
+      final updated = await _categoryService.renameCategory(category, name);
+      if (!mounted) return;
+      setState(() {
+        final i = _categories.indexWhere((item) => item.id == updated.id);
+        if (i >= 0) _categories[i] = updated;
+      });
+      _showCategoryMessage('${updated.displayName} renamed.');
+    } catch (error) {
+      if (mounted) _showCategoryMessage('Unable to rename category: $error');
+    }
+  }
+
+  Future<void> _changeCategoryImage(ReferenceCategory category) async {
+    try {
+      final picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 88,
+        maxWidth: 1600,
+        maxHeight: 1600,
+      );
+      if (picked == null) return;
+      final updated = await _categoryService.uploadCover(
+        category,
+        await picked.readAsBytes(),
+      );
+      if (!mounted) return;
+      setState(() {
+        final i = _categories.indexWhere((item) => item.id == updated.id);
+        if (i >= 0) _categories[i] = updated;
+      });
+      _showCategoryMessage('Category image updated.');
+    } catch (error) {
+      if (mounted) {
+        _showCategoryMessage('Unable to update category image: $error');
+      }
+    }
+  }
+
+  Future<void> _deleteCategory(ReferenceCategory category) async {
+    final count = _imageCountsByCategoryCode[category.databaseCode] ?? 0;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Delete ${category.displayName}?'),
+        content: Text(
+          count == 0
+              ? 'This category will be permanently removed.'
+              : 'This removes the category from $count ${count == 1 ? 'image' : 'images'}, but does not delete the original image files.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await _categoryService.deleteCategory(category);
+      if (!mounted) return;
+      setState(() {
+        _categories.removeWhere((item) => item.id == category.id);
+        _imageCountsByCategoryCode.remove(category.databaseCode);
+      });
+      _showCategoryMessage('${category.displayName} deleted.');
+    } catch (error) {
+      if (mounted) _showCategoryMessage('Unable to delete category: $error');
+    }
+  }
+
+  void _showCategoryMessage(String message) => ScaffoldMessenger.of(
+    context,
+  ).showSnackBar(SnackBar(content: Text(message)));
   @override
   Widget build(BuildContext context) {
     final userEmail =
@@ -639,6 +729,15 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
             category: category,
             imageCount: _imageCountsByCategoryCode[category.databaseCode] ?? 0,
             onTap: () => _openCategory(category),
+            onRename: category.canRename
+                ? () => _renameCategory(category)
+                : null,
+            onChangeImage: category.canRename
+                ? () => _changeCategoryImage(category)
+                : null,
+            onDelete: category.canDelete
+                ? () => _deleteCategory(category)
+                : null,
           );
         },
       ),
@@ -647,20 +746,29 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
 }
 
 class _AddCategoryDialog extends StatefulWidget {
-  const _AddCategoryDialog();
+  const _AddCategoryDialog({
+    this.title = 'Add Category',
+    this.actionLabel = 'Add',
+    this.initialValue = '',
+  });
+
+  final String title;
+  final String actionLabel;
+  final String initialValue;
 
   @override
   State<_AddCategoryDialog> createState() => _AddCategoryDialogState();
 }
 
 class _AddCategoryDialogState extends State<_AddCategoryDialog> {
-  final TextEditingController _controller = TextEditingController();
+  late final TextEditingController _controller;
 
   bool get _canSubmit => _controller.text.trim().isNotEmpty;
 
   @override
   void initState() {
     super.initState();
+    _controller = TextEditingController(text: widget.initialValue);
     _controller.addListener(_handleTextChanged);
   }
 
@@ -692,7 +800,7 @@ class _AddCategoryDialogState extends State<_AddCategoryDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Add Category'),
+      title: Text(widget.title),
       content: TextField(
         controller: _controller,
         autofocus: true,
@@ -717,7 +825,7 @@ class _AddCategoryDialogState extends State<_AddCategoryDialog> {
         ),
         FilledButton(
           onPressed: _canSubmit ? _submit : null,
-          child: const Text('Add'),
+          child: Text(widget.actionLabel),
         ),
       ],
     );
@@ -729,12 +837,18 @@ class CollectionCard extends StatelessWidget {
     required this.category,
     required this.imageCount,
     required this.onTap,
+    this.onRename,
+    this.onChangeImage,
+    this.onDelete,
     super.key,
   });
 
   final ReferenceCategory category;
   final int imageCount;
   final VoidCallback onTap;
+  final VoidCallback? onRename;
+  final VoidCallback? onChangeImage;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -756,6 +870,27 @@ class CollectionCard extends StatelessWidget {
                 ),
               ),
             ),
+            if (onRename != null)
+              Positioned(
+                top: 6,
+                right: 6,
+                child: PopupMenuButton<String>(
+                  tooltip: 'Manage category',
+                  color: Theme.of(context).colorScheme.surface,
+                  onSelected: (value) {
+                    if (value == 'rename') onRename?.call();
+                    if (value == 'image') onChangeImage?.call();
+                    if (value == 'delete') onDelete?.call();
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'rename', child: Text('Rename')),
+                    PopupMenuItem(value: 'image', child: Text('Change image')),
+                    PopupMenuDivider(),
+                    PopupMenuItem(value: 'delete', child: Text('Delete')),
+                  ],
+                  icon: Icon(Icons.more_vert, color: Colors.white),
+                ),
+              ),
             Positioned(
               left: 14,
               right: 14,
@@ -789,12 +924,18 @@ class CollectionCard extends StatelessWidget {
     final thumbnailAsset = category.thumbnailAsset;
 
     if (thumbnailAsset != null && thumbnailAsset.isNotEmpty) {
+      if (thumbnailAsset.startsWith('http://') ||
+          thumbnailAsset.startsWith('https://')) {
+        return Image.network(
+          thumbnailAsset,
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => _buildCustomCategoryBackground(context),
+        );
+      }
       return Image.asset(
         thumbnailAsset,
         fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) {
-          return _buildCustomCategoryBackground(context);
-        },
+        errorBuilder: (_, _, _) => _buildCustomCategoryBackground(context),
       );
     }
 
