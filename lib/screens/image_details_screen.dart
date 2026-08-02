@@ -173,6 +173,9 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
 
   bool _isLoadingMetadata = true;
   bool _isSavingMetadata = false;
+  bool _isExiting = false;
+  bool _allowPop = false;
+  bool _isAiAnalysisExpanded = false;
   bool _isMovingImage = false;
   bool _isFavorite = false;
 
@@ -324,12 +327,12 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
     return aiDescription is String && aiDescription.trim().isNotEmpty;
   }
 
-  Future<void> _saveMetadata() async {
+  Future<bool> _saveMetadata({bool showSuccessMessage = true}) async {
     if (_isSavingMetadata) {
-      return;
+      return false;
     }
 
-    FocusScope.of(context).unfocus();
+    FocusManager.instance.primaryFocus?.unfocus();
 
     setState(() {
       _isSavingMetadata = true;
@@ -364,31 +367,71 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
         );
       }
 
-      if (!mounted) {
-        return;
+      if (mounted) {
+        setState(() {
+          _isSavingMetadata = false;
+        });
+
+        if (showSuccessMessage) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Image details saved.')));
+        }
       }
 
-      setState(() {
-        _isSavingMetadata = false;
-      });
-
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Image details saved.')));
+      return true;
     } catch (error) {
-      if (!mounted) {
-        return;
+      if (mounted) {
+        setState(() {
+          _isSavingMetadata = false;
+          _metadataError = 'Unable to save image details.\n$error';
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Unable to save. Please try leaving again.'),
+          ),
+        );
       }
 
-      setState(() {
-        _isSavingMetadata = false;
-        _metadataError = 'Unable to save image details.\n$error';
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Unable to save image details.')),
-      );
+      return false;
     }
+  }
+
+  Future<void> _handlePop(bool didPop) async {
+    if (didPop || _isExiting) {
+      return;
+    }
+
+    if (_isLoadingMetadata) {
+      setState(() {
+        _allowPop = true;
+      });
+      Navigator.of(context).pop();
+      return;
+    }
+
+    setState(() {
+      _isExiting = true;
+    });
+
+    final saved = await _saveMetadata(showSuccessMessage: false);
+
+    if (!mounted) {
+      return;
+    }
+
+    if (!saved) {
+      setState(() {
+        _isExiting = false;
+      });
+      return;
+    }
+
+    setState(() {
+      _allowPop = true;
+    });
+    Navigator.of(context).pop();
   }
 
   Future<void> _analyzeImage() async {
@@ -438,6 +481,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
       setState(() {
         _aiAnalysis = analysis;
         _aiAnalysisStatus = 'completed';
+        _isAiAnalysisExpanded = true;
         _isAnalyzingImage = false;
         _aiAnalysisError = null;
       });
@@ -1022,91 +1066,86 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Image Details'),
-        actions: [
-          IconButton(
-            onPressed: _isLoadingMetadata || _isSavingMetadata
-                ? null
-                : () {
-                    setState(() {
-                      _isFavorite = !_isFavorite;
-                    });
-                  },
-            icon: Icon(_isFavorite ? Icons.favorite : Icons.favorite_border),
-            tooltip: _isFavorite ? 'Remove from favorites' : 'Add to favorites',
-          ),
-          IconButton(
-            onPressed: _isLoadingMetadata || _isSavingMetadata
-                ? null
-                : _saveMetadata,
-            icon: _isSavingMetadata
-                ? const SizedBox(
-                    width: 22,
-                    height: 22,
-                    child: CircularProgressIndicator(strokeWidth: 2.5),
-                  )
-                : const Icon(Icons.save_outlined),
-            tooltip: 'Save',
-          ),
-          PopupMenuButton<_ImageAction>(
-            enabled: !_isMovingImage,
-            tooltip: 'Image actions',
-            onSelected: (action) async {
-              switch (action) {
-                case _ImageAction.move:
-                  await _moveImage();
-              }
-            },
-            itemBuilder: (context) {
-              return const [
-                PopupMenuItem<_ImageAction>(
-                  value: _ImageAction.move,
-                  child: ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.drive_file_move_outline),
-                    title: Text('Move...'),
+    return PopScope<Object?>(
+      canPop: _allowPop,
+      onPopInvokedWithResult: (didPop, result) {
+        _handlePop(didPop);
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Image Details'),
+          actions: [
+            IconButton(
+              onPressed: _isLoadingMetadata || _isSavingMetadata
+                  ? null
+                  : () {
+                      setState(() {
+                        _isFavorite = !_isFavorite;
+                      });
+                    },
+              icon: Icon(_isFavorite ? Icons.favorite : Icons.favorite_border),
+              tooltip: _isFavorite
+                  ? 'Remove from favorites'
+                  : 'Add to favorites',
+            ),
+            PopupMenuButton<_ImageAction>(
+              enabled: !_isMovingImage,
+              tooltip: 'Image actions',
+              onSelected: (action) async {
+                switch (action) {
+                  case _ImageAction.move:
+                    await _moveImage();
+                }
+              },
+              itemBuilder: (context) {
+                return const [
+                  PopupMenuItem<_ImageAction>(
+                    value: _ImageAction.move,
+                    child: ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(Icons.drive_file_move_outline),
+                      title: Text('Move...'),
+                    ),
                   ),
+                ];
+              },
+            ),
+          ],
+        ),
+        body: LayoutBuilder(
+          builder: (context, constraints) {
+            final availableHeight = constraints.maxHeight;
+
+            final calculatedImageHeight = availableHeight * 0.55;
+
+            final imageHeight = math.min(
+              700.0,
+              math.max(320.0, calculatedImageHeight),
+            );
+
+            return ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                _buildImageViewer(context, imageHeight),
+                const SizedBox(height: 24),
+                _buildMetadataSection(context),
+                const SizedBox(height: 24),
+
+                ImageKeywordsSection(
+                  key: _keywordsSectionKey,
+                  imageId: widget.imageId,
+                  onKeywordsChanged: _handleKeywordsChanged,
                 ),
-              ];
-            },
-          ),
-        ],
-      ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final availableHeight = constraints.maxHeight;
 
-          final calculatedImageHeight = availableHeight * 0.55;
-
-          final imageHeight = math.min(
-            700.0,
-            math.max(320.0, calculatedImageHeight),
-          );
-
-          return ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              _buildImageViewer(context, imageHeight),
-              const SizedBox(height: 24),
-              _buildMetadataSection(context),
-              const SizedBox(height: 24),
-
-              ImageKeywordsSection(
-                key: _keywordsSectionKey,
-                imageId: widget.imageId,
-                onKeywordsChanged: _handleKeywordsChanged,
-              ),
-
-              const SizedBox(height: 24),
-              _buildAiAnalysisSection(context),
-              const SizedBox(height: 24),
-              _buildAssociatedImagesSection(context),
-              const SizedBox(height: 24),
-            ],
-          );
-        },
+                const SizedBox(height: 24),
+                _buildAiAnalysisSection(context),
+                const SizedBox(height: 24),
+                _buildAssociatedImagesSection(context),
+                const SizedBox(height: 24),
+              ],
+            );
+          },
+        ),
       ),
     );
   }
@@ -1319,21 +1358,6 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
                     });
                   },
           ),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: _isSavingMetadata ? null : _saveMetadata,
-              icon: _isSavingMetadata
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2.5),
-                    )
-                  : const Icon(Icons.save_outlined),
-              label: Text(_isSavingMetadata ? 'Saving...' : 'Save Details'),
-            ),
-          ),
         ],
       ],
     );
@@ -1341,21 +1365,46 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
 
   Widget _buildAiAnalysisSection(BuildContext context) {
     final analysis = _aiAnalysis;
+    final buttonLabel = _isAnalyzingImage
+        ? 'Analyzing...'
+        : analysis == null
+        ? _aiAnalysisStatus == 'failed'
+              ? 'Retry AI Analysis'
+              : 'Analyze with AI'
+        : _isAiAnalysisExpanded
+        ? 'Hide AI Analysis'
+        : 'Show AI Analysis';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Row(
-          children: [
-            Icon(Icons.auto_awesome_outlined),
-            SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'AI Art Analysis',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
-              ),
-            ),
-          ],
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: _isLoadingMetadata || _isAnalyzingImage
+                ? null
+                : analysis == null
+                ? _analyzeImage
+                : () {
+                    setState(() {
+                      _isAiAnalysisExpanded = !_isAiAnalysisExpanded;
+                    });
+                  },
+            icon: _isAnalyzingImage
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2.5),
+                  )
+                : Icon(
+                    analysis == null
+                        ? Icons.auto_awesome
+                        : _isAiAnalysisExpanded
+                        ? Icons.expand_less
+                        : Icons.expand_more,
+                  ),
+            label: Text(buttonLabel),
+          ),
         ),
         const SizedBox(height: 8),
         const Text(
@@ -1383,60 +1432,10 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
             ),
             const SizedBox(height: 16),
           ],
-          if (analysis == null && !_isAnalyzingImage) ...[
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: Theme.of(context).colorScheme.outlineVariant,
-                ),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Column(
-                children: [
-                  Icon(Icons.psychology_alt_outlined, size: 44),
-                  SizedBox(height: 12),
-                  Text(
-                    'This image has not been '
-                    'analyzed.',
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w500),
-                  ),
-                  SizedBox(height: 6),
-                  Text(
-                    'Nothing will happen '
-                    'automatically.',
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-          if (analysis != null) ...[
+          if (analysis != null && _isAiAnalysisExpanded) ...[
             _buildAiAnalysisCard(context, analysis),
             const SizedBox(height: 16),
           ],
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: _isAnalyzingImage ? null : _analyzeImage,
-              icon: _isAnalyzingImage
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2.5),
-                    )
-                  : const Icon(Icons.auto_awesome),
-              label: Text(
-                _isAnalyzingImage
-                    ? 'Analyzing...'
-                    : analysis == null
-                    ? 'Analyze with AI'
-                    : 'Analyze Again',
-              ),
-            ),
-          ),
         ],
       ],
     );
