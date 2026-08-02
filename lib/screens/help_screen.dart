@@ -46,8 +46,8 @@ class _IntroductionPage extends StatelessWidget {
         ),
         _HelpParagraph(
           'Your library is connected to your account, so you can work with '
-          'the same references across supported phones, tablets, and web '
-          'browsers.',
+          'the same references across supported phones, tablets, Windows '
+          'desktop computers, and web browsers.',
         ),
         _HelpSectionTitle('Organize your inspiration'),
         _HelpParagraph(
