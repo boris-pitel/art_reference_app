@@ -3,17 +3,81 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/reference_category.dart';
 import '../services/category_service.dart';
 import '../services/image_asset_service.dart';
+import '../services/image_save_service.dart';
 import '../services/keyword_service.dart';
 import '../widgets/image_keywords_section.dart';
 
-enum _AssociatedImageAction { open, delete }
+class _ExportImageData {
+  const _ExportImageData(this.bytes, this.mimeType);
+  final Uint8List bytes;
+  final String mimeType;
+  String get extension => mimeType == 'image/png' ? 'png' : 'jpg';
+}
+
+Future<_ExportImageData> _downloadExportImage(String imageUrl) async {
+  final response = await http.get(Uri.parse(imageUrl));
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw StateError(
+      'Image download failed with status ${response.statusCode}.',
+    );
+  }
+  if (response.bodyBytes.isEmpty) {
+    throw StateError('The downloaded image is empty.');
+  }
+  final header = response.headers['content-type']?.toLowerCase() ?? '';
+  final bytes = response.bodyBytes;
+  final mimeType =
+      header.contains('png') ||
+          (bytes.length >= 8 && bytes[0] == 0x89 && bytes[1] == 0x50)
+      ? 'image/png'
+      : 'image/jpeg';
+  return _ExportImageData(bytes, mimeType);
+}
+
+Future<void> _shareExportImage(
+  BuildContext context,
+  String imageUrl,
+  String imageId,
+) async {
+  Rect? origin;
+  final renderObject = context.findRenderObject();
+  if (renderObject is RenderBox && renderObject.hasSize) {
+    origin = renderObject.localToGlobal(Offset.zero) & renderObject.size;
+  }
+  final image = await _downloadExportImage(imageUrl);
+  await SharePlus.instance.share(
+    ShareParams(
+      files: [
+        XFile.fromData(
+          image.bytes,
+          mimeType: image.mimeType,
+          name: 'associated_image_$imageId.${image.extension}',
+        ),
+      ],
+      subject: 'Associated Art Reference Image',
+      sharePositionOrigin: origin,
+    ),
+  );
+}
+
+Future<void> _saveExportImage(String imageUrl, String imageId) async {
+  final image = await _downloadExportImage(imageUrl);
+  await ImageSaveService.save(
+    image.bytes,
+    fileName: 'associated_image_$imageId.${image.extension}',
+  );
+}
+
+enum _AssociatedImageAction { open, share, save, delete }
 
 enum _ImageAction { move }
 
@@ -100,6 +164,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
   final ImagePicker _imagePicker = ImagePicker();
 
   final Set<String> _deletingAssociatedImageIds = <String>{};
+  final Set<String> _sharingAssociatedImageIds = <String>{};
+  final Set<String> _savingAssociatedImageIds = <String>{};
   final GlobalKey<ImageKeywordsSectionState> _keywordsSectionKey =
       GlobalKey<ImageKeywordsSectionState>();
   final Set<String> _addingAiKeywords = <String>{};
@@ -137,9 +203,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
         .toLowerCase();
 
     if (normalizedEmail == null || normalizedEmail.isEmpty) {
-      throw StateError(
-        'You must be signed in before accessing image details.',
-      );
+      throw StateError('You must be signed in before accessing image details.');
     }
 
     return const Uuid().v5(
@@ -520,10 +584,61 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
         _openAssociatedImage(image);
         break;
 
+      case _AssociatedImageAction.share:
+        await _shareAssociatedImage(image);
+        break;
+
+      case _AssociatedImageAction.save:
+        await _saveAssociatedImage(image);
+        break;
+
       case _AssociatedImageAction.delete:
         await _confirmAndRemoveAssociatedImage(image);
         break;
     }
+  }
+
+  bool _isExportingAssociatedImage(String imageId) =>
+      _sharingAssociatedImageIds.contains(imageId) ||
+      _savingAssociatedImageIds.contains(imageId);
+
+  Future<void> _shareAssociatedImage(ImageAssetInfo image) async {
+    if (_isExportingAssociatedImage(image.id)) return;
+    setState(() => _sharingAssociatedImageIds.add(image.id));
+    try {
+      await _shareExportImage(context, image.imageUrl, image.id);
+    } catch (error) {
+      if (mounted) {
+        _showAssociatedMessage('Unable to share image: $error');
+      }
+    } finally {
+      if (mounted) setState(() => _sharingAssociatedImageIds.remove(image.id));
+    }
+  }
+
+  Future<void> _saveAssociatedImage(ImageAssetInfo image) async {
+    if (_isExportingAssociatedImage(image.id)) return;
+    setState(() => _savingAssociatedImageIds.add(image.id));
+    try {
+      await _saveExportImage(image.imageUrl, image.id);
+      if (mounted) {
+        _showAssociatedMessage(
+          kIsWeb ? 'Image downloaded.' : 'Image saved to Photos.',
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        _showAssociatedMessage('Unable to save image: $error');
+      }
+    } finally {
+      if (mounted) setState(() => _savingAssociatedImageIds.remove(image.id));
+    }
+  }
+
+  void _showAssociatedMessage(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _confirmAndRemoveAssociatedImage(ImageAssetInfo image) async {
@@ -615,6 +730,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
     _openZoomableImage(
       imageUrl: image.imageUrl,
       heroTag: 'associated-image-${image.id}',
+      exportImageId: image.id,
     );
   }
 
@@ -625,11 +741,19 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
     );
   }
 
-  void _openZoomableImage({required String imageUrl, required String heroTag}) {
+  void _openZoomableImage({
+    required String imageUrl,
+    required String heroTag,
+    String? exportImageId,
+  }) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (context) {
-          return _ZoomableImageScreen(imageUrl: imageUrl, heroTag: heroTag);
+          return _ZoomableImageScreen(
+            imageUrl: imageUrl,
+            heroTag: heroTag,
+            exportImageId: exportImageId,
+          );
         },
       ),
     );
@@ -1697,13 +1821,15 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
     final displayUrl = image.thumbnailUrl ?? image.imageUrl;
 
     final isDeleting = _deletingAssociatedImageIds.contains(image.id);
+    final isExporting = _isExportingAssociatedImage(image.id);
+    final isBusy = isDeleting || isExporting;
 
     return Material(
       color: Theme.of(context).colorScheme.surfaceContainerLow,
       borderRadius: BorderRadius.circular(12),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: isDeleting
+        onTap: isBusy
             ? null
             : () {
                 _openAssociatedImage(image);
@@ -1735,7 +1861,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
                 color: Colors.black54,
                 borderRadius: BorderRadius.circular(20),
                 child: PopupMenuButton<_AssociatedImageAction>(
-                  enabled: !isDeleting,
+                  enabled: !isBusy,
                   tooltip: 'Image actions',
                   icon: const Icon(
                     Icons.more_vert,
@@ -1755,6 +1881,22 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
                           title: Text('Open'),
                         ),
                       ),
+                      PopupMenuItem<_AssociatedImageAction>(
+                        value: _AssociatedImageAction.share,
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.share_outlined),
+                          title: Text('Share'),
+                        ),
+                      ),
+                      PopupMenuItem<_AssociatedImageAction>(
+                        value: _AssociatedImageAction.save,
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.download_outlined),
+                          title: Text('Save to Photos'),
+                        ),
+                      ),
                       PopupMenuDivider(),
                       PopupMenuItem<_AssociatedImageAction>(
                         value: _AssociatedImageAction.delete,
@@ -1769,7 +1911,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
                 ),
               ),
             ),
-            if (!isDeleting)
+            if (!isBusy)
               Positioned(
                 right: 6,
                 bottom: 6,
@@ -1784,7 +1926,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
                   ),
                 ),
               ),
-            if (isDeleting)
+            if (isBusy)
               const Positioned.fill(
                 child: ColoredBox(
                   color: Colors.black54,
@@ -1799,10 +1941,15 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
 }
 
 class _ZoomableImageScreen extends StatefulWidget {
-  const _ZoomableImageScreen({required this.imageUrl, required this.heroTag});
+  const _ZoomableImageScreen({
+    required this.imageUrl,
+    required this.heroTag,
+    this.exportImageId,
+  });
 
   final String imageUrl;
   final String heroTag;
+  final String? exportImageId;
 
   @override
   State<_ZoomableImageScreen> createState() => _ZoomableImageScreenState();
@@ -1817,6 +1964,8 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
       TransformationController();
 
   TapDownDetails? _doubleTapDetails;
+  bool _isSharing = false;
+  bool _isSaving = false;
 
   @override
   void dispose() {
@@ -1852,6 +2001,52 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
       ..scale(_doubleTapScale);
   }
 
+  Future<void> _shareImage() async {
+    final imageId = widget.exportImageId;
+    if (imageId == null || _isSharing || _isSaving) {
+      return;
+    }
+    setState(() => _isSharing = true);
+    try {
+      await _shareExportImage(context, widget.imageUrl, imageId);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to share image: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSharing = false);
+    }
+  }
+
+  Future<void> _saveImage() async {
+    final imageId = widget.exportImageId;
+    if (imageId == null || _isSharing || _isSaving) {
+      return;
+    }
+    setState(() => _isSaving = true);
+    try {
+      await _saveExportImage(widget.imageUrl, imageId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              kIsWeb ? 'Image downloaded.' : 'Image saved to Photos.',
+            ),
+          ),
+        );
+      }
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Unable to save image: $error')));
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
   void _resetZoom() {
     _transformationController.value = Matrix4.identity();
   }
@@ -1865,6 +2060,36 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
         foregroundColor: Colors.white,
         title: const Text('Image'),
         actions: [
+          if (widget.exportImageId != null) ...[
+            IconButton(
+              onPressed: _isSharing || _isSaving ? null : _saveImage,
+              icon: _isSaving
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.download_outlined),
+              tooltip: kIsWeb ? 'Download image' : 'Save to Photos',
+            ),
+            IconButton(
+              onPressed: _isSharing || _isSaving ? null : _shareImage,
+              icon: _isSharing
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.share_outlined),
+              tooltip: 'Share image',
+            ),
+          ],
           IconButton(
             onPressed: _resetZoom,
             icon: const Icon(Icons.fit_screen_outlined),

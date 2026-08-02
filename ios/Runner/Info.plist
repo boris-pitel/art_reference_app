@@ -66,5 +66,10 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
-</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Art Reference uses the camera to add reference and associated images.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Art Reference uses your photo library to select reference and associated images.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Art Reference saves selected reference and associated images to your photo library.</string></dict>
 </plist>
