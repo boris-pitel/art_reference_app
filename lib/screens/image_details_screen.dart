@@ -159,7 +159,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
 
   final TextEditingController _notesController = TextEditingController();
 
-  final TextEditingController _sourceUrlController = TextEditingController();
+  final TextEditingController _authorController = TextEditingController();
 
   final ImagePicker _imagePicker = ImagePicker();
 
@@ -233,7 +233,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
   void dispose() {
     _titleController.dispose();
     _notesController.dispose();
-    _sourceUrlController.dispose();
+    _authorController.dispose();
 
     super.dispose();
   }
@@ -286,7 +286,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
 
       _notesController.text = data['notes'] as String? ?? '';
 
-      _sourceUrlController.text = data['source_url'] as String? ?? '';
+      _authorController.text = data['source_url'] as String? ?? '';
 
       setState(() {
         _isFavorite = data['is_favorite'] == true;
@@ -344,7 +344,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
           'image_id': widget.imageId,
           'title': _normalizedNullableText(_titleController.text),
           'notes': _normalizedNullableText(_notesController.text),
-          'source_url': _normalizedNullableText(_sourceUrlController.text),
+          'source_url': _normalizedNullableText(_authorController.text),
           'is_favorite': _isFavorite,
         },
       );
@@ -1293,14 +1293,13 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
           ),
           const SizedBox(height: 16),
           TextField(
-            controller: _sourceUrlController,
-            keyboardType: TextInputType.url,
-            autocorrect: false,
+            controller: _authorController,
+
             decoration: const InputDecoration(
-              labelText: 'Source URL',
-              hintText: 'https://example.com/reference',
+              labelText: 'Author',
+              hintText: 'Artist, photographer, or creator',
               border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.link),
+              prefixIcon: Icon(Icons.person_outline),
             ),
           ),
           const SizedBox(height: 16),

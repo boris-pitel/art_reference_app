@@ -41,46 +41,55 @@ class _IntroductionPage extends StatelessWidget {
       children: [
         _HelpTitle('Welcome to Art Reference'),
         _HelpParagraph(
-          'Every artist collects reference images: a beautiful face, '
-          'an interesting building, dramatic lighting, a quiet landscape, '
-          'or an unusual still life.',
+          'Art Reference is a personal library for collecting, organizing, '
+          'finding, and using the photographs that inspire your artwork.',
         ),
         _HelpParagraph(
-          'Over time, these images become scattered across phones, '
-          'computers, downloads, cloud storage, email, and social media. '
-          'Finding the right reference becomes difficult, and useful images '
-          'are easily forgotten.',
-        ),
-        _HelpParagraph(
-          'Art Reference is a personal image library designed specifically '
-          'for artists. It helps you collect, organize, find, and use your '
-          'reference photographs.',
+          'Your library is connected to your account, so you can work with '
+          'the same references across supported phones, tablets, and web '
+          'browsers.',
         ),
         _HelpSectionTitle('Organize your inspiration'),
         _HelpParagraph(
-          'References can be organized into artistic categories such as '
-          'Portrait, Landscape, Architecture, Still Life, Abstract, and Icon.',
+          'Start with the built-in artistic categories or create your own. '
+          'Custom categories can be renamed, given a cover image, or removed '
+          'when they are no longer needed.',
         ),
         _HelpParagraph(
-          'A single reference may belong to more than one category without '
-          'creating another copy of the image.',
+          'A reference can be connected to more than one category without '
+          'uploading another copy. You can also move it from one category to '
+          'another.',
+        ),
+        _HelpSectionTitle('Find useful references again'),
+        _HelpParagraph(
+          'Add a title, notes, author, favorite status, and searchable '
+          'keywords to each reference. Keyword search helps bring the right '
+          'images back when you need them.',
         ),
         _HelpSectionTitle('Connect references with your artwork'),
         _HelpParagraph(
-          'You can attach sketches, studies, works in progress, and completed '
-          'artwork to the original reference image. This keeps the complete '
-          'creative process together.',
+          'Attach sketches, studies, works in progress, crops, edited '
+          'versions, or completed artwork to an original reference. '
+          'Associated images can be opened, shared, saved, or removed.',
         ),
-        _HelpSectionTitle('AI assistance'),
+        _HelpSectionTitle('Use references anywhere'),
         _HelpParagraph(
-          'Art Reference can analyze an image and suggest useful categories, '
-          'keywords, descriptions, and artistic observations.',
+          'Share reference images through your device, save them to Photos, '
+          'or print them. On the web, saving an associated image downloads it '
+          'through the browser.',
+        ),
+        _HelpSectionTitle('Optional AI assistance'),
+        _HelpParagraph(
+          'When you choose Analyze with AI, Art Reference can describe the '
+          'subject, lighting, composition, dominant colors, and useful '
+          'artistic observations. Suggested keywords can be added to your '
+          'reference with a tap.',
         ),
         _HelpParagraph(
-          'The goal is simple: spend less time managing photographs and more '
-          'time creating art.',
+          'AI analysis is never started automatically; it runs only when you '
+          'request it.',
         ),
-        _HelpClosing('Welcome to Art Reference, and happy painting!'),
+        _HelpClosing('Spend less time searching and more time creating.'),
       ],
     );
   }
@@ -95,109 +104,118 @@ class _HowToPage extends StatelessWidget {
       children: [
         _HelpTitle('How to Use Art Reference'),
         _HelpSectionTitle('Create an account'),
-        _NumberedInstruction(
-          number: 1,
-          text: 'Open Art Reference and select Create Account.',
-        ),
+        _NumberedInstruction(number: 1, text: 'Select Create Account.'),
         _NumberedInstruction(
           number: 2,
           text: 'Enter your email address and choose a password.',
         ),
         _NumberedInstruction(
           number: 3,
-          text: 'Complete email confirmation if it is requested.',
+          text:
+              'Confirm your email if confirmation is requested, then sign in.',
         ),
-        _NumberedInstruction(
-          number: 4,
-          text: 'Sign in using the same email address and password.',
+        _HelpSectionTitle('Manage categories'),
+        _HelpParagraph(
+          'Tap Add Category to create a custom category. Use the three-dot '
+          'menu on a custom category to rename it, change its cover image, or '
+          'delete it. Built-in categories cannot be renamed or deleted.',
+        ),
+        _HelpParagraph(
+          'Deleting a custom category removes its category connections but '
+          'does not delete the original image files.',
         ),
         _HelpSectionTitle('Add a reference image'),
         _NumberedInstruction(
           number: 1,
-          text: 'Open the category where you want the reference to appear.',
+          text: 'Open the category where the reference should appear.',
         ),
         _NumberedInstruction(number: 2, text: 'Tap Add Photo Reference.'),
         _NumberedInstruction(
           number: 3,
-          text: 'Choose an image from your device.',
+          text: 'Choose Gallery, or use Camera when it is available.',
         ),
         _NumberedInstruction(
           number: 4,
-          text: 'Wait for the image and its thumbnail to finish uploading.',
+          text: 'Allow the requested photo or camera permission.',
         ),
         _NumberedInstruction(
           number: 5,
-          text: 'The new reference will appear in the selected category.',
-        ),
-        _HelpSectionTitle('Import an image from another app'),
-        _NumberedInstruction(
-          number: 1,
           text:
-              'Open an image in your browser, photo application, or another '
-              'supported app.',
+              'Wait for the original image and thumbnail to finish uploading.',
         ),
-        _NumberedInstruction(number: 2, text: 'Use the Share command.'),
-        _NumberedInstruction(
-          number: 3,
-          text: 'Select Art Reference from the list of applications.',
-        ),
-        _NumberedInstruction(
-          number: 4,
-          text: 'Choose the category in which the reference should appear.',
-        ),
-        _NumberedInstruction(number: 5, text: 'Confirm the import.'),
-        _HelpSectionTitle('Open a reference'),
+        _HelpSectionTitle('Import from another app'),
         _HelpParagraph(
-          'Tap any thumbnail to open the full reference and view its '
-          'information.',
+          'On platforms that support direct sharing into Art Reference, use '
+          'the Share command in a browser or photo app, choose Art Reference, '
+          'then select the destination category. If Art Reference is not '
+          'listed, save the image first and add it from Gallery.',
         ),
-        _HelpSectionTitle('Use more than one category'),
+        _HelpSectionTitle('View and export a reference'),
         _HelpParagraph(
-          'The same reference can appear in multiple categories. Art '
-          'Reference keeps one original image and connects it to each chosen '
-          'category.',
+          'Tap a thumbnail to open its details. The image menu provides Share, '
+          'Save to Photos, and Print actions. On a desktop or web browser, '
+          'available actions may depend on the operating system and browser.',
+        ),
+        _HelpSectionTitle('Add details and keywords'),
+        _HelpParagraph(
+          'Open a reference to add its title, notes, author, favorite '
+          'status, and keywords. Tap Save Details after editing the reference '
+          'information. Use the search button on the main screen to find '
+          'references by keyword.',
+        ),
+        _HelpSectionTitle('Organize a reference'),
+        _HelpParagraph(
+          'Use Move to transfer a reference between categories. Uploading the '
+          'same image into another category connects the existing original '
+          'instead of storing a duplicate file.',
         ),
         _HelpSectionTitle('Add associated images'),
         _NumberedInstruction(number: 1, text: 'Open the original reference.'),
         _NumberedInstruction(
           number: 2,
-          text: 'Open the associated-images section.',
+          text: 'Scroll to Associated Images and choose Gallery or Camera.',
         ),
         _NumberedInstruction(
           number: 3,
-          text: 'Add a sketch, study, work in progress, or finished artwork.',
+          text:
+              'Select a sketch, study, work in progress, crop, or finished artwork.',
         ),
         _HelpParagraph(
-          'Associated images remain connected to the original reference and '
-          'do not appear as unrelated reference photographs.',
+          'Tap an associated image to view it full-screen. Its three-dot menu '
+          'and full-screen toolbar provide Share and Save actions. Delete '
+          'removes the association and may remove the file when it has no '
+          'other connections.',
         ),
         _HelpSectionTitle('Use AI analysis'),
         _NumberedInstruction(number: 1, text: 'Open a reference image.'),
-        _NumberedInstruction(
-          number: 2,
-          text: 'Select the AI analysis command.',
-        ),
+        _NumberedInstruction(number: 2, text: 'Tap Analyze with AI.'),
         _NumberedInstruction(
           number: 3,
-          text: 'Wait while the image is analyzed.',
+          text:
+              'Review the description, lighting, composition, colors, keywords, and artist notes.',
         ),
         _NumberedInstruction(
           number: 4,
           text:
-              'Review the suggested description, categories, keywords, and '
-              'artistic observations.',
+              'Tap a suggested keyword if you want to add it to the reference.',
         ),
         _HelpSectionTitle('Remove a reference from a category'),
         _HelpParagraph(
-          'Use the remove command while viewing the reference. Removing an '
-          'image from one category does not necessarily delete it from other '
-          'categories.',
+          'Choose Remove while viewing a reference. Removing it from one '
+          'category leaves any connections to other categories in place. If '
+          'this is the reference’s final category, the original reference and '
+          'its associated images are permanently deleted.',
+        ),
+        _HelpSectionTitle('Refresh and troubleshoot'),
+        _HelpParagraph(
+          'Use the refresh button if a recently uploaded image, category '
+          'cover, or associated image has not appeared yet. Check your '
+          'internet connection before retrying an upload or AI analysis.',
         ),
         _HelpSectionTitle('Sign out'),
         _HelpParagraph(
           'Open the account menu and select Sign Out. Your library remains '
-          'connected to your account and will be available when you sign in '
-          'again.',
+          'connected to your account and is available when you sign in again.',
         ),
       ],
     );
@@ -237,24 +255,36 @@ class _AboutPage extends StatelessWidget {
         ),
         const SizedBox(height: 28),
         const _HelpParagraph(
-          'Art Reference is a personal image library created for artists who '
-          'collect and use reference photographs in their creative work.',
+          'Art Reference is a cross-platform personal image library for '
+          'artists who collect and use reference photographs in their '
+          'creative work.',
         ),
         const _HelpParagraph(
-          'It helps organize reference images, connect artwork with its '
-          'original inspiration, and use artificial intelligence to describe '
-          'and classify images.',
+          'It combines custom categories, searchable details and keywords, '
+          'associated artwork, sharing and saving tools, and optional AI '
+          'analysis in one focused workspace.',
         ),
         const _HelpParagraph(
-          'Art Reference was created to solve a practical problem: artists '
-          'often collect thousands of useful images but have no convenient '
-          'way to organize and retrieve them.',
+          'Art Reference was created to solve a practical problem: useful '
+          'images are easily scattered or forgotten, while the connection '
+          'between a reference and the artwork it inspired is often lost.',
+        ),
+        const _HelpSectionTitle('Data and Privacy'),
+        const _HelpParagraph(
+          'Your account information, library details, and uploaded images are '
+          'stored online so your library can be available across supported '
+          'devices. Access to your personal library requires your account.',
+        ),
+        const _HelpParagraph(
+          'AI analysis is optional. A reference image is sent to the analysis '
+          'service only after you tap Analyze with AI; the app does not start '
+          'AI analysis automatically.',
         ),
         const SizedBox(height: 20),
         const Divider(),
         const SizedBox(height: 20),
         Text(
-          'Copyright © 2026 Boris Pitel',
+          'Copyright 2026 Boris Pitel',
           textAlign: TextAlign.center,
           style: theme.textTheme.bodyLarge,
         ),
