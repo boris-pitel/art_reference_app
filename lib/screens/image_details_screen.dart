@@ -63,7 +63,7 @@ Future<void> _shareExportImage(
           name: 'associated_image_$imageId.${image.extension}',
         ),
       ],
-      subject: 'Associated Art Reference Image',
+      subject: 'Associated Painter Reference Image',
       sharePositionOrigin: origin,
     ),
   );

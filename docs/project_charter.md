@@ -1,4 +1,4 @@
-# Art Reference App — Project Charter
+# Painter Reference — Project Charter
 
 ## Purpose
 

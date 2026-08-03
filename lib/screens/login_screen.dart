@@ -177,7 +177,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                           const SizedBox(height: 18),
                           Text(
-                            'Art Reference',
+                            'Painter Reference',
                             textAlign: TextAlign.center,
                             style: Theme.of(context).textTheme.headlineMedium
                                 ?.copyWith(fontWeight: FontWeight.w700),

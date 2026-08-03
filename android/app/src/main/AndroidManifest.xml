@@ -2,7 +2,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application
-        android:label="Art Reference"
+        android:label="Painter Reference"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 
@@ -30,7 +30,7 @@
             </intent-filter>
 
             <!--
-                 Allows Art Reference to appear in Android's Share menu
+                 Allows Painter Reference to appear in Android's Share menu
                  when one image is shared.
             -->
             <intent-filter>
@@ -40,7 +40,7 @@
             </intent-filter>
 
             <!--
-                 Allows Art Reference to appear when multiple images
+                 Allows Painter Reference to appear when multiple images
                  are shared together.
 
                  We will initially process only one image, but declaring

@@ -39,4 +39,4 @@ echo "Installing the release on device: $DEVICE_ID"
 flutter install --release -d "$DEVICE_ID"
 
 echo
-echo "Art Reference App release installation completed."
+echo "Painter Reference release installation completed."

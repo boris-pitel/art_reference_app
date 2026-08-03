@@ -359,7 +359,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
               name: 'art_reference_${image.id}.${downloadedImage.extension}',
             ),
           ],
-          subject: 'Art Reference',
+          subject: 'Painter Reference',
           sharePositionOrigin: sharePositionOrigin,
         ),
       );
@@ -449,7 +449,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
 
       await ImagePrintService.printImage(
         imageBytes: downloadedImage.bytes,
-        documentName: 'Art Reference ${image.id}',
+        documentName: 'Painter Reference ${image.id}',
       );
     } catch (error) {
       if (!mounted) {

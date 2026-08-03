@@ -12,7 +12,7 @@ class HelpScreen extends StatelessWidget {
       initialIndex: initialTabIndex,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Art Reference'),
+          title: const Text('Painter Reference'),
           bottom: const TabBar(
             tabs: [
               Tab(
@@ -39,9 +39,9 @@ class _IntroductionPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return const _HelpPage(
       children: [
-        _HelpTitle('Welcome to Art Reference'),
+        _HelpTitle('Welcome to Painter Reference'),
         _HelpParagraph(
-          'Art Reference is a personal library for collecting, organizing, '
+          'Painter Reference is a personal library for collecting, organizing, '
           'finding, and using the photographs that inspire your artwork.',
         ),
         _HelpParagraph(
@@ -80,7 +80,7 @@ class _IntroductionPage extends StatelessWidget {
         ),
         _HelpSectionTitle('Optional AI assistance'),
         _HelpParagraph(
-          'When you choose Analyze with AI, Art Reference can describe the '
+          'When you choose Analyze with AI, Painter Reference can describe the '
           'subject, lighting, composition, dominant colors, and useful '
           'artistic observations. Suggested keywords can be added to your '
           'reference with a tap.',
@@ -102,7 +102,7 @@ class _HowToPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return const _HelpPage(
       children: [
-        _HelpTitle('How to Use Art Reference'),
+        _HelpTitle('How to Use Painter Reference'),
         _HelpSectionTitle('Create an account'),
         _NumberedInstruction(number: 1, text: 'Select Create Account.'),
         _NumberedInstruction(
@@ -145,9 +145,9 @@ class _HowToPage extends StatelessWidget {
         ),
         _HelpSectionTitle('Import from another app'),
         _HelpParagraph(
-          'On platforms that support direct sharing into Art Reference, use '
-          'the Share command in a browser or photo app, choose Art Reference, '
-          'then select the destination category. If Art Reference is not '
+          'On platforms that support direct sharing into Painter Reference, use '
+          'the Share command in a browser or photo app, choose Painter Reference, '
+          'then select the destination category. If Painter Reference is not '
           'listed, save the image first and add it from Gallery.',
         ),
         _HelpSectionTitle('View and export a reference'),
@@ -241,7 +241,7 @@ class _AboutPage extends StatelessWidget {
         ),
         const SizedBox(height: 20),
         Text(
-          'Art Reference',
+          'Painter Reference',
           textAlign: TextAlign.center,
           style: theme.textTheme.headlineMedium?.copyWith(
             fontWeight: FontWeight.bold,
@@ -255,7 +255,7 @@ class _AboutPage extends StatelessWidget {
         ),
         const SizedBox(height: 28),
         const _HelpParagraph(
-          'Art Reference is a cross-platform personal image library for '
+          'Painter Reference is a cross-platform personal image library for '
           'artists who collect and use reference photographs in their '
           'creative work.',
         ),
@@ -265,7 +265,7 @@ class _AboutPage extends StatelessWidget {
           'analysis in one focused workspace.',
         ),
         const _HelpParagraph(
-          'Art Reference was created to solve a practical problem: useful '
+          'Painter Reference was created to solve a practical problem: useful '
           'images are easily scattered or forgotten, while the connection '
           'between a reference and the artwork it inspired is often lost.',
         ),
@@ -296,7 +296,7 @@ class _AboutPage extends StatelessWidget {
         ),
         const SizedBox(height: 28),
         const _HelpClosing(
-          'Thank you for using Art Reference.\n\nHappy painting!',
+          'Thank you for using Painter Reference.\n\nHappy painting!',
         ),
       ],
     );

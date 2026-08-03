@@ -1,11 +1,11 @@
 {
-    "name": "art_reference_app",
-    "short_name": "art_reference_app",
+    "name": "Painter Reference",
+    "short_name": "Painter Reference",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#211638",
     "theme_color": "#211638",
-    "description": "A new Flutter project.",
+    "description": "A personal library for collecting and organizing art reference images.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

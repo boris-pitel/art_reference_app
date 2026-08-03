@@ -240,7 +240,7 @@ class _ArtReferenceAppState extends State<ArtReferenceApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: _navigatorKey,
-      title: 'Art Reference',
+      title: 'Painter Reference',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
@@ -595,7 +595,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Art Reference'),
+        title: const Text('Painter Reference'),
         centerTitle: false,
         actions: [
           IconButton(

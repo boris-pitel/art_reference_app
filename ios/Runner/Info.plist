@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Art Reference App</string>
+	<string>Painter Reference</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -67,9 +67,9 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>Art Reference uses the camera to add reference and associated images.</string>
+	<string>Painter Reference uses the camera to add reference and associated images.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Art Reference uses your photo library to select reference and associated images.</string>
+	<string>Painter Reference uses your photo library to select reference and associated images.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Art Reference saves selected reference and associated images to your photo library.</string></dict>
+	<string>Painter Reference saves selected reference and associated images to your photo library.</string></dict>
 </plist>
