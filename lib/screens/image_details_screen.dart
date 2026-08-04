@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -140,6 +141,13 @@ class _AiAnalysis {
   }
 }
 
+typedef _MetadataDraft = ({
+  String? title,
+  String? notes,
+  String? author,
+  bool isFavorite,
+});
+
 class ImageDetailsScreen extends StatefulWidget {
   const ImageDetailsScreen({
     super.key,
@@ -154,7 +162,8 @@ class ImageDetailsScreen extends StatefulWidget {
   State<ImageDetailsScreen> createState() => _ImageDetailsScreenState();
 }
 
-class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
+class _ImageDetailsScreenState extends State<ImageDetailsScreen>
+    with WidgetsBindingObserver {
   final TextEditingController _titleController = TextEditingController();
 
   final TextEditingController _notesController = TextEditingController();
@@ -172,6 +181,10 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
   final Set<String> _attachedKeywords = <String>{};
 
   bool _isLoadingMetadata = true;
+  Timer? _metadataSaveDebounce;
+  Future<bool>? _metadataSaveFuture;
+  _MetadataDraft? _lastSavedMetadata;
+  bool _hasSavedMetadataChanges = false;
   bool _isSavingMetadata = false;
   bool _isExiting = false;
   bool _allowPop = false;
@@ -224,9 +237,23 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
         defaultTargetPlatform == TargetPlatform.iOS;
   }
 
+  _MetadataDraft get _currentMetadata => (
+    title: _normalizedNullableText(_titleController.text),
+    notes: _normalizedNullableText(_notesController.text),
+    author: _normalizedNullableText(_authorController.text),
+    isFavorite: _isFavorite,
+  );
+
+  bool get _hasUnsavedMetadata =>
+      !_isLoadingMetadata && _lastSavedMetadata != _currentMetadata;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _titleController.addListener(_metadataChanged);
+    _notesController.addListener(_metadataChanged);
+    _authorController.addListener(_metadataChanged);
 
     _loadMetadata();
     _loadAssociatedImages();
@@ -234,11 +261,37 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _metadataSaveDebounce?.cancel();
     _titleController.dispose();
     _notesController.dispose();
     _authorController.dispose();
 
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _metadataSaveDebounce?.cancel();
+      if (_hasUnsavedMetadata) {
+        unawaited(_saveMetadata(showSuccessMessage: false));
+      }
+    }
+  }
+
+  void _metadataChanged() {
+    if (_isLoadingMetadata || _isExiting) {
+      return;
+    }
+    _metadataSaveDebounce?.cancel();
+    _metadataSaveDebounce = Timer(const Duration(milliseconds: 1200), () {
+      if (mounted && _hasUnsavedMetadata) {
+        unawaited(_saveMetadata(showSuccessMessage: false));
+      }
+    });
   }
 
   Future<void> _loadMetadata() async {
@@ -293,6 +346,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
 
       setState(() {
         _isFavorite = data['is_favorite'] == true;
+        _lastSavedMetadata = _currentMetadata;
 
         _aiAnalysis = loadedAnalysis;
         _aiAnalysisStatus = analysisStatus;
@@ -309,6 +363,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
       }
 
       setState(() {
+        _lastSavedMetadata ??= _currentMetadata;
         _isLoadingMetadata = false;
         _metadataError = 'Unable to load image details.\n$error';
       });
@@ -327,17 +382,35 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
     return aiDescription is String && aiDescription.trim().isNotEmpty;
   }
 
-  Future<bool> _saveMetadata({bool showSuccessMessage = true}) async {
-    if (_isSavingMetadata) {
-      return false;
+  Future<bool> _saveMetadata({bool showSuccessMessage = true}) {
+    final existingSave = _metadataSaveFuture;
+    if (existingSave != null) {
+      return existingSave;
+    }
+    if (!_hasUnsavedMetadata) {
+      return Future<bool>.value(true);
     }
 
+    final operation = _performMetadataSave(
+      _currentMetadata,
+      showSuccessMessage: showSuccessMessage,
+    );
+    _metadataSaveFuture = operation;
+    return operation;
+  }
+
+  Future<bool> _performMetadataSave(
+    _MetadataDraft draft, {
+    required bool showSuccessMessage,
+  }) async {
     FocusManager.instance.primaryFocus?.unfocus();
 
-    setState(() {
-      _isSavingMetadata = true;
-      _metadataError = null;
-    });
+    if (mounted) {
+      setState(() {
+        _isSavingMetadata = true;
+        _metadataError = null;
+      });
+    }
 
     try {
       final response = await _supabase.functions.invoke(
@@ -345,69 +418,78 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
         body: {
           'user_id': _userId,
           'image_id': widget.imageId,
-          'title': _normalizedNullableText(_titleController.text),
-          'notes': _normalizedNullableText(_notesController.text),
-          'source_url': _normalizedNullableText(_authorController.text),
-          'is_favorite': _isFavorite,
+          'title': draft.title,
+          'notes': draft.notes,
+          'source_url': draft.author,
+          'is_favorite': draft.isFavorite,
         },
       );
 
       final data = response.data;
-
       if (data is! Map) {
         throw StateError(
-          'save-image-metadata returned an unexpected '
-          'response: $data',
+          'save-image-metadata returned an unexpected response: $data',
         );
       }
-
       if (data['saved'] != true) {
         throw StateError(
           data['error']?.toString() ?? 'The metadata was not saved.',
         );
       }
 
-      if (mounted) {
-        setState(() {
-          _isSavingMetadata = false;
-        });
-
-        if (showSuccessMessage) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('Image details saved.')));
-        }
+      _lastSavedMetadata = draft;
+      _hasSavedMetadataChanges = true;
+      if (mounted && showSuccessMessage) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Image details saved.')));
       }
-
       return true;
     } catch (error) {
       if (mounted) {
         setState(() {
-          _isSavingMetadata = false;
           _metadataError = 'Unable to save image details.\n$error';
         });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Unable to save. Please try leaving again.'),
-          ),
-        );
+        if (_isExiting || showSuccessMessage) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Unable to save. Please try leaving again.'),
+            ),
+          );
+        }
       }
-
       return false;
+    } finally {
+      _metadataSaveFuture = null;
+      if (mounted) {
+        setState(() {
+          _isSavingMetadata = false;
+        });
+        if (_hasUnsavedMetadata && !_isExiting) {
+          _metadataChanged();
+        }
+      }
     }
   }
 
-  Future<void> _handlePop(bool didPop) async {
+  Future<bool> _saveAllMetadata() async {
+    while (_hasUnsavedMetadata || _metadataSaveFuture != null) {
+      final saved = await _saveMetadata(showSuccessMessage: false);
+      if (!saved) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  Future<void> _handlePop(bool didPop, Object? result) async {
     if (didPop || _isExiting) {
       return;
     }
 
+    _metadataSaveDebounce?.cancel();
     if (_isLoadingMetadata) {
-      setState(() {
-        _allowPop = true;
-      });
-      Navigator.of(context).pop();
+      _completePop(result);
       return;
     }
 
@@ -415,12 +497,10 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
       _isExiting = true;
     });
 
-    final saved = await _saveMetadata(showSuccessMessage: false);
-
+    final saved = await _saveAllMetadata();
     if (!mounted) {
       return;
     }
-
     if (!saved) {
       setState(() {
         _isExiting = false;
@@ -428,10 +508,21 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
       return;
     }
 
+    _completePop(result);
+  }
+
+  void _completePop(Object? result) {
     setState(() {
       _allowPop = true;
     });
-    Navigator.of(context).pop();
+    final popResult = result == true || _hasSavedMetadataChanges
+        ? true
+        : result;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        Navigator.of(context).pop(popResult);
+      }
+    });
   }
 
   Future<void> _analyzeImage() async {
@@ -1069,7 +1160,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
     return PopScope<Object?>(
       canPop: _allowPop,
       onPopInvokedWithResult: (didPop, result) {
-        _handlePop(didPop);
+        unawaited(_handlePop(didPop, result));
       },
       child: Scaffold(
         appBar: AppBar(
@@ -1082,6 +1173,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
                       setState(() {
                         _isFavorite = !_isFavorite;
                       });
+                      _metadataChanged();
                     },
               icon: Icon(_isFavorite ? Icons.favorite : Icons.favorite_border),
               tooltip: _isFavorite
@@ -1356,6 +1448,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen> {
                     setState(() {
                       _isFavorite = value;
                     });
+                    _metadataChanged();
                   },
           ),
         ],
