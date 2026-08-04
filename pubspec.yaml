@@ -26,6 +26,8 @@ dependencies:
   receive_sharing_intent: ^1.9.0
 
 dev_dependencies:
+  supabase: ^2.14.0
+
   flutter_test:
     sdk: flutter
 

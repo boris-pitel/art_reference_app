@@ -44,3 +44,9 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 .env
+
+# Local administration secrets and audit output
+.admin-audit/
+.env.admin
+admin.env
+painter-admin.exe

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'feedback_screen.dart';
 
 class HelpScreen extends StatelessWidget {
   const HelpScreen({super.key, this.initialTabIndex = 0});
@@ -283,6 +284,19 @@ class _AboutPage extends StatelessWidget {
         const SizedBox(height: 20),
         const Divider(),
         const SizedBox(height: 20),
+        Center(
+          child: OutlinedButton.icon(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const FeedbackScreen(currentScreen: 'about'),
+                ),
+              );
+            },
+            icon: const Icon(Icons.feedback_outlined),
+            label: const Text('Send Feedback'),
+          ),
+        ),
         Text(
           'Copyright 2026 Boris Pitel',
           textAlign: TextAlign.center,

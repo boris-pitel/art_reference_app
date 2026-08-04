@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'models/reference_category.dart';
 import 'screens/category_screen.dart';
+import 'screens/feedback_screen.dart';
 import 'screens/help_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/keyword_search_screen.dart';
@@ -264,7 +265,7 @@ class _AuthenticationLoadingScreen extends StatelessWidget {
   }
 }
 
-enum _AccountMenuAction { help, about, signOut }
+enum _AccountMenuAction { help, about, feedback, signOut }
 
 class CollectionsScreen extends StatefulWidget {
   const CollectionsScreen({super.key});
@@ -408,6 +409,11 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         return;
       case _AccountMenuAction.about:
         await _openHelp(initialTabIndex: 2);
+        return;
+      case _AccountMenuAction.feedback:
+        await Navigator.of(
+          context,
+        ).push(MaterialPageRoute<void>(builder: (_) => const FeedbackScreen()));
         return;
       case _AccountMenuAction.signOut:
         await _signOut();
@@ -648,6 +654,15 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
                     contentPadding: EdgeInsets.zero,
                     leading: Icon(Icons.info_outline),
                     title: Text('About'),
+                  ),
+                ),
+                const PopupMenuItem<_AccountMenuAction>(
+                  value: _AccountMenuAction.feedback,
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.feedback_outlined),
+                    title: Text('Send Feedback'),
+                    subtitle: Text('Report a problem or share an idea'),
                   ),
                 ),
                 const PopupMenuDivider(),
