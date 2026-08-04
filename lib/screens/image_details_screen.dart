@@ -403,8 +403,6 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     _MetadataDraft draft, {
     required bool showSuccessMessage,
   }) async {
-    FocusManager.instance.primaryFocus?.unfocus();
-
     if (mounted) {
       setState(() {
         _isSavingMetadata = true;
@@ -1795,7 +1793,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                       _pickAssociatedImage(ImageSource.gallery);
                     },
               icon: const Icon(Icons.photo_library_outlined),
-              label: const Text('Gallery'),
+              label: const Text('Attach Image'),
             ),
             if (_cameraIsAvailable)
               OutlinedButton.icon(
@@ -1866,7 +1864,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                 ),
                 SizedBox(height: 6),
                 Text(
-                  'Use Gallery or Camera to add '
+                  'Use Attach Image or Camera to add '
                   'the first one.',
                   textAlign: TextAlign.center,
                 ),

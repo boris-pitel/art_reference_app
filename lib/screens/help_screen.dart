@@ -174,7 +174,8 @@ class _HowToPage extends StatelessWidget {
         _NumberedInstruction(number: 1, text: 'Open the original reference.'),
         _NumberedInstruction(
           number: 2,
-          text: 'Scroll to Associated Images and choose Gallery or Camera.',
+          text:
+              'Scroll to Associated Images and choose Attach Image or Camera.',
         ),
         _NumberedInstruction(
           number: 3,
