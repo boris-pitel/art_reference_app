@@ -148,15 +148,37 @@ typedef _MetadataDraft = ({
   bool isFavorite,
 });
 
+class ImageDetailsNavigationItem {
+  const ImageDetailsNavigationItem({
+    required this.imageId,
+    required this.imageUrl,
+    this.dateAdded,
+  });
+
+  final String imageId;
+  final String imageUrl;
+  final DateTime? dateAdded;
+}
+
 class ImageDetailsScreen extends StatefulWidget {
   const ImageDetailsScreen({
     super.key,
     required this.imageId,
     required this.imageUrl,
+    this.isAssociatedImage = false,
+    this.dateAdded,
+    this.navigationItems = const <ImageDetailsNavigationItem>[],
+    this.navigationIndex = 0,
+    this.hasPriorChanges = false,
   });
 
   final String imageId;
   final String imageUrl;
+  final bool isAssociatedImage;
+  final DateTime? dateAdded;
+  final List<ImageDetailsNavigationItem> navigationItems;
+  final int navigationIndex;
+  final bool hasPriorChanges;
 
   @override
   State<ImageDetailsScreen> createState() => _ImageDetailsScreenState();
@@ -175,7 +197,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   final Set<String> _deletingAssociatedImageIds = <String>{};
   final Set<String> _sharingAssociatedImageIds = <String>{};
   final Set<String> _savingAssociatedImageIds = <String>{};
-  final GlobalKey<ImageKeywordsSectionState> _keywordsSectionKey =
+  GlobalKey<ImageKeywordsSectionState> _keywordsSectionKey =
       GlobalKey<ImageKeywordsSectionState>();
   final Set<String> _addingAiKeywords = <String>{};
   final Set<String> _attachedKeywords = <String>{};
@@ -191,6 +213,12 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   bool _isAiAnalysisExpanded = false;
   bool _isMovingImage = false;
   bool _isFavorite = false;
+  bool _isNavigatingHorizontally = false;
+
+  late String _currentImageId;
+  late String _currentImageUrl;
+  late DateTime? _currentDateAdded;
+  late int _currentNavigationIndex;
 
   bool _isAnalyzingImage = false;
 
@@ -250,13 +278,21 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   @override
   void initState() {
     super.initState();
+    _currentImageId = widget.imageId;
+    _currentImageUrl = widget.imageUrl;
+    _currentDateAdded = widget.dateAdded;
+    _currentNavigationIndex = widget.navigationIndex;
     WidgetsBinding.instance.addObserver(this);
     _titleController.addListener(_metadataChanged);
     _notesController.addListener(_metadataChanged);
     _authorController.addListener(_metadataChanged);
 
     _loadMetadata();
-    _loadAssociatedImages();
+    if (!widget.isAssociatedImage) {
+      _loadAssociatedImages();
+    } else {
+      _isLoadingAssociatedImages = false;
+    }
   }
 
   @override
@@ -309,7 +345,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       final response = await _supabase.functions.invoke(
         'get-image-metadata',
         method: HttpMethod.get,
-        headers: {'x-user-id': _userId, 'x-image-id': widget.imageId},
+        headers: {'x-user-id': _userId, 'x-image-id': _currentImageId},
       );
 
       final data = response.data;
@@ -415,7 +451,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         'save-image-metadata',
         body: {
           'user_id': _userId,
-          'image_id': widget.imageId,
+          'image_id': _currentImageId,
           'title': draft.title,
           'notes': draft.notes,
           'source_url': draft.author,
@@ -513,7 +549,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     setState(() {
       _allowPop = true;
     });
-    final popResult = result == true || _hasSavedMetadataChanges
+    final popResult =
+        result == true || _hasSavedMetadataChanges || widget.hasPriorChanges
         ? true
         : result;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -537,7 +574,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     try {
       final response = await _supabase.functions.invoke(
         'analyze-image',
-        body: {'imageId': widget.imageId},
+        body: {'imageId': _currentImageId},
       );
 
       final data = response.data;
@@ -607,7 +644,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
 
     try {
       final images = await _imageAssetService.listAssociatedImages(
-        widget.imageId,
+        _currentImageId,
       );
 
       if (!mounted) {
@@ -676,7 +713,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     try {
       await _imageAssetService.uploadAssociatedImage(
         imageBytes,
-        widget.imageId,
+        _currentImageId,
       );
 
       await _loadAssociatedImages();
@@ -821,7 +858,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
 
     try {
       await _imageAssetService.removeAssociatedImage(
-        parentImageId: widget.imageId,
+        parentImageId: _currentImageId,
         childImageId: image.id,
       );
 
@@ -860,17 +897,94 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   }
 
   void _openAssociatedImage(ImageAssetInfo image) {
-    _openZoomableImage(
-      imageUrl: image.imageUrl,
-      heroTag: 'associated-image-${image.id}',
-      exportImageId: image.id,
+    final navigationItems = _associatedImages
+        .map(
+          (item) => ImageDetailsNavigationItem(
+            imageId: item.id,
+            imageUrl: item.imageUrl,
+            dateAdded: item.dateAdded,
+          ),
+        )
+        .toList(growable: false);
+    final navigationIndex = _associatedImages.indexWhere(
+      (item) => item.id == image.id,
     );
+
+    Navigator.of(context).push(
+      MaterialPageRoute<bool>(
+        builder: (context) => ImageDetailsScreen(
+          imageId: image.id,
+          imageUrl: image.imageUrl,
+          isAssociatedImage: true,
+          dateAdded: image.dateAdded,
+          navigationItems: navigationItems,
+          navigationIndex: navigationIndex,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _navigateHorizontally(int delta) async {
+    if (_isNavigatingHorizontally || widget.navigationItems.length < 2) {
+      return;
+    }
+
+    final targetIndex = _currentNavigationIndex + delta;
+    if (targetIndex < 0 || targetIndex >= widget.navigationItems.length) {
+      return;
+    }
+
+    setState(() => _isNavigatingHorizontally = true);
+    _metadataSaveDebounce?.cancel();
+    final saved = await _saveAllMetadata();
+    if (!mounted) return;
+    if (!saved) {
+      setState(() => _isNavigatingHorizontally = false);
+      return;
+    }
+
+    final target = widget.navigationItems[targetIndex];
+    setState(() {
+      _currentImageId = target.imageId;
+      _currentImageUrl = target.imageUrl;
+      _currentDateAdded = target.dateAdded;
+      _currentNavigationIndex = targetIndex;
+      _isLoadingMetadata = true;
+      _lastSavedMetadata = null;
+      _metadataError = null;
+      _aiAnalysisError = null;
+      _aiAnalysis = null;
+      _aiAnalysisStatus = 'not_analyzed';
+      _isAiAnalysisExpanded = false;
+      _associatedImages = [];
+      _associatedImagesError = null;
+      _isLoadingAssociatedImages = !widget.isAssociatedImage;
+      _attachedKeywords.clear();
+      _addingAiKeywords.clear();
+      _keywordsSectionKey = GlobalKey<ImageKeywordsSectionState>();
+      _titleController.clear();
+      _notesController.clear();
+      _authorController.clear();
+      _isFavorite = false;
+      _isNavigatingHorizontally = false;
+    });
+    await _loadMetadata();
+    if (!widget.isAssociatedImage) {
+      await _loadAssociatedImages();
+    }
+  }
+
+  void _handleHorizontalDragEnd(DragEndDetails details) {
+    final velocity = details.primaryVelocity ?? 0;
+    if (velocity.abs() < 300) return;
+    // A leftward swipe advances; a rightward swipe goes back.
+    unawaited(_navigateHorizontally(velocity < 0 ? 1 : -1));
   }
 
   void _openMainImage() {
     _openZoomableImage(
-      imageUrl: widget.imageUrl,
-      heroTag: 'main-image-${widget.imageId}',
+      imageUrl: _currentImageUrl,
+      heroTag: 'main-image-$_currentImageId',
     );
   }
 
@@ -905,7 +1019,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       final categoryService = CategoryService(_supabase);
       final results = await Future.wait<dynamic>([
         categoryService.listCategories(),
-        _imageAssetService.listImageCategoryCodes(widget.imageId),
+        _imageAssetService.listImageCategoryCodes(_currentImageId),
       ]);
 
       final allCategories = results[0] as List<ReferenceCategory>;
@@ -1038,7 +1152,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       }
 
       await _imageAssetService.moveImageToCategory(
-        imageId: widget.imageId,
+        imageId: _currentImageId,
         fromCategory: moveSelection.from,
         toCategory: moveSelection.to,
       );
@@ -1099,7 +1213,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
 
     try {
       await _keywordService.addKeyword(
-        imageId: widget.imageId,
+        imageId: _currentImageId,
         keyword: normalizedKeyword,
       );
 
@@ -1162,86 +1276,101 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       },
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Image Details'),
+          title: Text(
+            widget.isAssociatedImage
+                ? 'Associated Image Details'
+                : 'Image Details',
+          ),
           actions: [
-            IconButton(
-              onPressed: _isLoadingMetadata || _isSavingMetadata
-                  ? null
-                  : () {
-                      setState(() {
-                        _isFavorite = !_isFavorite;
-                      });
-                      _metadataChanged();
-                    },
-              icon: Icon(_isFavorite ? Icons.favorite : Icons.favorite_border),
-              tooltip: _isFavorite
-                  ? 'Remove from favorites'
-                  : 'Add to favorites',
-            ),
-            PopupMenuButton<_ImageAction>(
-              enabled: !_isMovingImage,
-              tooltip: 'Image actions',
-              onSelected: (action) async {
-                switch (action) {
-                  case _ImageAction.move:
-                    await _moveImage();
-                }
-              },
-              itemBuilder: (context) {
-                return const [
-                  PopupMenuItem<_ImageAction>(
-                    value: _ImageAction.move,
-                    child: ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: Icon(Icons.drive_file_move_outline),
-                      title: Text('Move...'),
+            if (!widget.isAssociatedImage)
+              IconButton(
+                onPressed: _isLoadingMetadata || _isSavingMetadata
+                    ? null
+                    : () {
+                        setState(() {
+                          _isFavorite = !_isFavorite;
+                        });
+                        _metadataChanged();
+                      },
+                icon: Icon(
+                  _isFavorite ? Icons.favorite : Icons.favorite_border,
+                ),
+                tooltip: _isFavorite
+                    ? 'Remove from favorites'
+                    : 'Add to favorites',
+              ),
+            if (!widget.isAssociatedImage)
+              PopupMenuButton<_ImageAction>(
+                enabled: !_isMovingImage,
+                tooltip: 'Image actions',
+                onSelected: (action) async {
+                  switch (action) {
+                    case _ImageAction.move:
+                      await _moveImage();
+                  }
+                },
+                itemBuilder: (context) {
+                  return const [
+                    PopupMenuItem<_ImageAction>(
+                      value: _ImageAction.move,
+                      child: ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(Icons.drive_file_move_outline),
+                        title: Text('Move...'),
+                      ),
                     ),
-                  ),
-                ];
-              },
-            ),
+                  ];
+                },
+              ),
           ],
         ),
-        body: LayoutBuilder(
-          builder: (context, constraints) {
-            final availableHeight = constraints.maxHeight;
+        body: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onHorizontalDragEnd: _handleHorizontalDragEnd,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final availableHeight = constraints.maxHeight;
 
-            final calculatedImageHeight = availableHeight * 0.55;
+              final calculatedImageHeight = availableHeight * 0.55;
 
-            final imageHeight = math.min(
-              700.0,
-              math.max(320.0, calculatedImageHeight),
-            );
+              final imageHeight = math.min(
+                700.0,
+                math.max(320.0, calculatedImageHeight),
+              );
 
-            return ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                _buildImageViewer(context, imageHeight),
-                const SizedBox(height: 24),
-                _buildMetadataSection(context),
-                const SizedBox(height: 24),
+              return ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  _buildImageViewer(context, imageHeight),
+                  const SizedBox(height: 24),
+                  _buildMetadataSection(context),
+                  const SizedBox(height: 24),
 
-                ImageKeywordsSection(
-                  key: _keywordsSectionKey,
-                  imageId: widget.imageId,
-                  onKeywordsChanged: _handleKeywordsChanged,
-                ),
-
-                const SizedBox(height: 24),
-                _buildAiAnalysisSection(context),
-                const SizedBox(height: 24),
-                _buildAssociatedImagesSection(context),
-                const SizedBox(height: 24),
-              ],
-            );
-          },
+                  if (!widget.isAssociatedImage) ...[
+                    ImageKeywordsSection(
+                      key: _keywordsSectionKey,
+                      imageId: _currentImageId,
+                      onKeywordsChanged: _handleKeywordsChanged,
+                    ),
+                    const SizedBox(height: 24),
+                  ],
+                  _buildAiAnalysisSection(context),
+                  if (!widget.isAssociatedImage) ...[
+                    const SizedBox(height: 24),
+                    _buildAssociatedImagesSection(context),
+                  ],
+                  const SizedBox(height: 24),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );
   }
 
   Widget _buildImageViewer(BuildContext context, double imageHeight) {
-    final heroTag = 'main-image-${widget.imageId}';
+    final heroTag = 'main-image-$_currentImageId';
 
     return Material(
       color: Colors.transparent,
@@ -1266,7 +1395,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
               Hero(
                 tag: heroTag,
                 child: Image.network(
-                  widget.imageUrl,
+                  _currentImageUrl,
                   width: double.infinity,
                   height: imageHeight,
                   fit: BoxFit.contain,
@@ -1349,18 +1478,25 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   }
 
   Widget _buildMetadataSection(BuildContext context) {
+    final dateAdded = _currentDateAdded;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            const Expanded(
+            Expanded(
               child: Text(
-                'Reference Information',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+                widget.isAssociatedImage
+                    ? 'Associated Image Information'
+                    : 'Reference Information',
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
-            if (_isFavorite)
+            if (!widget.isAssociatedImage && _isFavorite)
               Icon(
                 Icons.favorite,
                 color: Theme.of(context).colorScheme.primary,
@@ -1368,6 +1504,19 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
           ],
         ),
         const SizedBox(height: 12),
+        if (widget.isAssociatedImage && dateAdded != null) ...[
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.calendar_today_outlined),
+            title: const Text('Date added'),
+            subtitle: Text(
+              MaterialLocalizations.of(
+                context,
+              ).formatFullDate(dateAdded.toLocal()),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
         if (_isLoadingMetadata)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 32),
@@ -1391,64 +1540,64 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
             ),
             const SizedBox(height: 16),
           ],
-          TextField(
-            controller: _titleController,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(
-              labelText: 'Title',
-              hintText: 'Enter a title for this reference',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.title),
+          if (!widget.isAssociatedImage) ...[
+            TextField(
+              controller: _titleController,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: const InputDecoration(
+                labelText: 'Title',
+                hintText: 'Enter a title for this reference',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.title),
+              ),
             ),
-          ),
-          const SizedBox(height: 16),
+            const SizedBox(height: 16),
+          ],
           TextField(
             controller: _notesController,
             minLines: 4,
             maxLines: 8,
             textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Notes',
-              hintText:
-                  'Add composition ideas, color '
-                  'notes, or painting plans',
-              border: OutlineInputBorder(),
+              hintText: widget.isAssociatedImage
+                  ? 'Add progress notes, changes, materials, or painting plans'
+                  : 'Add composition ideas, color notes, or painting plans',
+              border: const OutlineInputBorder(),
               alignLabelWithHint: true,
-              prefixIcon: Padding(
+              prefixIcon: const Padding(
                 padding: EdgeInsets.only(bottom: 72),
                 child: Icon(Icons.notes_outlined),
               ),
             ),
           ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _authorController,
-
-            decoration: const InputDecoration(
-              labelText: 'Author',
-              hintText: 'Artist, photographer, or creator',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.person_outline),
+          if (!widget.isAssociatedImage) ...[
+            const SizedBox(height: 16),
+            TextField(
+              controller: _authorController,
+              decoration: const InputDecoration(
+                labelText: 'Author',
+                hintText: 'Artist, photographer, or creator',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.person_outline),
+              ),
             ),
-          ),
-          const SizedBox(height: 16),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Favorite'),
-            subtitle: const Text(
-              'Mark this image as an important '
-              'reference',
+            const SizedBox(height: 16),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Favorite'),
+              subtitle: const Text('Mark this image as an important reference'),
+              value: _isFavorite,
+              onChanged: _isSavingMetadata
+                  ? null
+                  : (value) {
+                      setState(() {
+                        _isFavorite = value;
+                      });
+                      _metadataChanged();
+                    },
             ),
-            value: _isFavorite,
-            onChanged: _isSavingMetadata
-                ? null
-                : (value) {
-                    setState(() {
-                      _isFavorite = value;
-                    });
-                    _metadataChanged();
-                  },
-          ),
+          ],
         ],
       ],
     );
@@ -1461,6 +1610,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         : analysis == null
         ? _aiAnalysisStatus == 'failed'
               ? 'Retry AI Analysis'
+              : widget.isAssociatedImage
+              ? 'Do AI Analysis'
               : 'Analyze with AI'
         : _isAiAnalysisExpanded
         ? 'Hide AI Analysis'

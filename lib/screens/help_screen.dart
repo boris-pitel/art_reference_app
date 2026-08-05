@@ -157,6 +157,11 @@ class _HowToPage extends StatelessWidget {
           'Save to Photos, and Print actions. On a desktop or web browser, '
           'available actions may depend on the operating system and browser.',
         ),
+        _HelpParagraph(
+          'While viewing image details, swipe left for the next reference or '
+          'right for the previous reference in the current category. Vertical '
+          'swipes continue to scroll through the details.',
+        ),
         _HelpSectionTitle('Add details and keywords'),
         _HelpParagraph(
           'Open a reference to add its title, notes, author, favorite '
@@ -183,10 +188,11 @@ class _HowToPage extends StatelessWidget {
               'Select a sketch, study, work in progress, crop, or finished artwork.',
         ),
         _HelpParagraph(
-          'Tap an associated image to view it full-screen. Its three-dot menu '
-          'and full-screen toolbar provide Share and Save actions. Delete '
-          'removes the association and may remove the file when it has no '
-          'other connections.',
+          'Tap an associated image to open its details. Swipe left or right to '
+          'move through the other images associated with the same reference. '
+          'Its three-dot menu and full-screen toolbar provide Share and Save '
+          'actions. Delete removes the association and may remove the file '
+          'when it has no other connections.',
         ),
         _HelpSectionTitle('Use AI analysis'),
         _NumberedInstruction(number: 1, text: 'Open a reference image.'),

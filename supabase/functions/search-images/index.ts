@@ -42,6 +42,7 @@ const corsHeaders = {
 type SearchRequest = {
   user_id?: unknown;
   query?: unknown;
+  favorites_only?: unknown;
 };
 
 type SearchRow = {
@@ -150,6 +151,7 @@ Deno.serve(async (request) => {
 
   let userId: string;
   let query: string;
+  let favoritesOnly: boolean;
 
   try {
     userId = requiredString(
@@ -157,10 +159,22 @@ Deno.serve(async (request) => {
       'user_id',
     );
 
-    query = requiredString(
-      body.query,
-      'query',
-    );
+    if (typeof body.query !== 'string') {
+      throw new Error('query must be a string');
+    }
+    query = body.query.trim();
+
+    if (
+      body.favorites_only !== undefined &&
+      typeof body.favorites_only !== 'boolean'
+    ) {
+      throw new Error('favorites_only must be a boolean');
+    }
+    favoritesOnly = body.favorites_only === true;
+
+    if (query.length === 0 && !favoritesOnly) {
+      throw new Error('query is required unless favorites_only is true');
+    }
   } catch (error) {
     return jsonResponse(
       {
@@ -234,7 +248,14 @@ Deno.serve(async (request) => {
           )
 
           and (
-            position(
+            ${favoritesOnly} = false
+            or image.is_favorite = true
+          )
+
+          and (
+            ${normalizedQuery} = ''
+
+            or position(
               ${normalizedQuery}
               in lower(coalesce(image.title, ''))
             ) > 0
@@ -297,6 +318,10 @@ Deno.serve(async (request) => {
 
         if ((row.matching_keywords ?? []).length > 0) {
           matchedIn.push('Keyword');
+        }
+
+        if (favoritesOnly) {
+          matchedIn.push('Favorite');
         }
 
         return {

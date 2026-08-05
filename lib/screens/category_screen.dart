@@ -290,8 +290,19 @@ class _CategoryScreenState extends State<CategoryScreen> {
     try {
       final changed = await Navigator.of(context).push<bool>(
         MaterialPageRoute<bool>(
-          builder: (context) =>
-              ImageDetailsScreen(imageId: image.id, imageUrl: image.imageUrl),
+          builder: (context) => ImageDetailsScreen(
+            imageId: image.id,
+            imageUrl: image.imageUrl,
+            navigationItems: _images
+                .map(
+                  (item) => ImageDetailsNavigationItem(
+                    imageId: item.id,
+                    imageUrl: item.imageUrl,
+                  ),
+                )
+                .toList(growable: false),
+            navigationIndex: _images.indexWhere((item) => item.id == image.id),
+          ),
         ),
       );
 

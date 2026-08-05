@@ -21,6 +21,7 @@ class _KeywordSearchScreenState extends State<KeywordSearchScreen> {
 
   bool _isSearching = false;
   bool _hasSearched = false;
+  bool _favoritesOnly = false;
   String? _errorMessage;
   String _lastQuery = '';
   List<ImageSearchResult> _results = const <ImageSearchResult>[];
@@ -45,7 +46,7 @@ class _KeywordSearchScreenState extends State<KeywordSearchScreen> {
     if (_isSearching) return;
 
     final query = _searchController.text.trim();
-    if (query.isEmpty) {
+    if (query.isEmpty && !_favoritesOnly) {
       setState(() {
         _hasSearched = false;
         _lastQuery = '';
@@ -66,7 +67,10 @@ class _KeywordSearchScreenState extends State<KeywordSearchScreen> {
     });
 
     try {
-      final results = await _searchService.searchImages(query);
+      final results = await _searchService.searchImages(
+        query,
+        favoritesOnly: _favoritesOnly,
+      );
       if (!mounted) return;
       setState(() {
         _results = results;
@@ -84,6 +88,7 @@ class _KeywordSearchScreenState extends State<KeywordSearchScreen> {
   void _clearSearch() {
     _searchController.clear();
     setState(() {
+      _favoritesOnly = false;
       _hasSearched = false;
       _lastQuery = '';
       _results = const <ImageSearchResult>[];
@@ -100,7 +105,7 @@ class _KeywordSearchScreenState extends State<KeywordSearchScreen> {
       ),
     );
 
-    if (mounted && _lastQuery.isNotEmpty) await _search();
+    if (mounted && (_lastQuery.isNotEmpty || _favoritesOnly)) await _search();
   }
 
   @override
@@ -150,6 +155,26 @@ class _KeywordSearchScreenState extends State<KeywordSearchScreen> {
                   label: Text(_isSearching ? 'Searching...' : 'Search'),
                 ),
               ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: FilterChip(
+                selected: _favoritesOnly,
+                avatar: Icon(
+                  _favoritesOnly ? Icons.favorite : Icons.favorite_border,
+                  size: 19,
+                ),
+                label: const Text('Favorites only'),
+                onSelected: _isSearching
+                    ? null
+                    : (selected) {
+                        setState(() => _favoritesOnly = selected);
+                        if (selected || _hasSearched) _search();
+                      },
+              ),
             ),
           ),
           if (_isSearching) const LinearProgressIndicator(),
@@ -335,6 +360,8 @@ class _KeywordSearchScreenState extends State<KeywordSearchScreen> {
         return Icons.notes_outlined;
       case 'Keyword':
         return Icons.sell_outlined;
+      case 'Favorite':
+        return Icons.favorite;
       default:
         return Icons.search;
     }

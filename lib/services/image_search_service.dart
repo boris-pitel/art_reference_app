@@ -40,7 +40,9 @@ class ImageSearchResult {
       throw StateError('Invalid image URL returned by search-images: $json');
     }
     if (thumbnailUrl != null && thumbnailUrl is! String) {
-      throw StateError('Invalid thumbnail URL returned by search-images: $json');
+      throw StateError(
+        'Invalid thumbnail URL returned by search-images: $json',
+      );
     }
     if (title != null && title is! String) {
       throw StateError('Invalid title returned by search-images: $json');
@@ -98,10 +100,13 @@ class ImageSearchService {
     );
   }
 
-  Future<List<ImageSearchResult>> searchImages(String query) async {
+  Future<List<ImageSearchResult>> searchImages(
+    String query, {
+    bool favoritesOnly = false,
+  }) async {
     final normalizedQuery = query.trim();
 
-    if (normalizedQuery.isEmpty) {
+    if (normalizedQuery.isEmpty && !favoritesOnly) {
       return const <ImageSearchResult>[];
     }
 
@@ -110,6 +115,7 @@ class ImageSearchService {
       body: {
         'user_id': _userId,
         'query': normalizedQuery,
+        'favorites_only': favoritesOnly,
       },
     );
 
@@ -123,12 +129,14 @@ class ImageSearchService {
       throw StateError('search-images returned an unexpected response: $data');
     }
 
-    return data.map((item) {
-      if (item is! Map) {
-        throw StateError('search-images returned an invalid result: $item');
-      }
+    return data
+        .map((item) {
+          if (item is! Map) {
+            throw StateError('search-images returned an invalid result: $item');
+          }
 
-      return ImageSearchResult.fromJson(Map<String, dynamic>.from(item));
-    }).toList(growable: false);
+          return ImageSearchResult.fromJson(Map<String, dynamic>.from(item));
+        })
+        .toList(growable: false);
   }
 }
