@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'feedback_screen.dart';
+import '../widgets/home_button.dart';
 
 class HelpScreen extends StatelessWidget {
   const HelpScreen({super.key, this.initialTabIndex = 0});
@@ -14,6 +15,7 @@ class HelpScreen extends StatelessWidget {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Painter Reference'),
+          actions: const [HomeButton()],
           bottom: const TabBar(
             tabs: [
               Tab(
@@ -187,10 +189,17 @@ class _HowToPage extends StatelessWidget {
           text:
               'Select a sketch, study, work in progress, crop, or finished artwork.',
         ),
+        _NumberedInstruction(
+          number: 4,
+          text: 'Crop, rotate, or straighten the sketch, then tap Done.',
+        ),
         _HelpParagraph(
           'Tap an associated image to open its details. Swipe left or right to '
           'move through the other images associated with the same reference. '
-          'Its three-dot menu and full-screen toolbar provide Share and Save '
+          'Open an associated sketch, then tap the image to enter the full-screen '
+          'Image window. Use Edit sketch there to crop, rotate, straighten, or '
+          'change its proportions. Reference photos do not show editing controls. '
+          'The sketch menu also provides Share and Save '
           'actions. Delete removes the association and may remove the file '
           'when it has no other connections.',
         ),
@@ -257,7 +266,7 @@ class _AboutPage extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text(
-          'Version 1.0',
+          'Version 1.2.0',
           textAlign: TextAlign.center,
           style: theme.textTheme.titleMedium,
         ),
@@ -287,6 +296,14 @@ class _AboutPage extends StatelessWidget {
           'AI analysis is optional. A reference image is sent to the analysis '
           'service only after you tap Analyze with AI; the app does not start '
           'AI analysis automatically.',
+        ),
+        const _HelpSectionTitle('Artificial Intelligence'),
+        const _HelpParagraph(
+          'Optional image analysis is currently provided by OpenAI using the '
+          'GPT-5 mini vision-capable model. The active provider or model may '
+          'change as the service evolves; Painter Reference will disclose the '
+          'provider used for an analysis and will not analyze an image without '
+          'your request.',
         ),
         const SizedBox(height: 20),
         const Divider(),

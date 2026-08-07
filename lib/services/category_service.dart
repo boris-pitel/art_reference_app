@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/reference_category.dart';
+import 'user_activity_logger.dart';
 
 class CategoryService {
   CategoryService(this._supabase);
@@ -97,8 +98,17 @@ class CategoryService {
         })
         .select()
         .single();
-
-    return ReferenceCategory.fromJson(Map<String, dynamic>.from(response));
+    final created = ReferenceCategory.fromJson(
+      Map<String, dynamic>.from(response),
+    );
+    UserActivityLogger.instance.record(
+      operation: 'category_create',
+      status: 'succeeded',
+      targetType: 'category',
+      targetId: created.id.toString(),
+      details: {'category_code': created.databaseCode},
+    );
+    return created;
   }
 
   Future<ReferenceCategory> renameCategory(
@@ -123,6 +133,12 @@ class CategoryService {
         .eq('is_builtin', false)
         .select()
         .single();
+    UserActivityLogger.instance.record(
+      operation: 'category_rename',
+      status: 'succeeded',
+      targetType: 'category',
+      targetId: category.id.toString(),
+    );
     return _withResolvedCover(
       ReferenceCategory.fromJson(Map<String, dynamic>.from(row)),
     );
@@ -156,6 +172,13 @@ class CategoryService {
         .eq('is_builtin', false)
         .select()
         .single();
+    UserActivityLogger.instance.record(
+      operation: 'category_cover_update',
+      status: 'succeeded',
+      targetType: 'category',
+      targetId: category.id.toString(),
+      details: {'bytes': bytes.lengthInBytes},
+    );
     return _withResolvedCover(
       ReferenceCategory.fromJson(Map<String, dynamic>.from(row)),
     );
@@ -189,6 +212,13 @@ class CategoryService {
         ]);
       } catch (_) {}
     }
+    UserActivityLogger.instance.record(
+      operation: 'category_delete',
+      status: 'succeeded',
+      targetType: 'category',
+      targetId: category.id.toString(),
+      details: {'category_code': category.databaseCode},
+    );
   }
 
   String _validateName(String name) {

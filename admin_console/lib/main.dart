@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import 'screens/audit_page.dart';
+import 'screens/activity_page.dart';
 import 'screens/feedback_page.dart';
 import 'screens/users_page.dart';
 import 'services/admin_audit_log.dart';
@@ -104,9 +105,10 @@ class _AdminShellState extends State<AdminShell> {
         passwordRedirectUrl: widget.passwordRedirectUrl,
       ),
       FeedbackPage(service: widget.service, auditLog: widget.auditLog),
+      ActivityPage(service: widget.service),
       AuditPage(auditLog: widget.auditLog),
     ];
-    const titles = ['Users', 'Feedback', 'Audit Log'];
+    const titles = ['Users', 'Feedback', 'User Activity', 'Admin Audit Log'];
 
     return Scaffold(
       body: Row(
@@ -141,9 +143,14 @@ class _AdminShellState extends State<AdminShell> {
                 label: Text('Feedback'),
               ),
               NavigationRailDestination(
+                icon: Icon(Icons.monitor_heart_outlined),
+                selectedIcon: Icon(Icons.monitor_heart),
+                label: Text('User Activity'),
+              ),
+              NavigationRailDestination(
                 icon: Icon(Icons.receipt_long_outlined),
                 selectedIcon: Icon(Icons.receipt_long),
-                label: Text('Audit Log'),
+                label: Text('Admin Audit Log'),
               ),
             ],
           ),

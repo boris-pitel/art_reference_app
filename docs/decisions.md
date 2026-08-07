@@ -1,5 +1,16 @@
 # Design Decisions
 
+## Sketch editing scope
+
+Reference photos are immutable after selection and upload. Crop, rotate,
+automatic straighten, manual straighten angle, and proportion controls are
+available only for associated sketches.
+
+The editor is contained within the sketch's full-screen **Image** window. It
+must not interrupt reference import or sketch attachment. Applying an edit
+uploads the adjusted sketch before replacing its association, so a failed edit
+cannot damage the reference photo.
+
 ## Fixed categories
 
 The application uses six fixed categories:

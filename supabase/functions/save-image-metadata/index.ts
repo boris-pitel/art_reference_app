@@ -104,23 +104,52 @@ Deno.serve(async (request) => {
   const notes = nullableText(body.notes);
   const sourceUrl = nullableText(body.source_url);
   const isFavorite = body.is_favorite === true;
+  const isFinishedArtwork = body.is_finished_artwork === true;
 
   const connection = await pool.connect();
 
   try {
+    if (isFinishedArtwork) {
+      const relationships = await connection.queryObject<{ count: number }>`
+        select count(*)::int as count
+        from public.image_relationships relationship
+        join public.image_assets child
+          on child.id = relationship.child_image_id
+        where relationship.child_image_id = ${imageId}::uuid
+          and child.user_id = ${userId}::uuid
+      `;
+      const parentCount = relationships.rows[0]?.count ?? 0;
+      if (parentCount > 1) {
+        return jsonResponse(
+          {
+            error: 'A finished painting can belong to only one photo reference.',
+          },
+          409,
+        );
+      }
+      if (parentCount === 0) {
+        return jsonResponse(
+          { error: 'Only an attached sketch can be marked as finished.' },
+          409,
+        );
+      }
+    }
+
     const result = await connection.queryObject<{
       id: string;
       title: string | null;
       notes: string | null;
       source_url: string | null;
       is_favorite: boolean;
+      is_finished_artwork: boolean;
     }>`
       update image_assets
       set
         title = ${title},
         notes = ${notes},
         source_url = ${sourceUrl},
-        is_favorite = ${isFavorite}
+        is_favorite = ${isFavorite},
+        is_finished_artwork = ${isFinishedArtwork}
       where id = ${imageId}::uuid
         and user_id = ${userId}::uuid
       returning
@@ -128,7 +157,8 @@ Deno.serve(async (request) => {
         title,
         notes,
         source_url,
-        is_favorite
+        is_favorite,
+        is_finished_artwork
     `;
 
     if (result.rows.length == 0) {
@@ -149,6 +179,7 @@ Deno.serve(async (request) => {
       notes: row.notes,
       source_url: row.source_url,
       is_favorite: row.is_favorite,
+      is_finished_artwork: row.is_finished_artwork,
     });
   } catch (error) {
     console.error('save-image-metadata failed:', error);

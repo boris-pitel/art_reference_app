@@ -3,6 +3,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/feedback_service.dart';
+import '../widgets/home_button.dart';
 
 class FeedbackScreen extends StatefulWidget {
   const FeedbackScreen({super.key, this.currentScreen = 'collections'});
@@ -65,7 +66,10 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Send Feedback')),
+      appBar: AppBar(
+        title: const Text('Send Feedback'),
+        actions: const [HomeButton()],
+      ),
       body: SafeArea(
         child: Form(
           key: _formKey,

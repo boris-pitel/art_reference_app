@@ -24,7 +24,10 @@ SUPABASE_PASSWORD_REDIRECT_URL=https://painterreference.com
 
 The redirect setting is optional. The URL must also be allowed in Supabase Authentication redirect settings.
 
-The application searches for `.env.admin` beside the working directory and executable, then walks up parent folders. Process environment variables override file values.
+The application searches for `.env.admin` beside the working directory and
+executable, then walks up enough parent folders to find the repository root
+from a packaged Windows Release directory. Process environment variables
+override file values.
 
 ## Run for development
 

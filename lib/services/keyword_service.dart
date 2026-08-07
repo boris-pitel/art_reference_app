@@ -1,6 +1,8 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
+import 'user_activity_logger.dart';
+
 class ImageKeyword {
   const ImageKeyword({
     required this.id,
@@ -99,11 +101,7 @@ class KeywordService {
         .order('keyword', ascending: true);
 
     return response
-        .map(
-          (row) => ImageKeyword.fromJson(
-            Map<String, dynamic>.from(row),
-          ),
-        )
+        .map((row) => ImageKeyword.fromJson(Map<String, dynamic>.from(row)))
         .toList(growable: false);
   }
 
@@ -122,11 +120,7 @@ class KeywordService {
         .order('keyword', ascending: true);
 
     return response
-        .map(
-          (row) => ImageKeyword.fromJson(
-            Map<String, dynamic>.from(row),
-          ),
-        )
+        .map((row) => ImageKeyword.fromJson(Map<String, dynamic>.from(row)))
         .toList(growable: false);
   }
 
@@ -156,9 +150,17 @@ class KeywordService {
           .select('id, image_id, keyword, date_added')
           .single();
 
-      return ImageKeyword.fromJson(
+      final created = ImageKeyword.fromJson(
         Map<String, dynamic>.from(response),
       );
+      UserActivityLogger.instance.record(
+        operation: 'keyword_add',
+        status: 'succeeded',
+        targetType: 'image',
+        targetId: normalizedImageId,
+        details: {'keyword_id': created.id},
+      );
+      return created;
     } on PostgrestException catch (error) {
       if (error.code == '23505') {
         throw DuplicateKeywordException(normalizedKeyword);
@@ -175,22 +177,24 @@ class KeywordService {
         .eq('id', keyword.id)
         .eq('user_id', _userId)
         .eq('image_id', keyword.imageId);
+    UserActivityLogger.instance.record(
+      operation: 'keyword_delete',
+      status: 'succeeded',
+      targetType: 'image',
+      targetId: keyword.imageId,
+      details: {'keyword_id': keyword.id},
+    );
   }
 
   String _normalizeKeyword(String keyword) {
-    final normalizedKeyword = keyword.trim().replaceAll(
-      RegExp(r'\s+'),
-      ' ',
-    );
+    final normalizedKeyword = keyword.trim().replaceAll(RegExp(r'\s+'), ' ');
 
     if (normalizedKeyword.isEmpty) {
       throw ArgumentError('The keyword cannot be empty.');
     }
 
     if (normalizedKeyword.length > 100) {
-      throw ArgumentError(
-        'The keyword must be 100 characters or fewer.',
-      );
+      throw ArgumentError('The keyword must be 100 characters or fewer.');
     }
 
     return normalizedKeyword;

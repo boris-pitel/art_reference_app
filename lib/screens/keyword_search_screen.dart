@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/reference_category.dart';
 import '../services/image_search_service.dart';
+import '../widgets/home_button.dart';
 import 'image_details_screen.dart';
 
 class KeywordSearchScreen extends StatefulWidget {
@@ -111,7 +112,10 @@ class _KeywordSearchScreenState extends State<KeywordSearchScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Search References')),
+      appBar: AppBar(
+        title: const Text('Search References'),
+        actions: const [HomeButton()],
+      ),
       body: Column(
         children: [
           Padding(

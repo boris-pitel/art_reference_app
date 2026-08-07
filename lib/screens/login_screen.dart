@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../services/user_activity_logger.dart';
+
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -77,6 +79,12 @@ class _LoginScreenState extends State<LoginScreen> {
           password: password,
         );
       }
+      UserActivityLogger.instance.record(
+        operation: _isCreatingAccount ? 'account_create' : 'login',
+        status: 'succeeded',
+        targetType: 'account',
+        targetId: _supabase.auth.currentUser?.id,
+      );
 
       // main.dart listens to onAuthStateChange.
       // It will automatically replace this screen after authentication.

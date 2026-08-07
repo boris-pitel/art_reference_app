@@ -22,6 +22,8 @@ verify_jwt = false
 verify_jwt = false
 [functions.list-associated-images]
 verify_jwt = false
+[functions.list-finished-artworks]
+verify_jwt = false
 [functions.remove-associated-image]
 verify_jwt = false
 [functions.analyze-image]

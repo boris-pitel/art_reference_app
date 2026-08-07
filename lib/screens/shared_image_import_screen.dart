@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/reference_category.dart';
 import '../services/category_service.dart';
 import '../services/image_asset_service.dart';
+import '../widgets/home_button.dart';
 import 'category_screen.dart';
 
 class SharedImageImportScreen extends StatefulWidget {
@@ -226,6 +227,7 @@ class _SharedImageImportScreenState extends State<SharedImageImportScreen> {
         appBar: AppBar(
           title: const Text('Import Reference'),
           automaticallyImplyLeading: !_isUploading,
+          actions: [HomeButton(enabled: !_isUploading)],
         ),
         body: Stack(
           children: [

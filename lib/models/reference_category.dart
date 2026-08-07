@@ -1,4 +1,11 @@
 class ReferenceCategory {
+  static const ReferenceCategory myArt = ReferenceCategory(
+    id: -1,
+    databaseCode: 'my_art',
+    displayName: 'My Art',
+    isBuiltIn: true,
+  );
+
   const ReferenceCategory({
     required this.id,
     required this.databaseCode,
@@ -18,6 +25,8 @@ class ReferenceCategory {
   bool get canDelete => !isBuiltIn;
 
   bool get canRename => !isBuiltIn;
+
+  bool get isMyArt => databaseCode == myArt.databaseCode;
 
   factory ReferenceCategory.fromJson(Map<String, dynamic> json) {
     final Object? rawId = json['id'];

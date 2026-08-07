@@ -1,4 +1,9 @@
-# art_reference_app
+# Painter Reference
+
+Painter Reference organizes immutable reference photos and their associated
+sketches. Associated sketches can be cropped, rotated, automatically or
+manually straightened, and resized to preset or custom proportions from the
+full-screen Image window.
 
 A new Flutter project.
 

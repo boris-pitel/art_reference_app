@@ -1,6 +1,5 @@
 import 'dart:typed_data';
 
-import 'package:storage_client/storage_client.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
@@ -8,6 +7,7 @@ import '../models/reference_category.dart';
 import '../utils/performance_profiler.dart';
 import 'image_hash_service.dart';
 import 'thumbnail_service.dart';
+import 'user_activity_logger.dart';
 
 class ImageAssetInfo {
   const ImageAssetInfo({
@@ -15,12 +15,14 @@ class ImageAssetInfo {
     required this.dateAdded,
     required this.imageUrl,
     required this.thumbnailUrl,
+    this.parentImageId,
   });
 
   final String id;
   final DateTime dateAdded;
   final String imageUrl;
   final String? thumbnailUrl;
+  final String? parentImageId;
 }
 
 class UnsupportedImageFormatException implements Exception {
@@ -59,14 +61,45 @@ class ImageAssetService {
     );
   }
 
-  Future<String> uploadImage(Uint8List imageBytes, ReferenceCategory category) {
-    return _uploadImage(imageBytes: imageBytes, category: category);
+  Future<String> uploadImage(
+    Uint8List imageBytes,
+    ReferenceCategory category,
+  ) async {
+    final stopwatch = Stopwatch()..start();
+    try {
+      final id = await _uploadImage(imageBytes: imageBytes, category: category);
+      UserActivityLogger.instance.record(
+        operation: 'image_upload',
+        status: 'succeeded',
+        targetType: 'image',
+        targetId: id,
+        durationMs: stopwatch.elapsedMilliseconds,
+        details: {
+          'category': category.databaseCode,
+          'bytes': imageBytes.lengthInBytes,
+        },
+      );
+      return id;
+    } catch (error) {
+      UserActivityLogger.instance.record(
+        operation: 'image_upload',
+        status: 'failed',
+        targetType: 'image',
+        durationMs: stopwatch.elapsedMilliseconds,
+        details: {
+          'category': category.databaseCode,
+          'bytes': imageBytes.lengthInBytes,
+        },
+        error: error,
+      );
+      rethrow;
+    }
   }
 
   Future<String> uploadAssociatedImage(
     Uint8List imageBytes,
     String parentImageId,
-  ) {
+  ) async {
     final normalizedParentImageId = parentImageId.trim();
 
     if (normalizedParentImageId.isEmpty) {
@@ -77,10 +110,34 @@ class ImageAssetService {
       );
     }
 
-    return _uploadImage(
-      imageBytes: imageBytes,
-      parentImageId: normalizedParentImageId,
-    );
+    final stopwatch = Stopwatch()..start();
+    try {
+      final id = await _uploadImage(
+        imageBytes: imageBytes,
+        parentImageId: normalizedParentImageId,
+      );
+      UserActivityLogger.instance.record(
+        operation: 'associated_image_upload',
+        status: 'succeeded',
+        targetType: 'sketch',
+        targetId: id,
+        parentImageId: normalizedParentImageId,
+        durationMs: stopwatch.elapsedMilliseconds,
+        details: {'bytes': imageBytes.lengthInBytes},
+      );
+      return id;
+    } catch (error) {
+      UserActivityLogger.instance.record(
+        operation: 'associated_image_upload',
+        status: 'failed',
+        targetType: 'sketch',
+        parentImageId: normalizedParentImageId,
+        durationMs: stopwatch.elapsedMilliseconds,
+        details: {'bytes': imageBytes.lengthInBytes},
+        error: error,
+      );
+      rethrow;
+    }
   }
 
   Future<String> _uploadImage({
@@ -489,9 +546,19 @@ class ImageAssetService {
         data['error']?.toString() ?? 'The associated image was not removed.',
       );
     }
+    UserActivityLogger.instance.record(
+      operation: 'sketch_remove',
+      status: 'succeeded',
+      targetType: 'sketch',
+      targetId: normalizedChildImageId,
+      parentImageId: normalizedParentImageId,
+    );
   }
 
   Future<List<ImageAssetInfo>> listImages(ReferenceCategory category) async {
+    if (category.isMyArt) {
+      return listFinishedArtworks();
+    }
     final cacheBuster = DateTime.now().millisecondsSinceEpoch;
 
     final response = await _supabase.functions.invoke(
@@ -510,6 +577,22 @@ class ImageAssetService {
     }
 
     return _parseImageAssetList(data, responseName: 'list-images');
+  }
+
+  Future<List<ImageAssetInfo>> listFinishedArtworks() async {
+    final cacheBuster = DateTime.now().millisecondsSinceEpoch;
+    final response = await _supabase.functions.invoke(
+      'list-finished-artworks?refresh=$cacheBuster',
+      method: HttpMethod.get,
+      headers: {'x-user-id': _userId},
+    );
+    final data = response.data;
+    if (data is! List) {
+      throw StateError(
+        'list-finished-artworks returned an unexpected response: $data',
+      );
+    }
+    return _parseImageAssetList(data, responseName: 'list-finished-artworks');
   }
 
   Future<List<ImageAssetInfo>> listAssociatedImages(
@@ -613,6 +696,7 @@ class ImageAssetService {
         dateAdded: parsedDateAdded,
         imageUrl: imageUrl,
         thumbnailUrl: thumbnailUrl as String?,
+        parentImageId: row['parent_image_id'] as String?,
       );
     }).toList();
   }

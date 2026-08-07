@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,6 +10,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/reference_category.dart';
 import '../services/image_asset_service.dart';
 import '../services/image_print_service.dart';
+import '../widgets/home_button.dart';
 import 'help_screen.dart';
 import 'image_details_screen.dart';
 
@@ -20,11 +19,13 @@ class _LoadedImage {
     required this.id,
     required this.imageUrl,
     required this.thumbnailUrl,
+    this.parentImageId,
   });
 
   final String id;
   final String imageUrl;
   final String? thumbnailUrl;
+  final String? parentImageId;
 }
 
 class _DownloadedImage {
@@ -64,6 +65,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
   bool _isUploading = false;
 
   String _uploadStatus = '';
+  double? _uploadProgress;
 
   String? _openingImageId;
   String? _removingImageId;
@@ -108,6 +110,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
             id: imageInfo.id,
             imageUrl: imageInfo.imageUrl,
             thumbnailUrl: imageInfo.thumbnailUrl,
+            parentImageId: imageInfo.parentImageId,
           ),
         )
         .toList();
@@ -145,48 +148,6 @@ class _CategoryScreenState extends State<CategoryScreen> {
     }
   }
 
-  Future<void> _refreshUntilImageAppears(String expectedImageId) async {
-    const maximumAttempts = 8;
-    const delayBetweenAttempts = Duration(milliseconds: 500);
-
-    for (var attempt = 1; attempt <= maximumAttempts; attempt++) {
-      final loadedImages = await _fetchImages();
-
-      final imageIsVisible = loadedImages.any(
-        (image) => image.id == expectedImageId,
-      );
-
-      if (imageIsVisible || attempt == maximumAttempts) {
-        if (!mounted) {
-          return;
-        }
-
-        setState(() {
-          _images
-            ..clear()
-            ..addAll(loadedImages);
-
-          _isLoading = false;
-          _errorMessage = null;
-        });
-
-        return;
-      }
-
-      await Future<void>.delayed(delayBetweenAttempts);
-    }
-  }
-
-  void _setUploadStatus(String status) {
-    if (!mounted) {
-      return;
-    }
-
-    setState(() {
-      _uploadStatus = status;
-    });
-  }
-
   Future<void> _openHelp() async {
     await Navigator.of(
       context,
@@ -208,46 +169,30 @@ class _CategoryScreenState extends State<CategoryScreen> {
     });
 
     try {
-      final selectedImage = await _imagePicker.pickImage(source: source);
+      late final List<XFile> selectedImages;
+      if (source == ImageSource.gallery) {
+        selectedImages = await _imagePicker.pickMultiImage();
+      } else {
+        final selectedImage = await _imagePicker.pickImage(source: source);
+        selectedImages = selectedImage == null ? <XFile>[] : [selectedImage];
+      }
 
-      if (selectedImage == null) {
+      if (selectedImages.isEmpty) {
         return;
       }
 
-      _setUploadStatus(
-        source == ImageSource.camera
-            ? 'Reading captured photo...'
-            : 'Reading selected photo...',
-      );
+      if (selectedImages.length > 1 &&
+          !await _confirmMultipleSelection(selectedImages.length)) {
+        return;
+      }
 
-      final bytes = await selectedImage.readAsBytes();
+      await _uploadSelectedImages(selectedImages);
 
       if (!mounted) {
         return;
       }
 
-      _setUploadStatus('Preparing thumbnail and uploading photo...');
-
-      final imageId = await _imageAssetService.uploadImage(
-        bytes,
-        widget.category,
-      );
-
-      if (!mounted) {
-        return;
-      }
-
-      _setUploadStatus('Updating ${widget.category.displayName}...');
-
-      await _refreshUntilImageAppears(imageId);
-
-      if (!mounted) {
-        return;
-      }
-
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Photo reference saved.')));
+      return;
     } on FunctionException catch (error) {
       if (!mounted) {
         return;
@@ -273,6 +218,89 @@ class _CategoryScreenState extends State<CategoryScreen> {
         setState(() {
           _isUploading = false;
           _uploadStatus = '';
+          _uploadProgress = null;
+        });
+      }
+    }
+  }
+
+  Future<bool> _confirmMultipleSelection(int count) async {
+    if (!mounted) return false;
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: Text('Add $count photos?'),
+            content: Text(
+              'The photos will be added to ${widget.category.displayName}. '
+              'You will see progress for each upload.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                child: const Text('Add photos'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  Future<void> _uploadSelectedImages(List<XFile> files) async {
+    final failures = <XFile>[];
+    var saved = 0;
+    for (var index = 0; index < files.length; index++) {
+      if (!mounted) return;
+      setState(() {
+        _uploadProgress = index / files.length;
+        _uploadStatus = 'Uploading ${index + 1} of ${files.length}…';
+      });
+      try {
+        final bytes = await files[index].readAsBytes();
+        await _imageAssetService.uploadImage(bytes, widget.category);
+        saved++;
+      } catch (_) {
+        failures.add(files[index]);
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _uploadProgress = 1;
+      _uploadStatus = 'Refreshing ${widget.category.displayName}…';
+    });
+    await _loadImages();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          failures.isEmpty
+              ? '$saved ${saved == 1 ? 'photo' : 'photos'} saved.'
+              : '$saved saved; ${failures.length} failed.',
+        ),
+        action: failures.isEmpty
+            ? null
+            : SnackBarAction(
+                label: 'Retry',
+                onPressed: () => _retryFailedUploads(failures),
+              ),
+      ),
+    );
+  }
+
+  Future<void> _retryFailedUploads(List<XFile> files) async {
+    if (_isBusy) return;
+    setState(() => _isUploading = true);
+    try {
+      await _uploadSelectedImages(files);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUploading = false;
+          _uploadStatus = '';
+          _uploadProgress = null;
         });
       }
     }
@@ -293,11 +321,14 @@ class _CategoryScreenState extends State<CategoryScreen> {
           builder: (context) => ImageDetailsScreen(
             imageId: image.id,
             imageUrl: image.imageUrl,
+            isAssociatedImage: widget.category.isMyArt,
+            parentImageId: image.parentImageId,
             navigationItems: _images
                 .map(
                   (item) => ImageDetailsNavigationItem(
                     imageId: item.id,
                     imageUrl: item.imageUrl,
+                    parentImageId: item.parentImageId,
                   ),
                 )
                 .toList(growable: false),
@@ -350,6 +381,10 @@ class _CategoryScreenState extends State<CategoryScreen> {
 
     try {
       final downloadedImage = await _downloadImage(image);
+
+      if (!mounted) {
+        return;
+      }
 
       Rect? sharePositionOrigin;
 
@@ -727,6 +762,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
       appBar: AppBar(
         title: Text(widget.category.displayName),
         actions: [
+          const HomeButton(),
           IconButton(
             onPressed: _openHelp,
             icon: const Icon(Icons.help_outline),
@@ -745,7 +781,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
           if (_isUploading) Positioned.fill(child: _buildUploadOverlay()),
         ],
       ),
-      floatingActionButton: _buildAddButtons(),
+      floatingActionButton: widget.category.isMyArt ? null : _buildAddButtons(),
     );
   }
 
@@ -804,7 +840,9 @@ class _CategoryScreenState extends State<CategoryScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const CircularProgressIndicator(),
+                  _uploadProgress == null
+                      ? const CircularProgressIndicator()
+                      : LinearProgressIndicator(value: _uploadProgress),
                   const SizedBox(height: 20),
                   Text(
                     _uploadStatus.isEmpty ? 'Working...' : _uploadStatus,
@@ -816,7 +854,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
                   ),
                   const SizedBox(height: 10),
                   const Text(
-                    'Large photographs may take a little while.',
+                    'You can leave successful items in place and retry only failures.',
                     textAlign: TextAlign.center,
                   ),
                 ],

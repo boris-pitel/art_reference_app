@@ -16,8 +16,8 @@ class PerformanceProfiler {
 
     debugPrint(
       '[$operationName] $description: '
-      '${checkpointMilliseconds} ms '
-      '(total: ${totalMilliseconds} ms)',
+      '$checkpointMilliseconds ms '
+      '(total: $totalMilliseconds ms)',
     );
 
     _checkpointStopwatch

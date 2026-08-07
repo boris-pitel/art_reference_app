@@ -15,6 +15,8 @@
 - PostgreSQL `image_assets` table created
 - Raw binary image upload implemented
 - Raw binary image retrieval implemented
+- Associated-sketch editor contained in the full-screen Image window
+- Crop, rotate, automatic straighten, manual angle, and custom proportions
 - Git repository initialized
 
 ## Next

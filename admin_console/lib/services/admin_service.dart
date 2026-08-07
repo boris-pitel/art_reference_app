@@ -195,6 +195,43 @@ class AdminService {
     return response.map((row) => Map<String, dynamic>.from(row)).toList();
   }
 
+  Future<List<Map<String, dynamic>>> listUserActivity({
+    String? email,
+    String? operation,
+    String? status,
+    String? search,
+    int days = 30,
+    int limit = 500,
+  }) async {
+    var query = client.from('user_activity_logs').select();
+    final normalizedEmail = email?.trim().toLowerCase();
+    if (normalizedEmail != null && normalizedEmail.isNotEmpty) {
+      query = query.ilike('user_email', '%$normalizedEmail%');
+    }
+    final normalizedOperation = operation?.trim();
+    if (normalizedOperation != null && normalizedOperation.isNotEmpty) {
+      query = query.ilike('operation', '%$normalizedOperation%');
+    }
+    if (status != null && status.isNotEmpty && status != 'all') {
+      query = query.eq('status', status);
+    }
+    final normalizedSearch = search?.trim();
+    if (normalizedSearch != null && normalizedSearch.isNotEmpty) {
+      query = query.or(
+        'target_id.ilike.%$normalizedSearch%,session_id.eq.$normalizedSearch',
+      );
+    }
+    final since = DateTime.now()
+        .toUtc()
+        .subtract(Duration(days: days))
+        .toIso8601String();
+    final response = await query
+        .gte('created_at', since)
+        .order('created_at', ascending: false)
+        .limit(limit);
+    return response.map((row) => Map<String, dynamic>.from(row)).toList();
+  }
+
   Future<Map<String, dynamic>> getFeedback(String id) async {
     final response = await client
         .from('user_feedback')

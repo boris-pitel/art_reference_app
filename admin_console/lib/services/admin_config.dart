@@ -73,7 +73,10 @@ class AdminConfig {
     final paths = <String>{};
     void addParents(Directory start) {
       var current = start.absolute;
-      for (var depth = 0; depth < 6; depth += 1) {
+      // A Windows release lives under
+      // admin_console/build/windows/x64/runner/Release, which is more than
+      // six levels below the repository-level configuration file.
+      for (var depth = 0; depth < 10; depth += 1) {
         paths.add('${current.path}${Platform.pathSeparator}.env.admin');
         final parent = current.parent;
         if (parent.path == current.path) break;

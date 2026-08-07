@@ -10,8 +10,9 @@ class ImageSaveService {
     if (!hasAccess) {
       hasAccess = await Gal.requestAccess();
     }
-    if (!hasAccess)
+    if (!hasAccess) {
       throw StateError('Permission to save images was not granted.');
+    }
     await Gal.putImageBytes(bytes);
   }
 }

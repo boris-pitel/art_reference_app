@@ -12,10 +12,13 @@ import 'screens/category_screen.dart';
 import 'screens/feedback_screen.dart';
 import 'screens/help_screen.dart';
 import 'screens/login_screen.dart';
+import 'services/user_activity_logger.dart';
 import 'screens/keyword_search_screen.dart';
 import 'screens/shared_image_import_screen.dart';
 import 'services/category_service.dart';
+import 'services/library_home_cache.dart';
 import 'services/image_asset_service.dart';
+import 'widgets/home_button.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -252,6 +255,7 @@ class _ArtReferenceAppState extends State<ArtReferenceApp> {
           : _isSignedIn
           ? const CollectionsScreen()
           : LoginScreen(key: ValueKey<String?>(_pendingSharedImagePath)),
+      routes: {categoriesHomeRoute: (_) => const CollectionsScreen()},
     );
   }
 }
@@ -293,17 +297,39 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     _categoryService = CategoryService(supabase);
     _imageAssetService = ImageAssetService(supabase);
 
-    _loadCategories();
+    _restoreThenRefreshCategories();
   }
 
-  Future<void> _loadCategories() async {
+  Future<void> _restoreThenRefreshCategories() async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId != null) {
+      final cached = await LibraryHomeCache.read(userId);
+      if (cached != null && mounted) {
+        setState(() {
+          _categories
+            ..clear()
+            ..addAll(cached.categories);
+          _imageCountsByCategoryCode
+            ..clear()
+            ..addAll(cached.counts);
+          _isLoading = false;
+        });
+      }
+    }
+    await _loadCategories(showLoading: _categories.isEmpty);
+  }
+
+  Future<void> _loadCategories({bool showLoading = true}) async {
     setState(() {
-      _isLoading = true;
+      if (showLoading) _isLoading = true;
       _errorMessage = null;
     });
 
     try {
       final categories = await _categoryService.listCategories();
+      if (!categories.any((category) => category.isMyArt)) {
+        categories.add(ReferenceCategory.myArt);
+      }
 
       final countEntries = await Future.wait(
         categories.map((category) async {
@@ -328,6 +354,14 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
 
         _isLoading = false;
       });
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      if (userId != null) {
+        await LibraryHomeCache.write(
+          userId,
+          categories,
+          Map<String, int>.fromEntries(countEntries),
+        );
+      }
     } catch (error) {
       if (!mounted) {
         return;
@@ -382,6 +416,12 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     }
 
     try {
+      await UserActivityLogger.instance.log(
+        operation: 'logout',
+        status: 'succeeded',
+        targetType: 'account',
+        targetId: Supabase.instance.client.auth.currentUser?.id,
+      );
       await Supabase.instance.client.auth.signOut();
     } on AuthException catch (error) {
       if (!mounted) {

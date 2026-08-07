@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -15,7 +14,10 @@ import '../services/category_service.dart';
 import '../services/image_asset_service.dart';
 import '../services/image_save_service.dart';
 import '../services/keyword_service.dart';
+import '../services/user_activity_logger.dart';
 import '../widgets/image_keywords_section.dart';
+import '../widgets/home_button.dart';
+import 'image_adjustment_screen.dart';
 
 class _ExportImageData {
   const _ExportImageData(this.bytes, this.mimeType);
@@ -146,6 +148,7 @@ typedef _MetadataDraft = ({
   String? notes,
   String? author,
   bool isFavorite,
+  bool isFinishedArtwork,
 });
 
 class ImageDetailsNavigationItem {
@@ -153,11 +156,13 @@ class ImageDetailsNavigationItem {
     required this.imageId,
     required this.imageUrl,
     this.dateAdded,
+    this.parentImageId,
   });
 
   final String imageId;
   final String imageUrl;
   final DateTime? dateAdded;
+  final String? parentImageId;
 }
 
 class ImageDetailsScreen extends StatefulWidget {
@@ -166,6 +171,7 @@ class ImageDetailsScreen extends StatefulWidget {
     required this.imageId,
     required this.imageUrl,
     this.isAssociatedImage = false,
+    this.parentImageId,
     this.dateAdded,
     this.navigationItems = const <ImageDetailsNavigationItem>[],
     this.navigationIndex = 0,
@@ -175,6 +181,7 @@ class ImageDetailsScreen extends StatefulWidget {
   final String imageId;
   final String imageUrl;
   final bool isAssociatedImage;
+  final String? parentImageId;
   final DateTime? dateAdded;
   final List<ImageDetailsNavigationItem> navigationItems;
   final int navigationIndex;
@@ -213,12 +220,15 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   bool _isAiAnalysisExpanded = false;
   bool _isMovingImage = false;
   bool _isFavorite = false;
+  bool _isFinishedArtwork = false;
   bool _isNavigatingHorizontally = false;
 
   late String _currentImageId;
   late String _currentImageUrl;
   late DateTime? _currentDateAdded;
+  late String? _currentParentImageId;
   late int _currentNavigationIndex;
+  late List<ImageDetailsNavigationItem> _navigationItems;
 
   bool _isAnalyzingImage = false;
 
@@ -270,6 +280,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     notes: _normalizedNullableText(_notesController.text),
     author: _normalizedNullableText(_authorController.text),
     isFavorite: _isFavorite,
+    isFinishedArtwork: _isFinishedArtwork,
   );
 
   bool get _hasUnsavedMetadata =>
@@ -281,7 +292,11 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     _currentImageId = widget.imageId;
     _currentImageUrl = widget.imageUrl;
     _currentDateAdded = widget.dateAdded;
+    _currentParentImageId = widget.parentImageId;
     _currentNavigationIndex = widget.navigationIndex;
+    _navigationItems = List<ImageDetailsNavigationItem>.of(
+      widget.navigationItems,
+    );
     WidgetsBinding.instance.addObserver(this);
     _titleController.addListener(_metadataChanged);
     _notesController.addListener(_metadataChanged);
@@ -382,6 +397,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
 
       setState(() {
         _isFavorite = data['is_favorite'] == true;
+        _isFinishedArtwork = data['is_finished_artwork'] == true;
         _lastSavedMetadata = _currentMetadata;
 
         _aiAnalysis = loadedAnalysis;
@@ -439,6 +455,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     _MetadataDraft draft, {
     required bool showSuccessMessage,
   }) async {
+    final stopwatch = Stopwatch()..start();
     if (mounted) {
       setState(() {
         _isSavingMetadata = true;
@@ -456,6 +473,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
           'notes': draft.notes,
           'source_url': draft.author,
           'is_favorite': draft.isFavorite,
+          'is_finished_artwork': draft.isFinishedArtwork,
         },
       );
 
@@ -473,6 +491,23 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
 
       _lastSavedMetadata = draft;
       _hasSavedMetadataChanges = true;
+      UserActivityLogger.instance.record(
+        operation: 'metadata_save',
+        status: 'succeeded',
+        targetType: widget.isAssociatedImage ? 'sketch' : 'image',
+        targetId: _currentImageId,
+        parentImageId: _currentParentImageId,
+        durationMs: stopwatch.elapsedMilliseconds,
+        details: const {
+          'changed_fields': [
+            'title',
+            'notes',
+            'author',
+            'favorite',
+            'finished_artwork',
+          ],
+        },
+      );
       if (mounted && showSuccessMessage) {
         ScaffoldMessenger.of(
           context,
@@ -480,16 +515,33 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       }
       return true;
     } catch (error) {
+      final errorMessage = error is FunctionException
+          ? switch (error.details) {
+              final Map details =>
+                details['error']?.toString() ??
+                    error.reasonPhrase ??
+                    'Unable to save image details.',
+              final Object details => details.toString(),
+              null => error.reasonPhrase ?? 'Unable to save image details.',
+            }
+          : error.toString();
+      UserActivityLogger.instance.record(
+        operation: 'metadata_save',
+        status: 'failed',
+        targetType: widget.isAssociatedImage ? 'sketch' : 'image',
+        targetId: _currentImageId,
+        parentImageId: _currentParentImageId,
+        durationMs: stopwatch.elapsedMilliseconds,
+        error: error,
+      );
       if (mounted) {
         setState(() {
-          _metadataError = 'Unable to save image details.\n$error';
+          _metadataError = 'Unable to save image details.\n$errorMessage';
         });
         if (_isExiting || showSuccessMessage) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Unable to save. Please try leaving again.'),
-            ),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(errorMessage)));
         }
       }
       return false;
@@ -514,6 +566,12 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       }
     }
     return true;
+  }
+
+  Future<void> _goHome() async {
+    _metadataSaveDebounce?.cancel();
+    if (!await _saveAllMetadata() || !mounted) return;
+    goToCategoriesHome(context);
   }
 
   Future<void> _handlePop(bool didPop, Object? result) async {
@@ -751,7 +809,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   ) async {
     switch (action) {
       case _AssociatedImageAction.open:
-        _openAssociatedImage(image);
+        await _openAssociatedImage(image);
         break;
 
       case _AssociatedImageAction.share:
@@ -896,7 +954,15 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     }
   }
 
-  void _openAssociatedImage(ImageAssetInfo image) {
+  Future<void> _openAssociatedImage(ImageAssetInfo image) async {
+    final stopwatch = Stopwatch()..start();
+    UserActivityLogger.instance.record(
+      operation: 'sketch_open',
+      status: 'started',
+      targetType: 'sketch',
+      targetId: image.id,
+      parentImageId: _currentImageId,
+    );
     final navigationItems = _associatedImages
         .map(
           (item) => ImageDetailsNavigationItem(
@@ -910,27 +976,39 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       (item) => item.id == image.id,
     );
 
-    Navigator.of(context).push(
+    await Navigator.of(context).push(
       MaterialPageRoute<bool>(
         builder: (context) => ImageDetailsScreen(
           imageId: image.id,
           imageUrl: image.imageUrl,
           isAssociatedImage: true,
+          parentImageId: _currentImageId,
           dateAdded: image.dateAdded,
           navigationItems: navigationItems,
           navigationIndex: navigationIndex,
         ),
       ),
     );
+    if (mounted) {
+      await _loadAssociatedImages();
+      UserActivityLogger.instance.record(
+        operation: 'attached_images_refresh',
+        status: 'succeeded',
+        targetType: 'image',
+        targetId: _currentImageId,
+        durationMs: stopwatch.elapsedMilliseconds,
+        details: const {'reason': 'returned_from_sketch'},
+      );
+    }
   }
 
   Future<void> _navigateHorizontally(int delta) async {
-    if (_isNavigatingHorizontally || widget.navigationItems.length < 2) {
+    if (_isNavigatingHorizontally || _navigationItems.length < 2) {
       return;
     }
 
     final targetIndex = _currentNavigationIndex + delta;
-    if (targetIndex < 0 || targetIndex >= widget.navigationItems.length) {
+    if (targetIndex < 0 || targetIndex >= _navigationItems.length) {
       return;
     }
 
@@ -943,11 +1021,12 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       return;
     }
 
-    final target = widget.navigationItems[targetIndex];
+    final target = _navigationItems[targetIndex];
     setState(() {
       _currentImageId = target.imageId;
       _currentImageUrl = target.imageUrl;
       _currentDateAdded = target.dateAdded;
+      _currentParentImageId = target.parentImageId ?? widget.parentImageId;
       _currentNavigationIndex = targetIndex;
       _isLoadingMetadata = true;
       _lastSavedMetadata = null;
@@ -966,6 +1045,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       _notesController.clear();
       _authorController.clear();
       _isFavorite = false;
+      _isFinishedArtwork = false;
       _isNavigatingHorizontally = false;
     });
     await _loadMetadata();
@@ -981,25 +1061,75 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     unawaited(_navigateHorizontally(velocity < 0 ? 1 : -1));
   }
 
-  void _openMainImage() {
-    _openZoomableImage(
+  Future<void> _openMainImage({bool startEditing = false}) async {
+    _metadataSaveDebounce?.cancel();
+    if (!await _saveAllMetadata() || !mounted) return;
+    final metadataBeforeEdit = _currentMetadata;
+    final result = await _openZoomableImage(
       imageUrl: _currentImageUrl,
       heroTag: 'main-image-$_currentImageId',
+      exportImageId: widget.isAssociatedImage ? _currentImageId : null,
+      editableParentImageId: widget.isAssociatedImage
+          ? _currentParentImageId
+          : null,
+      createSketchParentImageId: widget.isAssociatedImage
+          ? null
+          : _currentImageId,
+      startEditing: startEditing,
     );
+    if (result != null && mounted) {
+      if (!result.replacesCurrentImage) {
+        await _loadAssociatedImages();
+        return;
+      }
+      final replacementIndex = _currentNavigationIndex;
+      setState(() {
+        _currentImageId = result.imageId;
+        _currentImageUrl = result.imageUrl;
+        _metadataError = null;
+        _lastSavedMetadata = null;
+        _isLoadingMetadata = true;
+        if (replacementIndex >= 0 &&
+            replacementIndex < _navigationItems.length) {
+          _navigationItems[replacementIndex] = ImageDetailsNavigationItem(
+            imageId: result.imageId,
+            imageUrl: result.imageUrl,
+            dateAdded: _currentDateAdded,
+            parentImageId: _currentParentImageId,
+          );
+        }
+      });
+      await _loadMetadata();
+      if (!mounted) return;
+      _titleController.text = metadataBeforeEdit.title ?? '';
+      _notesController.text = metadataBeforeEdit.notes ?? '';
+      _authorController.text = metadataBeforeEdit.author ?? '';
+      setState(() {
+        _isFavorite = metadataBeforeEdit.isFavorite;
+        _isFinishedArtwork = metadataBeforeEdit.isFinishedArtwork;
+      });
+      await _saveMetadata(showSuccessMessage: false);
+    }
   }
 
-  void _openZoomableImage({
+  Future<_EditedSketch?> _openZoomableImage({
     required String imageUrl,
     required String heroTag,
     String? exportImageId,
+    String? editableParentImageId,
+    String? createSketchParentImageId,
+    bool startEditing = false,
   }) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
+    return Navigator.of(context).push<_EditedSketch>(
+      MaterialPageRoute<_EditedSketch>(
         builder: (context) {
           return _ZoomableImageScreen(
             imageUrl: imageUrl,
             heroTag: heroTag,
             exportImageId: exportImageId,
+            editableParentImageId: editableParentImageId,
+            createSketchParentImageId: createSketchParentImageId,
+            startEditing: startEditing,
           );
         },
       ),
@@ -1282,6 +1412,18 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                 : 'Image Details',
           ),
           actions: [
+            HomeButton(
+              enabled: !_isLoadingMetadata && !_isSavingMetadata,
+              onPressed: _goHome,
+            ),
+            if (widget.isAssociatedImage)
+              TextButton.icon(
+                onPressed: _isLoadingMetadata || _isSavingMetadata
+                    ? null
+                    : () => _openMainImage(startEditing: true),
+                icon: const Icon(Icons.crop_rotate),
+                label: const Text('Edit'),
+              ),
             if (!widget.isAssociatedImage)
               IconButton(
                 onPressed: _isLoadingMetadata || _isSavingMetadata
@@ -1571,6 +1713,25 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
               ),
             ),
           ),
+          if (widget.isAssociatedImage) ...[
+            const SizedBox(height: 16),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Finished painting'),
+              subtitle: const Text('Show this artwork in My Art'),
+              value: _isFinishedArtwork,
+              onChanged: _isSavingMetadata
+                  ? null
+                  : (value) async {
+                      final previous = _isFinishedArtwork;
+                      setState(() => _isFinishedArtwork = value);
+                      final saved = await _saveMetadata();
+                      if (!saved && mounted) {
+                        setState(() => _isFinishedArtwork = previous);
+                      }
+                    },
+            ),
+          ],
           if (!widget.isAssociatedImage) ...[
             const SizedBox(height: 16),
             TextField(
@@ -2065,6 +2226,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     final isBusy = isDeleting || isExporting;
 
     return Material(
+      key: ValueKey('associated-image-${image.id}'),
       color: Theme.of(context).colorScheme.surfaceContainerLow,
       borderRadius: BorderRadius.circular(12),
       clipBehavior: Clip.antiAlias,
@@ -2072,7 +2234,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         onTap: isBusy
             ? null
             : () {
-                _openAssociatedImage(image);
+                unawaited(_openAssociatedImage(image));
               },
         child: Stack(
           fit: StackFit.expand,
@@ -2180,16 +2342,33 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   }
 }
 
+class _EditedSketch {
+  const _EditedSketch({
+    required this.imageId,
+    required this.imageUrl,
+    required this.replacesCurrentImage,
+  });
+  final String imageId;
+  final String imageUrl;
+  final bool replacesCurrentImage;
+}
+
 class _ZoomableImageScreen extends StatefulWidget {
   const _ZoomableImageScreen({
     required this.imageUrl,
     required this.heroTag,
     this.exportImageId,
+    this.editableParentImageId,
+    this.createSketchParentImageId,
+    this.startEditing = false,
   });
 
   final String imageUrl;
   final String heroTag;
   final String? exportImageId;
+  final String? editableParentImageId;
+  final String? createSketchParentImageId;
+  final bool startEditing;
 
   @override
   State<_ZoomableImageScreen> createState() => _ZoomableImageScreenState();
@@ -2202,10 +2381,33 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
 
   final TransformationController _transformationController =
       TransformationController();
+  final ImageAdjustmentController _imageAdjustmentController =
+      ImageAdjustmentController();
 
   TapDownDetails? _doubleTapDetails;
   bool _isSharing = false;
   bool _isSaving = false;
+  bool _isLoadingEditor = false;
+  bool _isApplyingEdit = false;
+  bool _isEditorProcessing = false;
+  String _saveProgressLabel = 'Processing image…';
+  bool _hasEdited = false;
+  bool _allowPop = false;
+  Uint8List? _editingBytes;
+  late String _imageUrl;
+  late String? _imageId;
+
+  @override
+  void initState() {
+    super.initState();
+    _imageUrl = widget.imageUrl;
+    _imageId = widget.exportImageId;
+    if (widget.startEditing) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _startEditing();
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -2237,18 +2439,18 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
     final y = -tapPosition.dy * (_doubleTapScale - 1);
 
     _transformationController.value = Matrix4.identity()
-      ..translate(x, y)
-      ..scale(_doubleTapScale);
+      ..translateByDouble(x, y, 0, 1)
+      ..scaleByDouble(_doubleTapScale, _doubleTapScale, 1, 1);
   }
 
   Future<void> _shareImage() async {
-    final imageId = widget.exportImageId;
+    final imageId = _imageId;
     if (imageId == null || _isSharing || _isSaving) {
       return;
     }
     setState(() => _isSharing = true);
     try {
-      await _shareExportImage(context, widget.imageUrl, imageId);
+      await _shareExportImage(context, _imageUrl, imageId);
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2261,13 +2463,13 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
   }
 
   Future<void> _saveImage() async {
-    final imageId = widget.exportImageId;
+    final imageId = _imageId;
     if (imageId == null || _isSharing || _isSaving) {
       return;
     }
     setState(() => _isSaving = true);
     try {
-      await _saveExportImage(widget.imageUrl, imageId);
+      await _saveExportImage(_imageUrl, imageId);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -2278,10 +2480,11 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
         );
       }
     } catch (error) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Unable to save image: $error')));
+      }
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
@@ -2291,117 +2494,374 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
     _transformationController.value = Matrix4.identity();
   }
 
+  Future<void> _startEditing() async {
+    if (_isLoadingEditor || _isApplyingEdit) return;
+    setState(() => _isLoadingEditor = true);
+    try {
+      final image = await _downloadExportImage(_imageUrl);
+      if (mounted) {
+        _resetZoom();
+        setState(() => _editingBytes = image.bytes);
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to open the image editor: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoadingEditor = false);
+    }
+  }
+
+  Future<void> _applyEditedSketch(Uint8List bytes) async {
+    final isCreating = widget.createSketchParentImageId != null;
+    final parentId =
+        widget.createSketchParentImageId ?? widget.editableParentImageId;
+    final oldImageId = _imageId;
+    if (parentId == null || _isApplyingEdit) return;
+    final stopwatch = Stopwatch()..start();
+    UserActivityLogger.instance.record(
+      operation: isCreating ? 'sketch_create' : 'sketch_edit',
+      status: 'started',
+      targetType: 'sketch',
+      targetId: oldImageId,
+      parentImageId: parentId,
+      details: {'output_bytes': bytes.lengthInBytes},
+    );
+    setState(() {
+      _isApplyingEdit = true;
+      _saveProgressLabel = 'Uploading edited sketch…';
+    });
+    try {
+      final service = ImageAssetService(Supabase.instance.client);
+      final newImageId = await service
+          .uploadAssociatedImage(bytes, parentId)
+          .timeout(const Duration(seconds: 60));
+      if (newImageId == parentId) {
+        throw StateError('Make an adjustment before creating a sketch.');
+      }
+      if (!isCreating && oldImageId != null && newImageId != oldImageId) {
+        if (mounted) {
+          setState(() => _saveProgressLabel = 'Replacing old sketch…');
+        }
+        await service
+            .removeAssociatedImage(
+              parentImageId: parentId,
+              childImageId: oldImageId,
+            )
+            .timeout(const Duration(seconds: 30));
+      }
+      if (mounted) {
+        setState(() => _saveProgressLabel = 'Refreshing thumbnail…');
+      }
+      final images = await service
+          .listAssociatedImages(parentId)
+          .timeout(const Duration(seconds: 30));
+      final updated = images
+          .where((image) => image.id == newImageId)
+          .firstOrNull;
+      if (updated == null) {
+        throw StateError('The edited sketch could not be reloaded.');
+      }
+      if (!mounted) return;
+      setState(() {
+        _imageId = updated.id;
+        _imageUrl = updated.imageUrl;
+        _editingBytes = null;
+        _hasEdited = true;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(isCreating ? 'Sketch created.' : 'Sketch updated.'),
+        ),
+      );
+      UserActivityLogger.instance.record(
+        operation: isCreating ? 'sketch_create' : 'sketch_edit',
+        status: 'succeeded',
+        targetType: 'sketch',
+        targetId: newImageId,
+        parentImageId: parentId,
+        durationMs: stopwatch.elapsedMilliseconds,
+      );
+    } catch (error) {
+      UserActivityLogger.instance.record(
+        operation: isCreating ? 'sketch_create' : 'sketch_edit',
+        status: 'failed',
+        targetType: 'sketch',
+        targetId: oldImageId,
+        parentImageId: parentId,
+        durationMs: stopwatch.elapsedMilliseconds,
+        error: error,
+      );
+      if (mounted) {
+        final message = error is TimeoutException
+            ? 'The sketch save timed out. Check your connection and try again.'
+            : 'Unable to update the sketch: $error';
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(message)));
+      }
+    } finally {
+      if (mounted) setState(() => _isApplyingEdit = false);
+    }
+  }
+
+  void _finishImageWindow() {
+    final imageId = _imageId;
+    final result = _hasEdited && imageId != null
+        ? _EditedSketch(
+            imageId: imageId,
+            imageUrl: _imageUrl,
+            replacesCurrentImage: widget.createSketchParentImageId == null,
+          )
+        : null;
+    if (_hasEdited && !_allowPop) {
+      setState(() => _allowPop = true);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) Navigator.of(context).pop(result);
+      });
+      return;
+    }
+    Navigator.of(context).pop(result);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
+    return PopScope(
+      canPop: _allowPop || !_hasEdited,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) _finishImageWindow();
+      },
+      child: Scaffold(
         backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: const Text('Image'),
-        actions: [
-          if (widget.exportImageId != null) ...[
-            IconButton(
-              onPressed: _isSharing || _isSaving ? null : _saveImage,
-              icon: _isSaving
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.download_outlined),
-              tooltip: kIsWeb ? 'Download image' : 'Save to Photos',
-            ),
-            IconButton(
-              onPressed: _isSharing || _isSaving ? null : _shareImage,
-              icon: _isSharing
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.share_outlined),
-              tooltip: 'Share image',
-            ),
-          ],
-          IconButton(
-            onPressed: _resetZoom,
-            icon: const Icon(Icons.fit_screen_outlined),
-            tooltip: 'Reset zoom',
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onDoubleTapDown: _handleDoubleTapDown,
-          onDoubleTap: _handleDoubleTap,
-          child: InteractiveViewer(
-            transformationController: _transformationController,
-            minScale: _minimumScale,
-            maxScale: _maximumScale,
-            boundaryMargin: const EdgeInsets.all(120),
-            clipBehavior: Clip.none,
-            child: SizedBox.expand(
-              child: Center(
-                child: Hero(
-                  tag: widget.heroTag,
-                  child: Image.network(
-                    widget.imageUrl,
-                    width: double.infinity,
-                    height: double.infinity,
-                    fit: BoxFit.contain,
-                    gaplessPlayback: true,
-                    loadingBuilder: (context, child, loadingProgress) {
-                      if (loadingProgress == null) {
-                        return child;
-                      }
-
-                      final expectedBytes = loadingProgress.expectedTotalBytes;
-
-                      final value = expectedBytes == null
-                          ? null
-                          : loadingProgress.cumulativeBytesLoaded /
-                                expectedBytes;
-
-                      return Center(
-                        child: CircularProgressIndicator(
-                          value: value,
-                          color: Colors.white,
-                        ),
-                      );
-                    },
-                    errorBuilder: (context, error, stackTrace) {
-                      return const Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.broken_image_outlined,
-                              size: 64,
-                              color: Colors.white,
-                            ),
-                            SizedBox(height: 14),
-                            Text(
-                              'Unable to load image.',
-                              style: TextStyle(color: Colors.white),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          foregroundColor: Colors.white,
+          leading: BackButton(onPressed: _finishImageWindow),
+          title: Text(_editingBytes == null ? 'Image' : 'Edit sketch'),
+          actions: [
+            HomeButton(enabled: !_isApplyingEdit && !_isEditorProcessing),
+            if (_editingBytes != null) ...[
+              TextButton(
+                style: TextButton.styleFrom(foregroundColor: Colors.white),
+                onPressed: _isApplyingEdit
+                    ? null
+                    : () => setState(() => _editingBytes = null),
+                child: const Text('Cancel'),
+              ),
+              ValueListenableBuilder<bool>(
+                valueListenable: _imageAdjustmentController.hasChanges,
+                builder: (context, hasChanges, _) => TextButton(
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    disabledForegroundColor: Colors.white38,
                   ),
+                  onPressed:
+                      _isApplyingEdit ||
+                          (!hasChanges &&
+                              widget.createSketchParentImageId == null)
+                      ? null
+                      : _imageAdjustmentController.apply,
+                  child: _isEditorProcessing || _isApplyingEdit
+                      ? const SizedBox.square(
+                          dimension: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text('Save'),
                 ),
               ),
-            ),
-          ),
+            ] else ...[
+              if (_imageId != null) ...[
+                IconButton(
+                  onPressed: _isSharing || _isSaving ? null : _saveImage,
+                  icon: _isSaving
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.download_outlined),
+                  tooltip: kIsWeb ? 'Download image' : 'Save to Photos',
+                ),
+                IconButton(
+                  onPressed: _isSharing || _isSaving ? null : _shareImage,
+                  icon: _isSharing
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.share_outlined),
+                  tooltip: 'Share image',
+                ),
+              ],
+              IconButton(
+                onPressed: _resetZoom,
+                icon: const Icon(Icons.fit_screen_outlined),
+                tooltip: 'Reset zoom',
+              ),
+            ],
+          ],
         ),
+        body: _editingBytes != null
+            ? Stack(
+                children: [
+                  Positioned.fill(
+                    child: ImageAdjustmentScreen(
+                      imageBytes: _editingBytes!,
+                      embedded: true,
+                      onDone: _applyEditedSketch,
+                      onProcessingChanged: (processing) {
+                        if (mounted) {
+                          setState(() {
+                            _isEditorProcessing = processing;
+                            if (processing && !_isApplyingEdit) {
+                              _saveProgressLabel = 'Processing image…';
+                            }
+                          });
+                        }
+                      },
+                      controller: _imageAdjustmentController,
+                    ),
+                  ),
+                  if (_isEditorProcessing || _isApplyingEdit)
+                    Positioned.fill(
+                      child: ColoredBox(
+                        color: const Color(0x99000000),
+                        child: Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const CircularProgressIndicator(
+                                color: Colors.white,
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                _saveProgressLabel,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              )
+            : SafeArea(
+                child: Stack(
+                  children: [
+                    Positioned.fill(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onDoubleTapDown: _handleDoubleTapDown,
+                        onDoubleTap: _handleDoubleTap,
+                        child: InteractiveViewer(
+                          transformationController: _transformationController,
+                          minScale: _minimumScale,
+                          maxScale: _maximumScale,
+                          boundaryMargin: const EdgeInsets.all(120),
+                          clipBehavior: Clip.none,
+                          child: SizedBox.expand(
+                            child: Center(
+                              child: Hero(
+                                tag: widget.heroTag,
+                                child: Image.network(
+                                  _imageUrl,
+                                  width: double.infinity,
+                                  height: double.infinity,
+                                  fit: BoxFit.contain,
+                                  gaplessPlayback: true,
+                                  loadingBuilder:
+                                      (context, child, loadingProgress) {
+                                        if (loadingProgress == null) {
+                                          return child;
+                                        }
+
+                                        final expectedBytes =
+                                            loadingProgress.expectedTotalBytes;
+
+                                        final value = expectedBytes == null
+                                            ? null
+                                            : loadingProgress
+                                                      .cumulativeBytesLoaded /
+                                                  expectedBytes;
+
+                                        return Center(
+                                          child: CircularProgressIndicator(
+                                            value: value,
+                                            color: Colors.white,
+                                          ),
+                                        );
+                                      },
+                                  errorBuilder: (context, error, stackTrace) {
+                                    return const Center(
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.broken_image_outlined,
+                                            size: 64,
+                                            color: Colors.white,
+                                          ),
+                                          SizedBox(height: 14),
+                                          Text(
+                                            'Unable to load image.',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (widget.editableParentImageId != null ||
+                        widget.createSketchParentImageId != null)
+                      Positioned(
+                        left: 16,
+                        right: 16,
+                        bottom: 16,
+                        child: Center(
+                          child: FilledButton.icon(
+                            onPressed: _isLoadingEditor ? null : _startEditing,
+                            icon: _isLoadingEditor
+                                ? const SizedBox.square(
+                                    dimension: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.crop_rotate),
+                            label: Text(
+                              widget.createSketchParentImageId != null
+                                  ? 'Create sketch'
+                                  : 'Edit sketch',
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
       ),
     );
   }
