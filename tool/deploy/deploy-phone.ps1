@@ -1,9 +1,16 @@
 [CmdletBinding()]
-param([string]$DeviceId)
+param(
+    [string]$DeviceId,
+    [switch]$SkipVersionBump
+)
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 Set-Location $repoRoot
+
+if (-not $SkipVersionBump) {
+    & (Join-Path $PSScriptRoot 'increment-version.ps1')
+}
 
 if (-not (Get-Command flutter -ErrorAction SilentlyContinue)) {
     throw 'Flutter was not found on PATH.'
@@ -33,6 +40,10 @@ if ([string]::IsNullOrWhiteSpace($DeviceId)) {
         throw 'Multiple phones found. Run again with -DeviceId SERIAL.'
     }
     $DeviceId = ($deviceLines[0] -split '\s+')[0]
+} elseif (-not ($deviceLines | Where-Object {
+    ($_ -split '\s+')[0] -eq $DeviceId
+})) {
+    throw "Device '$DeviceId' is not connected and authorized."
 }
 
 Write-Host "Building release APK for device $DeviceId..."

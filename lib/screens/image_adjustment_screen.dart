@@ -131,12 +131,15 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
                 ? 'The image already appears straight.'
                 : 'Straightened by ${angle.abs().toStringAsFixed(1)}°.',
           ),
-          action: SnackBarAction(
-            label: 'Undo',
-            onPressed: () {
-              if (mounted) setState(() => _straightenAngle = 0);
-            },
-          ),
+          duration: Duration(seconds: angle == 0 ? 3 : 5),
+          action: angle == 0
+              ? null
+              : SnackBarAction(
+                  label: 'Undo',
+                  onPressed: () {
+                    if (mounted) setState(() => _straightenAngle = 0);
+                  },
+                ),
         ),
       );
     } catch (_) {
@@ -393,7 +396,7 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
                       left: _crop.left * fitted.width,
                       top: _handleTop(handle, fitted.height),
                       width: _crop.width * fitted.width,
-                      height: 44,
+                      height: 88,
                       child: GestureDetector(
                         behavior: HitTestBehavior.translucent,
                         onPanUpdate: (details) =>
@@ -408,7 +411,7 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
                     Positioned(
                       left: _handleLeft(handle, fitted.width),
                       top: _crop.top * fitted.height,
-                      width: 44,
+                      width: 88,
                       height: _crop.height * fitted.height,
                       child: GestureDetector(
                         behavior: HitTestBehavior.translucent,
@@ -426,8 +429,8 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
                     Positioned(
                       left: _handleLeft(handle, fitted.width),
                       top: _handleTop(handle, fitted.height),
-                      width: 44,
-                      height: 44,
+                      width: 88,
+                      height: 88,
                       child: GestureDetector(
                         behavior: HitTestBehavior.translucent,
                         onPanUpdate: (details) =>
@@ -445,14 +448,14 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
   }
 
   double _handleLeft(Alignment handle, double width) =>
-      ((handle.x < 0 ? _crop.left : _crop.right) * width - 22).clamp(
+      ((handle.x < 0 ? _crop.left : _crop.right) * width - 44).clamp(
         0.0,
-        math.max(0, width - 44),
+        math.max(0, width - 88),
       );
   double _handleTop(Alignment handle, double height) =>
-      ((handle.y < 0 ? _crop.top : _crop.bottom) * height - 22).clamp(
+      ((handle.y < 0 ? _crop.top : _crop.bottom) * height - 44).clamp(
         0.0,
-        math.max(0, height - 44),
+        math.max(0, height - 88),
       );
 
   Widget _buildControls() {
@@ -599,8 +602,22 @@ class _CropOverlayPainter extends CustomPainter {
       Paint()
         ..color = Colors.white
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 2,
+        ..strokeWidth = 3,
     );
+    final handleFill = Paint()..color = Colors.white;
+    final handleStroke = Paint()
+      ..color = Colors.black87
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+    for (final point in [
+      rect.topLeft,
+      rect.topRight,
+      rect.bottomLeft,
+      rect.bottomRight,
+    ]) {
+      canvas.drawCircle(point, 15, handleFill);
+      canvas.drawCircle(point, 15, handleStroke);
+    }
     final grid = Paint()
       ..color = Colors.white.withValues(alpha: 0.55)
       ..strokeWidth = 1;

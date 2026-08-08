@@ -1,9 +1,16 @@
 [CmdletBinding()]
-param([switch]$BuildOnly)
+param(
+    [switch]$BuildOnly,
+    [switch]$SkipVersionBump
+)
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 Set-Location $repoRoot
+
+if (-not $SkipVersionBump) {
+    & (Join-Path $PSScriptRoot 'increment-version.ps1')
+}
 
 foreach ($command in @('flutter', 'firebase')) {
     if (-not (Get-Command $command -ErrorAction SilentlyContinue)) {

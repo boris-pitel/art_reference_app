@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../app_version.dart';
 import 'package:uuid/uuid.dart';
 
 enum FeedbackType { suggestion, problem, question, other }
@@ -19,7 +21,6 @@ class FeedbackService {
   final SupabaseClient _client;
   static const _uuid = Uuid();
   static const _bucket = 'feedback-attachments';
-  static const _appVersion = '1.0.0+1';
 
   Future<void> submit({
     required FeedbackType type,
@@ -65,7 +66,7 @@ class FeedbackService {
         'feedback_type': type.name,
         'comment': normalizedComment,
         'platform': _platformName(),
-        'app_version': _appVersion,
+        'app_version': appVersion,
         'current_screen': currentScreen,
         'attachment_path': attachmentPath,
         'metadata': {'is_web': kIsWeb},

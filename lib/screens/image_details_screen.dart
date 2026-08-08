@@ -12,6 +12,8 @@ import 'package:uuid/uuid.dart';
 import '../models/reference_category.dart';
 import '../services/category_service.dart';
 import '../services/image_asset_service.dart';
+import '../services/image_adjustment_service.dart';
+import '../services/image_print_service.dart';
 import '../services/image_save_service.dart';
 import '../services/keyword_service.dart';
 import '../services/user_activity_logger.dart';
@@ -80,9 +82,9 @@ Future<void> _saveExportImage(String imageUrl, String imageId) async {
   );
 }
 
-enum _AssociatedImageAction { open, share, save, delete }
+enum _AssociatedImageAction { open, editImage, share, save, delete }
 
-enum _ImageAction { move }
+enum _ImageAction { print, move }
 
 class _AiAnalysis {
   const _AiAnalysis({
@@ -175,6 +177,7 @@ class ImageDetailsScreen extends StatefulWidget {
     this.dateAdded,
     this.navigationItems = const <ImageDetailsNavigationItem>[],
     this.navigationIndex = 0,
+    this.startImageEditing = false,
     this.hasPriorChanges = false,
   });
 
@@ -185,6 +188,7 @@ class ImageDetailsScreen extends StatefulWidget {
   final DateTime? dateAdded;
   final List<ImageDetailsNavigationItem> navigationItems;
   final int navigationIndex;
+  final bool startImageEditing;
   final bool hasPriorChanges;
 
   @override
@@ -219,6 +223,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   bool _allowPop = false;
   bool _isAiAnalysisExpanded = false;
   bool _isMovingImage = false;
+  bool _isPrintingImage = false;
   bool _isFavorite = false;
   bool _isFinishedArtwork = false;
   bool _isNavigatingHorizontally = false;
@@ -307,6 +312,11 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       _loadAssociatedImages();
     } else {
       _isLoadingAssociatedImages = false;
+    }
+    if (widget.startImageEditing) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_openMainImage(startEditing: true));
+      });
     }
   }
 
@@ -812,6 +822,10 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         await _openAssociatedImage(image);
         break;
 
+      case _AssociatedImageAction.editImage:
+        await _openAssociatedImageForEditing(image);
+        break;
+
       case _AssociatedImageAction.share:
         await _shareAssociatedImage(image);
         break;
@@ -824,6 +838,22 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         await _confirmAndRemoveAssociatedImage(image);
         break;
     }
+  }
+
+  Future<void> _openAssociatedImageForEditing(ImageAssetInfo image) async {
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (context) => ImageDetailsScreen(
+          imageId: image.id,
+          imageUrl: image.imageUrl,
+          isAssociatedImage: true,
+          parentImageId: _currentImageId,
+          dateAdded: image.dateAdded,
+          startImageEditing: true,
+        ),
+      ),
+    );
+    if (mounted) await _loadAssociatedImages();
   }
 
   bool _isExportingAssociatedImage(String imageId) =>
@@ -1136,6 +1166,27 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     );
   }
 
+  Future<void> _printCurrentImage() async {
+    if (_isMovingImage || _isPrintingImage) return;
+
+    setState(() => _isPrintingImage = true);
+    try {
+      final image = await _downloadExportImage(_currentImageUrl);
+      await ImagePrintService.printImage(
+        imageBytes: image.bytes,
+        documentName: 'Painter Reference $_currentImageId',
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to print the reference: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isPrintingImage = false);
+    }
+  }
+
   Future<void> _moveImage() async {
     if (_isMovingImage) {
       return;
@@ -1420,7 +1471,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
               TextButton.icon(
                 onPressed: _isLoadingMetadata || _isSavingMetadata
                     ? null
-                    : () => _openMainImage(startEditing: true),
+                    : _openMainImage,
                 icon: const Icon(Icons.crop_rotate),
                 label: const Text('Edit'),
               ),
@@ -1440,29 +1491,6 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                 tooltip: _isFavorite
                     ? 'Remove from favorites'
                     : 'Add to favorites',
-              ),
-            if (!widget.isAssociatedImage)
-              PopupMenuButton<_ImageAction>(
-                enabled: !_isMovingImage,
-                tooltip: 'Image actions',
-                onSelected: (action) async {
-                  switch (action) {
-                    case _ImageAction.move:
-                      await _moveImage();
-                  }
-                },
-                itemBuilder: (context) {
-                  return const [
-                    PopupMenuItem<_ImageAction>(
-                      value: _ImageAction.move,
-                      child: ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: Icon(Icons.drive_file_move_outline),
-                        title: Text('Move...'),
-                      ),
-                    ),
-                  ];
-                },
               ),
           ],
         ),
@@ -1586,6 +1614,11 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                 ),
               ),
               Positioned(
+                top: 12,
+                right: 12,
+                child: _buildImageActionsMenu(context),
+              ),
+              Positioned(
                 right: 12,
                 bottom: 12,
                 child: DecoratedBox(
@@ -1615,6 +1648,47 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildImageActionsMenu(BuildContext context) {
+    if (widget.isAssociatedImage) return const SizedBox.shrink();
+
+    return Material(
+      color: Colors.black54,
+      borderRadius: BorderRadius.circular(24),
+      child: PopupMenuButton<_ImageAction>(
+        enabled: !_isMovingImage && !_isPrintingImage,
+        tooltip: 'Image actions',
+        icon: const Icon(Icons.more_vert, color: Colors.white),
+        onSelected: (action) async {
+          switch (action) {
+            case _ImageAction.print:
+              await _printCurrentImage();
+            case _ImageAction.move:
+              await _moveImage();
+          }
+        },
+        itemBuilder: (context) => const [
+          PopupMenuItem<_ImageAction>(
+            value: _ImageAction.print,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.print_outlined),
+              title: Text('Print'),
+            ),
+          ),
+          PopupMenuDivider(),
+          PopupMenuItem<_ImageAction>(
+            value: _ImageAction.move,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.drive_file_move_outline),
+              title: Text('Move...'),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -2284,6 +2358,15 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                         ),
                       ),
                       PopupMenuItem<_AssociatedImageAction>(
+                        value: _AssociatedImageAction.editImage,
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.edit_outlined),
+                          title: Text('Edit image'),
+                          subtitle: Text('Crop, rotate, or straighten'),
+                        ),
+                      ),
+                      PopupMenuItem<_AssociatedImageAction>(
                         value: _AssociatedImageAction.share,
                         child: ListTile(
                           contentPadding: EdgeInsets.zero,
@@ -2392,6 +2475,7 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
   bool _isEditorProcessing = false;
   String _saveProgressLabel = 'Processing image…';
   bool _hasEdited = false;
+  bool _hasSavedSketchForThisWindow = false;
   bool _allowPop = false;
   Uint8List? _editingBytes;
   late String _imageUrl;
@@ -2514,12 +2598,70 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
     }
   }
 
+  Future<void> _saveUnchangedSketch() async {
+    if (_isLoadingEditor || _isApplyingEdit) return;
+    setState(() {
+      _isLoadingEditor = true;
+      _saveProgressLabel = 'Preparing sketch…';
+    });
+    try {
+      final stopwatch = Stopwatch()..start();
+      final image = await _downloadExportImage(_imageUrl);
+      UserActivityLogger.instance.record(
+        operation: 'sketch_create_timing',
+        status: 'started',
+        targetType: 'sketch',
+        parentImageId: widget.createSketchParentImageId,
+        details: {'download_ms': stopwatch.elapsedMilliseconds},
+      );
+      final output = await ImageAdjustmentService.apply(
+        bytes: image.bytes,
+        angle: 0,
+        crop: const Rect.fromLTWH(0, 0, 1, 1),
+      );
+      UserActivityLogger.instance.record(
+        operation: 'sketch_create_timing',
+        status: 'started',
+        targetType: 'sketch',
+        parentImageId: widget.createSketchParentImageId,
+        details: {
+          'download_ms': stopwatch.elapsedMilliseconds,
+          'processing_ms': stopwatch.elapsedMilliseconds,
+          'output_bytes': output.lengthInBytes,
+        },
+      );
+      if (mounted) {
+        await _applyEditedSketch(output);
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to create the sketch: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoadingEditor = false);
+    }
+  }
+
+  bool _isAlreadyAttachedError(Object error) {
+    final message = error.toString().toLowerCase();
+    return message.contains('already associated') ||
+        message.contains('already stored as an associated image') ||
+        message.contains('duplicate key') ||
+        message.contains('unique constraint');
+  }
+
   Future<void> _applyEditedSketch(Uint8List bytes) async {
     final isCreating = widget.createSketchParentImageId != null;
     final parentId =
         widget.createSketchParentImageId ?? widget.editableParentImageId;
     final oldImageId = _imageId;
-    if (parentId == null || _isApplyingEdit) return;
+    if (parentId == null ||
+        _isApplyingEdit ||
+        (isCreating && _hasSavedSketchForThisWindow)) {
+      return;
+    }
     final stopwatch = Stopwatch()..start();
     UserActivityLogger.instance.record(
       operation: isCreating ? 'sketch_create' : 'sketch_edit',
@@ -2531,6 +2673,7 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
     );
     setState(() {
       _isApplyingEdit = true;
+      if (isCreating) _hasSavedSketchForThisWindow = true;
       _saveProgressLabel = 'Uploading edited sketch…';
     });
     try {
@@ -2551,6 +2694,15 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
               childImageId: oldImageId,
             )
             .timeout(const Duration(seconds: 30));
+      }
+      if (isCreating && mounted) {
+        setState(() {
+          _imageId = newImageId;
+          _editingBytes = null;
+          _hasEdited = true;
+        });
+        _finishImageWindow();
+        return;
       }
       if (mounted) {
         setState(() => _saveProgressLabel = 'Refreshing thumbnail…');
@@ -2584,10 +2736,16 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
         parentImageId: parentId,
         durationMs: stopwatch.elapsedMilliseconds,
       );
+      if (isCreating && mounted) {
+        // Return the newly created sketch to the reference details page so it
+        // can add it to Associated Images immediately.
+        _finishImageWindow();
+      }
     } catch (error) {
+      final alreadyAttached = isCreating && _isAlreadyAttachedError(error);
       UserActivityLogger.instance.record(
         operation: isCreating ? 'sketch_create' : 'sketch_edit',
-        status: 'failed',
+        status: alreadyAttached ? 'succeeded' : 'failed',
         targetType: 'sketch',
         targetId: oldImageId,
         parentImageId: parentId,
@@ -2595,7 +2753,14 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
         error: error,
       );
       if (mounted) {
-        final message = error is TimeoutException
+        if (alreadyAttached) {
+          setState(() => _editingBytes = null);
+        } else if (isCreating) {
+          setState(() => _hasSavedSketchForThisWindow = false);
+        }
+        final message = alreadyAttached
+            ? 'This sketch is already attached to the reference.'
+            : error is TimeoutException
             ? 'The sketch save timed out. Check your connection and try again.'
             : 'Unable to update the sketch: $error';
         ScaffoldMessenger.of(
@@ -2734,7 +2899,9 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
                       controller: _imageAdjustmentController,
                     ),
                   ),
-                  if (_isEditorProcessing || _isApplyingEdit)
+                  if (_isLoadingEditor ||
+                      _isEditorProcessing ||
+                      _isApplyingEdit)
                     Positioned.fill(
                       child: ColoredBox(
                         color: const Color(0x99000000),
@@ -2747,7 +2914,11 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
                               ),
                               const SizedBox(height: 16),
                               Text(
-                                _saveProgressLabel,
+                                _isLoadingEditor &&
+                                        !_isEditorProcessing &&
+                                        !_isApplyingEdit
+                                    ? 'Preparing sketch…'
+                                    : _saveProgressLabel,
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 16,
@@ -2841,22 +3012,43 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
                         right: 16,
                         bottom: 16,
                         child: Center(
-                          child: FilledButton.icon(
-                            onPressed: _isLoadingEditor ? null : _startEditing,
-                            icon: _isLoadingEditor
-                                ? const SizedBox.square(
-                                    dimension: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
+                          child: widget.createSketchParentImageId != null
+                              ? Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    OutlinedButton.icon(
+                                      onPressed: _isLoadingEditor
+                                          ? null
+                                          : _startEditing,
+                                      icon: const Icon(Icons.crop_rotate),
+                                      label: const Text('Edit sketch'),
                                     ),
-                                  )
-                                : const Icon(Icons.crop_rotate),
-                            label: Text(
-                              widget.createSketchParentImageId != null
-                                  ? 'Create sketch'
-                                  : 'Edit sketch',
-                            ),
-                          ),
+                                    const SizedBox(width: 12),
+                                    FilledButton.icon(
+                                      onPressed: _isLoadingEditor
+                                          ? null
+                                          : _saveUnchangedSketch,
+                                      icon: _isLoadingEditor
+                                          ? const SizedBox.square(
+                                              dimension: 18,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                              ),
+                                            )
+                                          : const Icon(
+                                              Icons.add_photo_alternate,
+                                            ),
+                                      label: const Text('Save as sketch'),
+                                    ),
+                                  ],
+                                )
+                              : FilledButton.icon(
+                                  onPressed: _isLoadingEditor
+                                      ? null
+                                      : _startEditing,
+                                  icon: const Icon(Icons.crop_rotate),
+                                  label: const Text('Edit sketch'),
+                                ),
                         ),
                       ),
                   ],

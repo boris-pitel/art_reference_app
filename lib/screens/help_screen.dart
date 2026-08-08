@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../app_version.dart';
 import 'feedback_screen.dart';
 import '../widgets/home_button.dart';
 
@@ -98,8 +100,10 @@ class _IntroductionPage extends StatelessWidget {
   }
 }
 
-class _HowToPage extends StatelessWidget {
-  const _HowToPage();
+// Kept temporarily as a fallback while the Markdown guide is adopted.
+// ignore: unused_element
+class _BuiltInHowToPage extends StatelessWidget {
+  const _BuiltInHowToPage();
 
   @override
   Widget build(BuildContext context) {
@@ -239,6 +243,61 @@ class _HowToPage extends StatelessWidget {
   }
 }
 
+class _HowToPage extends StatelessWidget {
+  const _HowToPage();
+
+  static final Future<String> _contents = rootBundle.loadString(
+    'assets/help/how_to.md',
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<String>(
+      future: _contents,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return const _HelpPage(
+            children: [
+              _HelpTitle('How To'),
+              _HelpParagraph('The How To guide could not be loaded.'),
+            ],
+          );
+        }
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        return _HelpPage(children: _markdownHelpWidgets(snapshot.data!));
+      },
+    );
+  }
+}
+
+List<Widget> _markdownHelpWidgets(String markdown) {
+  final widgets = <Widget>[];
+  for (final rawLine in markdown.split('\n')) {
+    final line = rawLine.trim();
+    if (line.isEmpty) continue;
+    if (line.startsWith('# ')) {
+      widgets.add(_HelpTitle(line.substring(2)));
+    } else if (line.startsWith('## ')) {
+      widgets.add(_HelpSectionTitle(line.substring(3)));
+    } else if (RegExp(r'^\d+\. ').hasMatch(line)) {
+      final match = RegExp(r'^(\d+)\. (.*)$').firstMatch(line)!;
+      widgets.add(
+        _NumberedInstruction(
+          number: int.parse(match.group(1)!),
+          text: match.group(2)!,
+        ),
+      );
+    } else if (line.startsWith('- ')) {
+      widgets.add(_HelpParagraph('• ${line.substring(2)}'));
+    } else {
+      widgets.add(_HelpParagraph(line));
+    }
+  }
+  return widgets;
+}
+
 class _AboutPage extends StatelessWidget {
   const _AboutPage();
 
@@ -266,7 +325,7 @@ class _AboutPage extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text(
-          'Version 1.2.0',
+          appVersionLabel,
           textAlign: TextAlign.center,
           style: theme.textTheme.titleMedium,
         ),

@@ -20,12 +20,14 @@ class _LoadedImage {
     required this.imageUrl,
     required this.thumbnailUrl,
     this.parentImageId,
+    this.parentImageUrl,
   });
 
   final String id;
   final String imageUrl;
   final String? thumbnailUrl;
   final String? parentImageId;
+  final String? parentImageUrl;
 }
 
 class _DownloadedImage {
@@ -43,7 +45,7 @@ class _DownloadedImage {
   }
 }
 
-enum _ImageAction { share, save, print, remove }
+enum _ImageAction { edit, share, save, print, remove }
 
 class CategoryScreen extends StatefulWidget {
   const CategoryScreen({super.key, required this.category});
@@ -111,6 +113,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
             imageUrl: imageInfo.imageUrl,
             thumbnailUrl: imageInfo.thumbnailUrl,
             parentImageId: imageInfo.parentImageId,
+            parentImageUrl: imageInfo.parentImageUrl,
           ),
         )
         .toList();
@@ -316,19 +319,30 @@ class _CategoryScreenState extends State<CategoryScreen> {
     });
 
     try {
+      final detailsImageId = widget.category.isMyArt
+          ? image.parentImageId
+          : image.id;
+      final detailsImageUrl = widget.category.isMyArt
+          ? image.parentImageUrl
+          : image.imageUrl;
+      if (detailsImageId == null || detailsImageUrl == null) {
+        _showMessage('The parent photo reference could not be opened.');
+        return;
+      }
       final changed = await Navigator.of(context).push<bool>(
         MaterialPageRoute<bool>(
           builder: (context) => ImageDetailsScreen(
-            imageId: image.id,
-            imageUrl: image.imageUrl,
-            isAssociatedImage: widget.category.isMyArt,
-            parentImageId: image.parentImageId,
+            imageId: detailsImageId,
+            imageUrl: detailsImageUrl,
             navigationItems: _images
                 .map(
                   (item) => ImageDetailsNavigationItem(
-                    imageId: item.id,
-                    imageUrl: item.imageUrl,
-                    parentImageId: item.parentImageId,
+                    imageId: widget.category.isMyArt
+                        ? item.parentImageId ?? item.id
+                        : item.id,
+                    imageUrl: widget.category.isMyArt
+                        ? item.parentImageUrl ?? item.imageUrl
+                        : item.imageUrl,
                   ),
                 )
                 .toList(growable: false),
@@ -582,6 +596,9 @@ class _CategoryScreenState extends State<CategoryScreen> {
     _LoadedImage image,
   ) async {
     switch (action) {
+      case _ImageAction.edit:
+        await _openImageDetails(image);
+        return;
       case _ImageAction.share:
         await _shareImage(image);
         return;
@@ -619,6 +636,18 @@ class _CategoryScreenState extends State<CategoryScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: Text(
+                  widget.category.isMyArt
+                      ? 'Edit parent details'
+                      : 'Edit details',
+                ),
+                subtitle: const Text('Open titles, notes, and image options'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop(_ImageAction.edit);
+                },
+              ),
               const Padding(
                 padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
                 child: Align(
@@ -650,22 +679,24 @@ class _CategoryScreenState extends State<CategoryScreen> {
                   Navigator.of(sheetContext).pop(_ImageAction.print);
                 },
               ),
-              const Divider(height: 1),
-              ListTile(
-                leading: Icon(
-                  Icons.delete_outline,
-                  color: Theme.of(sheetContext).colorScheme.error,
-                ),
-                title: Text(
-                  'Remove',
-                  style: TextStyle(
+              if (!widget.category.isMyArt) ...[
+                const Divider(height: 1),
+                ListTile(
+                  leading: Icon(
+                    Icons.delete_outline,
                     color: Theme.of(sheetContext).colorScheme.error,
                   ),
+                  title: Text(
+                    'Remove',
+                    style: TextStyle(
+                      color: Theme.of(sheetContext).colorScheme.error,
+                    ),
+                  ),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop(_ImageAction.remove);
+                  },
                 ),
-                onTap: () {
-                  Navigator.of(sheetContext).pop(_ImageAction.remove);
-                },
-              ),
+              ],
               const SizedBox(height: 8),
             ],
           ),
@@ -699,6 +730,17 @@ class _CategoryScreenState extends State<CategoryScreen> {
         Offset.zero & overlay.size,
       ),
       items: [
+        PopupMenuItem(
+          value: _ImageAction.edit,
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.edit_outlined),
+            title: Text(
+              widget.category.isMyArt ? 'Edit parent details' : 'Edit details',
+            ),
+            subtitle: const Text('Open titles, notes, and image options'),
+          ),
+        ),
         const PopupMenuItem(
           value: _ImageAction.share,
           child: ListTile(
@@ -723,21 +765,23 @@ class _CategoryScreenState extends State<CategoryScreen> {
             title: Text('Print'),
           ),
         ),
-        const PopupMenuDivider(),
-        PopupMenuItem(
-          value: _ImageAction.remove,
-          child: ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(
-              Icons.delete_outline,
-              color: Theme.of(context).colorScheme.error,
-            ),
-            title: Text(
-              'Remove',
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
+        if (!widget.category.isMyArt) ...[
+          const PopupMenuDivider(),
+          PopupMenuItem(
+            value: _ImageAction.remove,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                Icons.delete_outline,
+                color: Theme.of(context).colorScheme.error,
+              ),
+              title: Text(
+                'Remove',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
             ),
           ),
-        ),
+        ],
       ],
     );
 

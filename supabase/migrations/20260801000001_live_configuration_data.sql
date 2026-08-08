@@ -10,7 +10,7 @@ values
   (3, null, 'architecture', 'Architecture', 'assets/category_thumbnails/architecture.jpg', true, '2026-07-30 08:39:41.071743+00'),
   (4, null, 'still_life', 'Still Life', 'assets/category_thumbnails/stilllife.jpg', true, '2026-07-30 08:39:41.071743+00'),
   (5, null, 'abstract', 'Abstract', 'assets/category_thumbnails/abstract.jpg', true, '2026-07-30 08:39:41.071743+00'),
-  (6, null, 'icon', 'Icon', 'assets/category_thumbnails/icon.jpg', true, '2026-07-30 08:39:41.071743+00')
+  (6, null, 'icon', 'Icons', 'assets/category_thumbnails/icon.jpg', true, '2026-07-30 08:39:41.071743+00')
 on conflict (id) do nothing;
 
 select setval(

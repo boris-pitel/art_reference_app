@@ -30,18 +30,24 @@ if (-not ($Backend -or $Web -or $Phone -or $Windows -or $AdminConsole)) {
     exit 1
 }
 
+if ($Web -or $Phone -or $Windows) {
+    & (Join-Path $PSScriptRoot 'increment-version.ps1')
+    & (Join-Path $PSScriptRoot 'ensure-release-notes.ps1')
+}
+
 if ($Backend) {
     & (Join-Path $PSScriptRoot 'deploy-backend.ps1') -AllFunctions
 }
 if ($Web) {
-    & (Join-Path $PSScriptRoot 'deploy-web.ps1')
+    & (Join-Path $PSScriptRoot 'deploy-web.ps1') -SkipVersionBump
 }
 if ($Phone) {
-    & (Join-Path $PSScriptRoot 'deploy-phone.ps1') -DeviceId $DeviceId
+    & (Join-Path $PSScriptRoot 'deploy-phone.ps1') `
+        -DeviceId $DeviceId -SkipVersionBump
 }
 if ($Windows -or $AdminConsole) {
     & (Join-Path $PSScriptRoot 'build-windows.ps1') `
-        -MainApp:$Windows -AdminConsole:$AdminConsole
+        -MainApp:$Windows -AdminConsole:$AdminConsole -SkipVersionBump
 }
 
 Write-Host 'All selected release tasks completed.' -ForegroundColor Green

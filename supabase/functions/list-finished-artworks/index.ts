@@ -51,16 +51,21 @@ Deno.serve(async (request) => {
       storage_path: string;
       thumbnail_storage_path: string | null;
       parent_image_id: string;
+      parent_storage_path: string;
     }>`
       select
         artwork.id,
         artwork.date_added,
         artwork.storage_path,
         artwork.thumbnail_storage_path,
-        min(relationship.parent_image_id::text) as parent_image_id
+        min(relationship.parent_image_id::text) as parent_image_id,
+        min(parent.storage_path) as parent_storage_path
       from public.image_assets artwork
       join public.image_relationships relationship
         on relationship.child_image_id = artwork.id
+      join public.image_assets parent
+        on parent.id = relationship.parent_image_id
+        and parent.user_id = artwork.user_id
       where artwork.user_id = ${userId}::uuid
         and artwork.is_finished_artwork = true
       group by artwork.id
@@ -71,6 +76,7 @@ Deno.serve(async (request) => {
     const paths = result.rows.flatMap((row) => [
       row.storage_path,
       ...(row.thumbnail_storage_path ? [row.thumbnail_storage_path] : []),
+      row.parent_storage_path,
     ]);
     if (paths.length === 0) {
       return jsonResponse([]);
@@ -96,6 +102,7 @@ Deno.serve(async (request) => {
           ? urls.get(row.thumbnail_storage_path) ?? null
           : null,
         parent_image_id: row.parent_image_id,
+        parent_image_url: urls.get(row.parent_storage_path) ?? null,
       })),
     );
   } catch (error) {

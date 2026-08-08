@@ -234,6 +234,36 @@ Deno.serve(async (request) => {
   const connection = await pool.connect();
 
   try {
+    // The common duplicate-sketch path: one indexed lookup before the
+    // general upload validation and transaction work.
+    if (destination.type === 'associated') {
+      const duplicateRelationship = await connection.queryObject<{
+        child_image_id: string;
+      }>`
+        select relationship.child_image_id
+        from public.image_relationships relationship
+        join public.image_assets child
+          on child.id = relationship.child_image_id
+        where relationship.parent_image_id = ${destination.parentImageId}::uuid
+          and child.user_id = ${userId}::uuid
+          and child.image_hash = ${imageHash}
+        limit 1
+      `;
+
+      if (duplicateRelationship.rows.length > 0) {
+        return jsonResponse(
+          {
+            error: 'This image is already associated with this reference',
+            duplicate: true,
+            relationship_already_present: true,
+            existing_image: true,
+            image_id: duplicateRelationship.rows[0].child_image_id,
+          },
+          409,
+        );
+      }
+    }
+
     await connection.queryArray`begin`;
 
     if (destination.type === 'associated') {

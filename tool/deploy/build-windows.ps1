@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [switch]$MainApp,
-    [switch]$AdminConsole
+    [switch]$AdminConsole,
+    [switch]$SkipVersionBump
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,6 +13,10 @@ if (-not (Get-Command flutter -ErrorAction SilentlyContinue)) {
 }
 if (-not $MainApp -and -not $AdminConsole) {
     $MainApp = $true
+}
+
+if ($MainApp -and -not $SkipVersionBump) {
+    & (Join-Path $PSScriptRoot 'increment-version.ps1')
 }
 
 if ($MainApp) {

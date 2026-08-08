@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 import '../models/reference_category.dart';
 import '../utils/performance_profiler.dart';
 import 'image_hash_service.dart';
+import 'image_import_service.dart';
 import 'thumbnail_service.dart';
 import 'user_activity_logger.dart';
 
@@ -16,6 +17,7 @@ class ImageAssetInfo {
     required this.imageUrl,
     required this.thumbnailUrl,
     this.parentImageId,
+    this.parentImageUrl,
   });
 
   final String id;
@@ -23,6 +25,7 @@ class ImageAssetInfo {
   final String imageUrl;
   final String? thumbnailUrl;
   final String? parentImageId;
+  final String? parentImageUrl;
 }
 
 class UnsupportedImageFormatException implements Exception {
@@ -162,35 +165,31 @@ class ImageAssetService {
         throw const UnsupportedImageFormatException();
       }
 
+      late final Uint8List normalizedImageBytes;
+      try {
+        normalizedImageBytes = await ImageImportService.normalizeForUpload(
+          imageBytes,
+        );
+      } catch (error) {
+        profiler.checkpoint('Image format conversion failed: $error');
+        throw const UnsupportedImageFormatException();
+      }
+
+      if (!identical(normalizedImageBytes, imageBytes)) {
+        profiler.checkpoint(
+          'HEIC/HEIF image converted to JPEG; converted size: '
+          '${(normalizedImageBytes.lengthInBytes / 1024 / 1024).toStringAsFixed(2)} MB',
+        );
+      }
+
       profiler.checkpoint(
         'Upload method started; original size: '
         '${(imageBytes.lengthInBytes / 1024 / 1024).toStringAsFixed(2)} MB',
       );
 
-      late final Uint8List thumbnailBytes;
-
-      try {
-        thumbnailBytes = await ThumbnailService.createThumbnail(
-          imageBytes,
-          maximumDimension: 500,
-          jpegQuality: 80,
-        );
-      } catch (error) {
-        profiler.checkpoint('Thumbnail creation failed: $error');
-
-        throw const UnsupportedImageFormatException();
-      }
-
-      profiler.checkpoint(
-        'Thumbnail created; thumbnail size: '
-        '${(thumbnailBytes.lengthInBytes / 1024).toStringAsFixed(1)} KB',
+      final imageHash = await ImageHashService.calculateSha256(
+        normalizedImageBytes,
       );
-
-      if (thumbnailBytes.isEmpty) {
-        throw const UnsupportedImageFormatException();
-      }
-
-      final imageHash = await ImageHashService.calculateSha256(imageBytes);
 
       profiler.checkpoint('SHA-256 hash calculated');
 
@@ -257,6 +256,25 @@ class ImageAssetService {
         );
       }
 
+      late final Uint8List thumbnailBytes;
+      try {
+        thumbnailBytes = await ThumbnailService.createThumbnail(
+          normalizedImageBytes,
+          maximumDimension: 500,
+          jpegQuality: 80,
+        );
+      } catch (error) {
+        profiler.checkpoint('Thumbnail creation failed: $error');
+        throw const UnsupportedImageFormatException();
+      }
+      profiler.checkpoint(
+        'Thumbnail created; thumbnail size: '
+        '${(thumbnailBytes.lengthInBytes / 1024).toStringAsFixed(1)} KB',
+      );
+      if (thumbnailBytes.isEmpty) {
+        throw const UnsupportedImageFormatException();
+      }
+
       final storagePath = prepareData['storage_path'];
 
       final uploadToken = prepareData['upload_token'];
@@ -282,10 +300,10 @@ class ImageAssetService {
           .uploadBinaryToSignedUrl(
             storagePath,
             uploadToken,
-            imageBytes,
+            normalizedImageBytes,
             FileOptions(
               cacheControl: '3600',
-              contentType: _detectContentType(imageBytes),
+              contentType: _detectContentType(normalizedImageBytes),
               upsert: false,
             ),
           );
@@ -697,6 +715,7 @@ class ImageAssetService {
         imageUrl: imageUrl,
         thumbnailUrl: thumbnailUrl as String?,
         parentImageId: row['parent_image_id'] as String?,
+        parentImageUrl: row['parent_image_url'] as String?,
       );
     }).toList();
   }

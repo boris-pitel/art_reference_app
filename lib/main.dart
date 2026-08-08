@@ -18,6 +18,7 @@ import 'screens/shared_image_import_screen.dart';
 import 'services/category_service.dart';
 import 'services/library_home_cache.dart';
 import 'services/image_asset_service.dart';
+import 'utils/performance_profiler.dart';
 import 'widgets/home_button.dart';
 
 Future<void> main() async {
@@ -320,6 +321,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   }
 
   Future<void> _loadCategories({bool showLoading = true}) async {
+    final profiler = PerformanceProfiler('CATEGORY RETURN/REFRESH');
     setState(() {
       if (showLoading) _isLoading = true;
       _errorMessage = null;
@@ -327,17 +329,30 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
 
     try {
       final categories = await _categoryService.listCategories();
+      profiler.checkpoint('Category records loaded');
       if (!categories.any((category) => category.isMyArt)) {
         categories.add(ReferenceCategory.myArt);
       }
+      categories.sort((left, right) {
+        if (left.isMyArt) return -1;
+        if (right.isMyArt) return 1;
+        return left.id.compareTo(right.id);
+      });
 
       final countEntries = await Future.wait(
         categories.map((category) async {
-          final images = await _imageAssetService.listImages(category);
-
-          return MapEntry<String, int>(category.databaseCode, images.length);
+          try {
+            final images = await _imageAssetService.listImages(category);
+            return MapEntry<String, int>(category.databaseCode, images.length);
+          } catch (error) {
+            debugPrint(
+              'Unable to load the ${category.displayName} count: $error',
+            );
+            return MapEntry<String, int>(category.databaseCode, 0);
+          }
         }),
       );
+      profiler.checkpoint('Category image counts loaded');
 
       if (!mounted) {
         return;
@@ -354,6 +369,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
 
         _isLoading = false;
       });
+      profiler.checkpoint('Category grid updated');
       final userId = Supabase.instance.client.auth.currentUser?.id;
       if (userId != null) {
         await LibraryHomeCache.write(
@@ -361,8 +377,11 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
           categories,
           Map<String, int>.fromEntries(countEntries),
         );
+        profiler.checkpoint('Category cache written');
       }
+      profiler.finish();
     } catch (error) {
+      profiler.fail(error);
       if (!mounted) {
         return;
       }
@@ -462,6 +481,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   }
 
   Future<void> _openCategory(ReferenceCategory category) async {
+    final profiler = PerformanceProfiler('RETURN FROM CATEGORY');
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (context) {
@@ -474,7 +494,9 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       return;
     }
 
-    await _loadCategories();
+    profiler.checkpoint('Category route closed');
+    await _loadCategories(showLoading: false);
+    profiler.finish();
   }
 
   Future<void> _openKeywordSearch() async {

@@ -2,13 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../app_version.dart';
 import 'package:uuid/uuid.dart';
 
 class UserActivityLogger {
   UserActivityLogger._();
 
   static final UserActivityLogger instance = UserActivityLogger._();
-  static const _appVersion = '1.1.5';
   final String sessionId = const Uuid().v4();
 
   String get _platform => kIsWeb ? 'web' : defaultTargetPlatform.name;
@@ -39,7 +40,7 @@ class UserActivityLogger {
         'parent_image_id': parentImageId,
         'duration_ms': durationMs,
         'platform': _platform,
-        'app_version': _appVersion,
+        'app_version': appVersion,
         'details': details,
         if (error != null) 'error_message': _sanitizeError(error),
       });

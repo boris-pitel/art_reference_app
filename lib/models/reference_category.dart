@@ -4,6 +4,7 @@ class ReferenceCategory {
     databaseCode: 'my_art',
     displayName: 'My Art',
     isBuiltIn: true,
+    thumbnailAsset: 'assets/category_thumbnails/myart.jpg',
   );
 
   const ReferenceCategory({
@@ -39,7 +40,12 @@ class ReferenceCategory {
 
     final String databaseCode = (json['code'] as String? ?? '').trim();
 
-    final String displayName = (json['display_name'] as String? ?? '').trim();
+    final String storedDisplayName = (json['display_name'] as String? ?? '')
+        .trim();
+    final String displayName =
+        databaseCode == 'icon' && storedDisplayName == 'Icon'
+        ? 'Icons'
+        : storedDisplayName;
 
     if (databaseCode.isEmpty) {
       throw const FormatException(

@@ -7,5 +7,20 @@ void main() {
     expect(ReferenceCategory.myArt.isBuiltIn, isTrue);
     expect(ReferenceCategory.myArt.canDelete, isFalse);
     expect(ReferenceCategory.myArt.canRename, isFalse);
+    expect(
+      ReferenceCategory.myArt.thumbnailAsset,
+      'assets/category_thumbnails/myart.jpg',
+    );
+  });
+
+  test('normalizes the legacy Icon category name', () {
+    final category = ReferenceCategory.fromJson({
+      'id': 6,
+      'code': 'icon',
+      'display_name': 'Icon',
+      'is_builtin': true,
+    });
+
+    expect(category.displayName, 'Icons');
   });
 }
