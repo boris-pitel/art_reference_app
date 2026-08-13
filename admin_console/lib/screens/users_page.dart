@@ -23,6 +23,7 @@ class UsersPage extends StatefulWidget {
 class _UsersPageState extends State<UsersPage> {
   final _searchController = TextEditingController();
   List<User> _users = [];
+  Map<String, String?> _loginNames = {};
   bool _loading = true;
   String? _error;
 
@@ -45,8 +46,14 @@ class _UsersPageState extends State<UsersPage> {
     });
     try {
       final users = await widget.service.listUsers();
+      final loginNames = await widget.service.fetchLoginNames(
+        users.map((user) => user.id),
+      );
       if (!mounted) return;
-      setState(() => _users = users);
+      setState(() {
+        _users = users;
+        _loginNames = loginNames;
+      });
     } on Object catch (error) {
       if (!mounted) return;
       setState(() => _error = error.toString());
@@ -62,9 +69,7 @@ class _UsersPageState extends State<UsersPage> {
         .where(
           (user) =>
               (user.email ?? '').toLowerCase().contains(query) ||
-              (widget.service.loginNameFor(user) ?? '').toLowerCase().contains(
-                query,
-              ) ||
+              (_loginNames[user.id] ?? '').toLowerCase().contains(query) ||
               user.id.toLowerCase().contains(query),
         )
         .toList();
@@ -138,7 +143,7 @@ class _UsersPageState extends State<UsersPage> {
                                 ),
                               ),
                               DataCell(
-                                Text(widget.service.loginNameFor(user) ?? '-'),
+                                Text(_loginNames[user.id] ?? '-'),
                               ),
                               DataCell(
                                 Switch(
@@ -150,7 +155,7 @@ class _UsersPageState extends State<UsersPage> {
                               DataCell(Text(_date(user.lastSignInAt))),
                               DataCell(
                                 SizedBox(
-                                  width: 196,
+                                  width: 236,
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
@@ -180,6 +185,11 @@ class _UsersPageState extends State<UsersPage> {
                                         icon: const Icon(
                                           Icons.password_outlined,
                                         ),
+                                      ),
+                                      IconButton(
+                                        tooltip: 'Set login name',
+                                        onPressed: () => _setLoginName(user),
+                                        icon: const Icon(Icons.badge_outlined),
                                       ),
                                       IconButton(
                                         tooltip: 'Permanently remove user',
@@ -397,6 +407,66 @@ class _UsersPageState extends State<UsersPage> {
       operation: () => widget.service.setPassword(user.email!, password),
     );
     if (success) _message('Password changed successfully.');
+  }
+
+  Future<void> _setLoginName(User user) async {
+    final controller = TextEditingController(text: _loginNames[user.id] ?? '');
+    String? validation;
+    final loginName = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('Set login name for ${user.email ?? user.id}'),
+          content: SizedBox(
+            width: 420,
+            child: TextField(
+              controller: controller,
+              autofocus: true,
+              maxLength: 50,
+              decoration: InputDecoration(
+                labelText: 'Login name',
+                hintText: 'Leave blank to clear it',
+                errorText: validation,
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final value = controller.text.trim();
+                if (value.length > 50) {
+                  setDialogState(
+                    () => validation = 'Must be 50 characters or fewer.',
+                  );
+                  return;
+                }
+                Navigator.pop(dialogContext, value);
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    controller.dispose();
+    if (loginName == null || !mounted) return;
+    final success = await _runMutation(
+      label: 'Setting login name...',
+      action: 'users.set-login-name',
+      targetEmail: user.email ?? user.id,
+      authUserId: user.id,
+      details: {'login_name': loginName.isEmpty ? null : loginName},
+      operation: () => widget.service.setLoginName(user, loginName),
+    );
+    if (success) {
+      _message('Login name updated.');
+      await _load();
+    }
   }
 
   Future<void> _removeUser(String email) async {

@@ -1681,8 +1681,6 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   }
 
   Widget _buildImageActionsMenu(BuildContext context) {
-    if (widget.isAssociatedImage) return const SizedBox.shrink();
-
     return Material(
       color: Colors.black54,
       borderRadius: BorderRadius.circular(24),
@@ -1700,8 +1698,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
               await _sendCurrentImageToFriend();
           }
         },
-        itemBuilder: (context) => const [
-          PopupMenuItem<_ImageAction>(
+        itemBuilder: (context) => [
+          const PopupMenuItem<_ImageAction>(
             value: _ImageAction.print,
             child: ListTile(
               contentPadding: EdgeInsets.zero,
@@ -1709,7 +1707,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
               title: Text('Print'),
             ),
           ),
-          PopupMenuItem<_ImageAction>(
+          const PopupMenuItem<_ImageAction>(
             value: _ImageAction.sendToFriend,
             child: ListTile(
               contentPadding: EdgeInsets.zero,
@@ -1717,15 +1715,18 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
               title: Text('Send to friend'),
             ),
           ),
-          PopupMenuDivider(),
-          PopupMenuItem<_ImageAction>(
-            value: _ImageAction.move,
-            child: ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.drive_file_move_outline),
-              title: Text('Move...'),
+          // A sketch isn't filed in a category, so moving it doesn't apply.
+          if (!widget.isAssociatedImage) ...[
+            const PopupMenuDivider(),
+            const PopupMenuItem<_ImageAction>(
+              value: _ImageAction.move,
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.drive_file_move_outline),
+                title: Text('Move...'),
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );

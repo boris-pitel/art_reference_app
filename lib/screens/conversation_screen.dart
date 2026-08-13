@@ -253,20 +253,31 @@ class _ConversationScreenState extends State<ConversationScreen> {
       controller: _scrollController,
       padding: const EdgeInsets.all(16),
       itemCount: _messages.length,
-      itemBuilder: (context, index) => _buildBubble(_messages[index]),
+      itemBuilder: (context, index) {
+        final previous = index > 0 ? _messages[index - 1] : null;
+        final sameSenderAsPrevious =
+            previous != null && previous.senderId == _messages[index].senderId;
+        return _buildBubble(
+          _messages[index],
+          extraTopGap: sameSenderAsPrevious ? 6 : 0,
+        );
+      },
     );
   }
 
-  Widget _buildBubble(ChatMessage message) {
+  Widget _buildBubble(ChatMessage message, {required double extraTopGap}) {
     final theme = Theme.of(context);
     final isMine = message.isMine;
+    final timeLabel = MaterialLocalizations.of(
+      context,
+    ).formatTimeOfDay(TimeOfDay.fromDateTime(message.createdAt.toLocal()));
     return Align(
       alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         constraints: BoxConstraints(
           maxWidth: MediaQuery.of(context).size.width * 0.72,
         ),
-        margin: const EdgeInsets.only(bottom: 10),
+        margin: EdgeInsets.only(top: extraTopGap, bottom: 10),
         padding: message.imageUrl != null
             ? const EdgeInsets.all(4)
             : const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -275,6 +286,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
               ? theme.colorScheme.primaryContainer
               : theme.colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(16),
+          border: message.imageUrl != null
+              ? Border.all(color: theme.colorScheme.outlineVariant)
+              : null,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -306,6 +320,25 @@ class _ConversationScreenState extends State<ConversationScreen> {
                   ),
                 ),
               ),
+            Padding(
+              padding: EdgeInsets.only(
+                top: message.imageUrl != null ? 4 : 4,
+                left: message.imageUrl != null ? 4 : 0,
+              ),
+              child: Text(
+                timeLabel,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: isMine
+                      ? theme.colorScheme.onPrimaryContainer.withValues(
+                          alpha: 0.7,
+                        )
+                      : theme.colorScheme.onSurfaceVariant.withValues(
+                          alpha: 0.7,
+                        ),
+                ),
+              ),
+            ),
           ],
         ),
       ),

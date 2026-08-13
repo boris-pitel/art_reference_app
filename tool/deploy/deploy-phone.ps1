@@ -39,9 +39,12 @@ if ([string]::IsNullOrWhiteSpace($DeviceId)) {
     if ($deviceLines.Count -gt 1) {
         throw 'Multiple phones found. Run again with -DeviceId SERIAL.'
     }
-    $DeviceId = ($deviceLines[0] -split '\s+')[0]
+    if ($deviceLines[0] -notmatch '^(\S+)') {
+        throw "Could not parse a device serial from: $($deviceLines[0])"
+    }
+    $DeviceId = $Matches[1]
 } elseif (-not ($deviceLines | Where-Object {
-    ($_ -split '\s+')[0] -eq $DeviceId
+    $_ -match '^(\S+)' -and $Matches[1] -eq $DeviceId
 })) {
     throw "Device '$DeviceId' is not connected and authorized."
 }

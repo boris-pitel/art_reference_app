@@ -61,9 +61,20 @@ class AdminService {
 
   String normalizeEmail(String email) => email.trim().toLowerCase();
 
-  String? loginNameFor(User user) {
-    final value = user.userMetadata?['login_name']?.toString().trim();
-    return value == null || value.isEmpty ? null : value;
+  /// Current `user_profiles.login_name` values, keyed by auth user ID. This
+  /// is the live value shown throughout the app; `user.userMetadata` only
+  /// holds what was submitted at signup and is never updated afterward.
+  Future<Map<String, String?>> fetchLoginNames(Iterable<String> userIds) async {
+    final ids = userIds.toList();
+    if (ids.isEmpty) return {};
+    final rows = await client
+        .from('user_profiles')
+        .select('auth_user_id,login_name')
+        .inFilter('auth_user_id', ids);
+    return {
+      for (final row in rows)
+        row['auth_user_id'] as String: row['login_name'] as String?,
+    };
   }
 
   Future<List<User>> listUsers() async {
@@ -177,6 +188,27 @@ class AdminService {
       user.email!,
       redirectTo: redirectUrl,
     );
+  }
+
+  Future<void> setLoginName(User user, String? loginName) async {
+    final normalized = loginName?.trim();
+    final value = (normalized == null || normalized.isEmpty)
+        ? null
+        : normalized;
+    if (value != null && value.length > 50) {
+      throw ArgumentError('Login name must be 50 characters or fewer.');
+    }
+    try {
+      await client
+          .from('user_profiles')
+          .update({'login_name': value})
+          .eq('auth_user_id', user.id);
+    } on PostgrestException catch (error) {
+      if (error.code == '23505') {
+        throw StateError('That login name is already taken.');
+      }
+      rethrow;
+    }
   }
 
   Future<void> setPassword(String email, String password) async {

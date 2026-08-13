@@ -78,9 +78,12 @@ Deno.serve(async (request) => {
     .select('auth_user_id,login_name')
     .eq('is_discoverable', true)
     .not('login_name', 'is', null)
-    .ilike('login_name', `%${query}%`)
+    // Case-insensitive POSIX regular expression match (PostgREST "imatch",
+    // Postgres `~*`), so the query is treated as a regex, not a literal
+    // substring.
+    .filter('login_name', 'imatch', query)
     .order('login_name', { ascending: true })
-    .limit(20);
+    .limit(15);
 
   for (const id of excludedIds) {
     builder = builder.neq('auth_user_id', id);
@@ -89,6 +92,13 @@ Deno.serve(async (request) => {
   const { data, error } = await builder;
 
   if (error) {
+    // An invalid regular expression (e.g. unbalanced parentheses) is a
+    // client input problem, not a server failure — treat it as "no
+    // matches" instead of a 500 so a stray typo doesn't look like an
+    // outage.
+    if (error.code === '2201B') {
+      return jsonResponse({ users: [] }, 200);
+    }
     console.error(error);
     return jsonResponse({ error: 'Unable to search users.' }, 500);
   }
