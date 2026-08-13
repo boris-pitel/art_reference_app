@@ -38,3 +38,21 @@ verify_jwt = false
 verify_jwt = false
 [functions.delete-category]
 verify_jwt = false
+[functions.search-users]
+verify_jwt = true
+[functions.list-conversations]
+verify_jwt = true
+[functions.list-messages]
+verify_jwt = true
+[functions.prepare-message-image-upload]
+verify_jwt = true
+[functions.send-message]
+verify_jwt = true
+[functions.mark-conversation-read]
+verify_jwt = true
+[functions.block-user]
+verify_jwt = true
+[functions.unblock-user]
+verify_jwt = true
+[functions.list-blocked-users]
+verify_jwt = true

@@ -15,6 +15,8 @@ import 'screens/login_screen.dart';
 import 'screens/maintenance_screen.dart';
 import 'services/user_activity_logger.dart';
 import 'screens/keyword_search_screen.dart';
+import 'screens/messages_screen.dart';
+import 'screens/messaging_settings_screen.dart';
 import 'screens/shared_image_import_screen.dart';
 import 'services/category_service.dart';
 import 'services/library_home_cache.dart';
@@ -269,7 +271,7 @@ class _AuthenticationLoadingScreen extends StatelessWidget {
   }
 }
 
-enum _AccountMenuAction { help, about, feedback, signOut }
+enum _AccountMenuAction { help, about, feedback, privacy, signOut }
 
 class CollectionsScreen extends StatefulWidget {
   const CollectionsScreen({super.key});
@@ -585,6 +587,13 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
           context,
         ).push(MaterialPageRoute<void>(builder: (_) => const FeedbackScreen()));
         return;
+      case _AccountMenuAction.privacy:
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => const MessagingSettingsScreen(),
+          ),
+        );
+        return;
       case _AccountMenuAction.signOut:
         await _signOut();
         return;
@@ -608,6 +617,12 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     profiler.checkpoint('Category route closed');
     await _loadCategories(showLoading: false);
     profiler.finish();
+  }
+
+  Future<void> _openMessages() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (context) => const MessagesScreen()),
+    );
   }
 
   Future<void> _openKeywordSearch() async {
@@ -863,6 +878,11 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         centerTitle: false,
         actions: [
           IconButton(
+            onPressed: _openMessages,
+            icon: const Icon(Icons.mail_outline),
+            tooltip: 'Messages',
+          ),
+          IconButton(
             onPressed: _isLoading || _categories.isEmpty
                 ? null
                 : _openKeywordSearch,
@@ -936,6 +956,15 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
                     leading: Icon(Icons.feedback_outlined),
                     title: Text('Send Feedback'),
                     subtitle: Text('Report a problem or share an idea'),
+                  ),
+                ),
+                const PopupMenuItem<_AccountMenuAction>(
+                  value: _AccountMenuAction.privacy,
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.privacy_tip_outlined),
+                    title: Text('Privacy and blocking'),
+                    subtitle: Text('Manage who can find and message you'),
                   ),
                 ),
               ];

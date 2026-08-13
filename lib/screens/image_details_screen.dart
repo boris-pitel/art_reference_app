@@ -21,6 +21,7 @@ import '../widgets/image_keywords_section.dart';
 import '../widgets/home_button.dart';
 import 'ai_image_edit_screen.dart';
 import 'image_adjustment_screen.dart';
+import 'recipient_picker_screen.dart';
 
 class _ExportImageData {
   const _ExportImageData(this.bytes, this.mimeType);
@@ -85,7 +86,7 @@ Future<void> _saveExportImage(String imageUrl, String imageId) async {
 
 enum _AssociatedImageAction { open, editImage, share, save, print, delete }
 
-enum _ImageAction { print, move }
+enum _ImageAction { print, move, sendToFriend }
 
 class _AiAnalysis {
   const _AiAnalysis({
@@ -226,6 +227,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   bool _isAiAnalysisExpanded = false;
   bool _isMovingImage = false;
   bool _isPrintingImage = false;
+  bool _isSendingToFriend = false;
   bool _isFavorite = false;
   bool _isFinishedArtwork = false;
   bool _isNavigatingHorizontally = false;
@@ -1194,6 +1196,32 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     }
   }
 
+  Future<void> _sendCurrentImageToFriend() async {
+    if (_isMovingImage || _isPrintingImage || _isSendingToFriend) return;
+
+    setState(() => _isSendingToFriend = true);
+    try {
+      final image = await _downloadExportImage(_currentImageUrl);
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (context) => RecipientPickerScreen(
+            imageBytes: image.bytes,
+            imageLabel: widget.isAssociatedImage ? 'sketch' : 'reference',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to prepare the image to send: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSendingToFriend = false);
+    }
+  }
+
   Future<void> _printAssociatedImage(ImageAssetInfo image) async {
     if (_isExportingAssociatedImage(image.id)) return;
     setState(() => _printingAssociatedImageIds.add(image.id));
@@ -1659,7 +1687,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       color: Colors.black54,
       borderRadius: BorderRadius.circular(24),
       child: PopupMenuButton<_ImageAction>(
-        enabled: !_isMovingImage && !_isPrintingImage,
+        enabled: !_isMovingImage && !_isPrintingImage && !_isSendingToFriend,
         tooltip: 'Image actions',
         icon: const Icon(Icons.more_vert, color: Colors.white),
         onSelected: (action) async {
@@ -1668,6 +1696,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
               await _printCurrentImage();
             case _ImageAction.move:
               await _moveImage();
+            case _ImageAction.sendToFriend:
+              await _sendCurrentImageToFriend();
           }
         },
         itemBuilder: (context) => const [
@@ -1677,6 +1707,14 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
               contentPadding: EdgeInsets.zero,
               leading: Icon(Icons.print_outlined),
               title: Text('Print'),
+            ),
+          ),
+          PopupMenuItem<_ImageAction>(
+            value: _ImageAction.sendToFriend,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.person_add_alt_outlined),
+              title: Text('Send to friend'),
             ),
           ),
           PopupMenuDivider(),

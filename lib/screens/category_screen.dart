@@ -13,6 +13,7 @@ import '../services/image_print_service.dart';
 import '../widgets/home_button.dart';
 import 'help_screen.dart';
 import 'image_details_screen.dart';
+import 'recipient_picker_screen.dart';
 
 class _LoadedImage {
   const _LoadedImage({
@@ -45,7 +46,7 @@ class _DownloadedImage {
   }
 }
 
-enum _ImageAction { edit, share, save, print, remove }
+enum _ImageAction { edit, share, save, print, sendToFriend, remove }
 
 class CategoryScreen extends StatefulWidget {
   const CategoryScreen({super.key, required this.category});
@@ -74,6 +75,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
   String? _sharingImageId;
   String? _savingImageId;
   String? _printingImageId;
+  String? _sendingImageId;
   String? _errorMessage;
 
   bool get _isBusy {
@@ -82,7 +84,8 @@ class _CategoryScreenState extends State<CategoryScreen> {
         _removingImageId != null ||
         _sharingImageId != null ||
         _savingImageId != null ||
-        _printingImageId != null;
+        _printingImageId != null ||
+        _sendingImageId != null;
   }
 
   bool get _cameraIsAvailable {
@@ -526,6 +529,45 @@ class _CategoryScreenState extends State<CategoryScreen> {
     }
   }
 
+  Future<void> _sendToFriend(_LoadedImage image) async {
+    if (_isBusy) {
+      return;
+    }
+
+    setState(() {
+      _sendingImageId = image.id;
+    });
+
+    try {
+      final downloadedImage = await _downloadImage(image);
+
+      if (!mounted) {
+        return;
+      }
+
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (context) => RecipientPickerScreen(
+            imageBytes: downloadedImage.bytes,
+            imageLabel: widget.category.displayName,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      _showMessage('Unable to prepare the image to send: $error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _sendingImageId = null;
+        });
+      }
+    }
+  }
+
   String _detectMimeType(String? responseContentType, Uint8List bytes) {
     final normalizedHeader = responseContentType
         ?.split(';')
@@ -611,6 +653,10 @@ class _CategoryScreenState extends State<CategoryScreen> {
         await _printImage(image);
         return;
 
+      case _ImageAction.sendToFriend:
+        await _sendToFriend(image);
+        return;
+
       case _ImageAction.remove:
         await _removeFromCategory(image);
         return;
@@ -633,72 +679,84 @@ class _CategoryScreenState extends State<CategoryScreen> {
       showDragHandle: true,
       builder: (sheetContext) {
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.edit_outlined),
-                title: Text(
-                  widget.category.isMyArt
-                      ? 'Edit parent details'
-                      : 'Edit details',
-                ),
-                subtitle: const Text('Open titles, notes, and image options'),
-                onTap: () {
-                  Navigator.of(sheetContext).pop(_ImageAction.edit);
-                },
-              ),
-              const Padding(
-                padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Reference',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ),
-              ListTile(
-                leading: const Icon(Icons.ios_share_outlined),
-                title: const Text('Share'),
-                onTap: () {
-                  Navigator.of(sheetContext).pop(_ImageAction.share);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.photo_library_outlined),
-                title: const Text('Save to Photos'),
-                onTap: () {
-                  Navigator.of(sheetContext).pop(_ImageAction.save);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.print_outlined),
-                title: const Text('Print'),
-                onTap: () {
-                  Navigator.of(sheetContext).pop(_ImageAction.print);
-                },
-              ),
-              if (!widget.category.isMyArt) ...[
-                const Divider(height: 1),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
                 ListTile(
-                  leading: Icon(
-                    Icons.delete_outline,
-                    color: Theme.of(sheetContext).colorScheme.error,
-                  ),
+                  leading: const Icon(Icons.edit_outlined),
                   title: Text(
-                    'Remove',
-                    style: TextStyle(
-                      color: Theme.of(sheetContext).colorScheme.error,
-                    ),
+                    widget.category.isMyArt
+                        ? 'Edit parent details'
+                        : 'Edit details',
                   ),
+                  subtitle: const Text('Open titles, notes, and image options'),
                   onTap: () {
-                    Navigator.of(sheetContext).pop(_ImageAction.remove);
+                    Navigator.of(sheetContext).pop(_ImageAction.edit);
                   },
                 ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Reference',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.ios_share_outlined),
+                  title: const Text('Share'),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop(_ImageAction.share);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.photo_library_outlined),
+                  title: const Text('Save to Photos'),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop(_ImageAction.save);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.print_outlined),
+                  title: const Text('Print'),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop(_ImageAction.print);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.person_add_alt_outlined),
+                  title: const Text('Send to friend'),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop(_ImageAction.sendToFriend);
+                  },
+                ),
+                if (!widget.category.isMyArt) ...[
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: Icon(
+                      Icons.delete_outline,
+                      color: Theme.of(sheetContext).colorScheme.error,
+                    ),
+                    title: Text(
+                      'Remove',
+                      style: TextStyle(
+                        color: Theme.of(sheetContext).colorScheme.error,
+                      ),
+                    ),
+                    onTap: () {
+                      Navigator.of(sheetContext).pop(_ImageAction.remove);
+                    },
+                  ),
+                ],
+                const SizedBox(height: 8),
               ],
-              const SizedBox(height: 8),
-            ],
+            ),
           ),
         );
       },
@@ -763,6 +821,14 @@ class _CategoryScreenState extends State<CategoryScreen> {
             contentPadding: EdgeInsets.zero,
             leading: Icon(Icons.print_outlined),
             title: Text('Print'),
+          ),
+        ),
+        const PopupMenuItem(
+          value: _ImageAction.sendToFriend,
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.person_add_alt_outlined),
+            title: Text('Send to friend'),
           ),
         ),
         if (!widget.category.isMyArt) ...[
@@ -965,9 +1031,15 @@ class _CategoryScreenState extends State<CategoryScreen> {
         final isSharing = _sharingImageId == image.id;
         final isSaving = _savingImageId == image.id;
         final isPrinting = _printingImageId == image.id;
+        final isSending = _sendingImageId == image.id;
 
         final isWorking =
-            isOpening || isRemoving || isSharing || isSaving || isPrinting;
+            isOpening ||
+            isRemoving ||
+            isSharing ||
+            isSaving ||
+            isPrinting ||
+            isSending;
 
         return GestureDetector(
           onLongPress: isWorking ? null : () => _handleLongPress(image),
@@ -1001,6 +1073,8 @@ class _CategoryScreenState extends State<CategoryScreen> {
                                   ? 'Saving...'
                                   : isPrinting
                                   ? 'Preparing print...'
+                                  : isSending
+                                  ? 'Preparing...'
                                   : 'Opening...',
                               style: const TextStyle(
                                 color: Colors.white,
