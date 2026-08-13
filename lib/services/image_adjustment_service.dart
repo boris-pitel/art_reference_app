@@ -101,8 +101,17 @@ Uint8List _applyAdjustment(
     );
   }
 
-  final x = (data.left.clamp(0.0, 1.0) * source.width).round();
-  final y = (data.top.clamp(0.0, 1.0) * source.height).round();
+  // Leave at least one source pixel after the crop origin. A normalized
+  // position close to 1 can otherwise round to the image dimension, making
+  // the width/height clamp bounds invalid (for example, clamp(1, 0)).
+  final x = math.min(
+    (data.left.clamp(0.0, 1.0) * source.width).round(),
+    source.width - 1,
+  );
+  final y = math.min(
+    (data.top.clamp(0.0, 1.0) * source.height).round(),
+    source.height - 1,
+  );
   final cropWidth = (data.width.clamp(0.01, 1.0) * source.width).round().clamp(
     1,
     source.width - x,

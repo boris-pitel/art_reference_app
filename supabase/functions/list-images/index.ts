@@ -113,9 +113,25 @@ Deno.serve(async (request) => {
     );
   }
 
-  const connection = await pool.connect();
+  let connection: Awaited<ReturnType<typeof pool.connect>> | null = null;
 
   try {
+    let connectionError: unknown;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        connection = await pool.connect();
+        break;
+      } catch (error) {
+        connectionError = error;
+        if (attempt < 2) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, attempt === 0 ? 150 : 450)
+          );
+        }
+      }
+    }
+    if (!connection) throw connectionError ?? new Error('Database unavailable');
+
     const result =
         await connection.queryObject<ImageRow>`
       select
@@ -205,6 +221,6 @@ Deno.serve(async (request) => {
       500,
     );
   } finally {
-    connection.release();
+    connection?.release();
   }
 });

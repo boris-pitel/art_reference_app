@@ -19,6 +19,7 @@ import '../services/keyword_service.dart';
 import '../services/user_activity_logger.dart';
 import '../widgets/image_keywords_section.dart';
 import '../widgets/home_button.dart';
+import 'ai_image_edit_screen.dart';
 import 'image_adjustment_screen.dart';
 
 class _ExportImageData {
@@ -82,7 +83,7 @@ Future<void> _saveExportImage(String imageUrl, String imageId) async {
   );
 }
 
-enum _AssociatedImageAction { open, editImage, share, save, delete }
+enum _AssociatedImageAction { open, editImage, share, save, print, delete }
 
 enum _ImageAction { print, move }
 
@@ -208,6 +209,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   final Set<String> _deletingAssociatedImageIds = <String>{};
   final Set<String> _sharingAssociatedImageIds = <String>{};
   final Set<String> _savingAssociatedImageIds = <String>{};
+  final Set<String> _printingAssociatedImageIds = <String>{};
   GlobalKey<ImageKeywordsSectionState> _keywordsSectionKey =
       GlobalKey<ImageKeywordsSectionState>();
   final Set<String> _addingAiKeywords = <String>{};
@@ -834,6 +836,10 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         await _saveAssociatedImage(image);
         break;
 
+      case _AssociatedImageAction.print:
+        await _printAssociatedImage(image);
+        break;
+
       case _AssociatedImageAction.delete:
         await _confirmAndRemoveAssociatedImage(image);
         break;
@@ -858,7 +864,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
 
   bool _isExportingAssociatedImage(String imageId) =>
       _sharingAssociatedImageIds.contains(imageId) ||
-      _savingAssociatedImageIds.contains(imageId);
+      _savingAssociatedImageIds.contains(imageId) ||
+      _printingAssociatedImageIds.contains(imageId);
 
   Future<void> _shareAssociatedImage(ImageAssetInfo image) async {
     if (_isExportingAssociatedImage(image.id)) return;
@@ -1184,6 +1191,26 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       }
     } finally {
       if (mounted) setState(() => _isPrintingImage = false);
+    }
+  }
+
+  Future<void> _printAssociatedImage(ImageAssetInfo image) async {
+    if (_isExportingAssociatedImage(image.id)) return;
+    setState(() => _printingAssociatedImageIds.add(image.id));
+    try {
+      final downloadedImage = await _downloadExportImage(image.imageUrl);
+      await ImagePrintService.printImage(
+        imageBytes: downloadedImage.bytes,
+        documentName: 'Painter Reference Sketch ${image.id}',
+      );
+    } catch (error) {
+      if (mounted) {
+        _showAssociatedMessage('Unable to print sketch: $error');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _printingAssociatedImageIds.remove(image.id));
+      }
     }
   }
 
@@ -1617,33 +1644,6 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                 top: 12,
                 right: 12,
                 child: _buildImageActionsMenu(context),
-              ),
-              Positioned(
-                right: 12,
-                bottom: 12,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(24),
-                  ),
-                  child: const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.open_in_full, size: 20, color: Colors.white),
-                        SizedBox(width: 7),
-                        Text(
-                          'Open image',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
               ),
             ],
           ),
@@ -2382,6 +2382,14 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                           title: Text('Save to Photos'),
                         ),
                       ),
+                      PopupMenuItem<_AssociatedImageAction>(
+                        value: _AssociatedImageAction.print,
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.print_outlined),
+                          title: Text('Print'),
+                        ),
+                      ),
                       PopupMenuDivider(),
                       PopupMenuItem<_AssociatedImageAction>(
                         value: _AssociatedImageAction.delete,
@@ -2644,6 +2652,52 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
     }
   }
 
+  Future<void> _openAiEditor() async {
+    final sourceImageId = _imageId ?? widget.createSketchParentImageId;
+    final parentImageId =
+        widget.createSketchParentImageId ?? widget.editableParentImageId;
+    if (sourceImageId == null || parentImageId == null || _isApplyingEdit) {
+      return;
+    }
+    final newImageId = await Navigator.of(context).push<String>(
+      MaterialPageRoute<String>(
+        builder: (_) => AiImageEditScreen(
+          sourceImageId: sourceImageId,
+          sourceImageUrl: _imageUrl,
+          parentImageId: parentImageId,
+        ),
+      ),
+    );
+    if (newImageId == null || !mounted) return;
+    try {
+      final associated = await ImageAssetService(
+        Supabase.instance.client,
+      ).listAssociatedImages(parentImageId);
+      final saved = associated
+          .where((item) => item.id == newImageId)
+          .firstOrNull;
+      if (saved == null) {
+        throw StateError('The accepted AI image could not be reloaded.');
+      }
+      if (!mounted) return;
+      Navigator.of(context).pop(
+        _EditedSketch(
+          imageId: saved.id,
+          imageUrl: saved.imageUrl,
+          replacesCurrentImage: false,
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('AI image was saved, but refresh failed: $error'),
+          ),
+        );
+      }
+    }
+  }
+
   bool _isAlreadyAttachedError(Object error) {
     final message = error.toString().toLowerCase();
     return message.contains('already associated') ||
@@ -2886,6 +2940,7 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
                       imageBytes: _editingBytes!,
                       embedded: true,
                       onDone: _applyEditedSketch,
+                      onEditWithAi: _openAiEditor,
                       onProcessingChanged: (processing) {
                         if (mounted) {
                           setState(() {

@@ -56,9 +56,9 @@ class _IntroductionPage extends StatelessWidget {
         ),
         _HelpSectionTitle('Organize your inspiration'),
         _HelpParagraph(
-          'Start with the built-in artistic categories or create your own. '
-          'Custom categories can be renamed, given a cover image, or removed '
-          'when they are no longer needed.',
+          'Organize references in Portraits, Landscapes, Still Life, and '
+          'Inbox. Use Add images or Camera on the main screen to send new '
+          'references directly to Inbox.',
         ),
         _HelpParagraph(
           'A reference can be connected to more than one category without '
@@ -123,13 +123,8 @@ class _BuiltInHowToPage extends StatelessWidget {
         ),
         _HelpSectionTitle('Manage categories'),
         _HelpParagraph(
-          'Tap Add Category to create a custom category. Use the three-dot '
-          'menu on a custom category to rename it, change its cover image, or '
-          'delete it. Built-in categories cannot be renamed or deleted.',
-        ),
-        _HelpParagraph(
-          'Deleting a custom category removes its category connections but '
-          'does not delete the original image files.',
+          'Use the three-dot menu on Portraits, Landscapes, or Still Life to '
+          'choose a personal cover image. My Art and Inbox are protected.',
         ),
         _HelpSectionTitle('Add a reference image'),
         _NumberedInstruction(
@@ -139,7 +134,7 @@ class _BuiltInHowToPage extends StatelessWidget {
         _NumberedInstruction(number: 2, text: 'Tap Add Photo Reference.'),
         _NumberedInstruction(
           number: 3,
-          text: 'Choose Gallery, or use Camera when it is available.',
+          text: 'Choose Add image, or use Camera when it is available.',
         ),
         _NumberedInstruction(
           number: 4,
@@ -155,7 +150,7 @@ class _BuiltInHowToPage extends StatelessWidget {
           'On platforms that support direct sharing into Painter Reference, use '
           'the Share command in a browser or photo app, choose Painter Reference, '
           'then select the destination category. If Painter Reference is not '
-          'listed, save the image first and add it from Gallery.',
+          'listed, save the image first and use Add image.',
         ),
         _HelpSectionTitle('View and export a reference'),
         _HelpParagraph(

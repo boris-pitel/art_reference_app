@@ -6,7 +6,7 @@
 3. Confirm your email if requested, then sign in.
 
 ## Manage categories
-Tap Add Category to create a custom category. Use its three-dot menu to rename it, change its cover image, or delete it. Built-in categories cannot be renamed or deleted. My Art is the first built-in category and shows sketches marked as finished paintings.
+The main library contains My Art, Portraits, Landscapes, Still Life, and Inbox. Tap Add images or Camera on the main screen to put photos directly into Inbox. Use the three-dot menu on Portraits, Landscapes, or Still Life to choose a personal cover image. My Art and Inbox covers cannot be changed. My Art shows sketches marked as finished paintings.
 
 ## Add and organize a reference
 1. Open the category where the reference should appear.

@@ -23,4 +23,34 @@ void main() {
 
     expect(category.displayName, 'Icons');
   });
+
+  test('reference and custom categories allow personalized cover images', () {
+    for (final code in ['portrait', 'landscape', 'still_life']) {
+      final category = ReferenceCategory.fromJson({
+        'id': code.hashCode,
+        'code': code,
+        'display_name': code,
+        'is_builtin': true,
+      });
+      expect(category.canChangeImage, isTrue);
+    }
+
+    expect(ReferenceCategory.myArt.canChangeImage, isFalse);
+    final inbox = ReferenceCategory.fromJson({
+      'id': 99,
+      'code': 'inbox',
+      'display_name': 'Inbox',
+      'is_builtin': true,
+    });
+    expect(inbox.isInbox, isTrue);
+    expect(inbox.canChangeImage, isFalse);
+    final custom = ReferenceCategory.fromJson({
+      'id': 100,
+      'code': 'flowers',
+      'display_name': 'Flowers',
+      'is_builtin': false,
+      'user_id': 'owner',
+    });
+    expect(custom.canChangeImage, isTrue);
+  });
 }

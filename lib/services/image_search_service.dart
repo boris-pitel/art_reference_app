@@ -100,27 +100,16 @@ class ImageSearchService {
     );
   }
 
-  Future<List<ImageSearchResult>> searchImages(
-    String query, {
-    bool favoritesOnly = false,
-  }) async {
-    final normalizedQuery = query.trim();
+  static String normalizeQuery(String query) => query.trim();
 
-    if (normalizedQuery.isEmpty && !favoritesOnly) {
-      return const <ImageSearchResult>[];
-    }
+  static bool shouldSkipSearch(
+    String normalizedQuery, {
+    required bool favoritesOnly,
+  }) {
+    return normalizedQuery.isEmpty && !favoritesOnly;
+  }
 
-    final response = await _supabase.functions.invoke(
-      'search-images',
-      body: {
-        'user_id': _userId,
-        'query': normalizedQuery,
-        'favorites_only': favoritesOnly,
-      },
-    );
-
-    final data = response.data;
-
+  static List<ImageSearchResult> parseSearchResults(dynamic data) {
     if (data is Map && data['error'] != null) {
       throw StateError(data['error'].toString());
     }
@@ -134,9 +123,30 @@ class ImageSearchService {
           if (item is! Map) {
             throw StateError('search-images returned an invalid result: $item');
           }
-
           return ImageSearchResult.fromJson(Map<String, dynamic>.from(item));
         })
         .toList(growable: false);
+  }
+
+  Future<List<ImageSearchResult>> searchImages(
+    String query, {
+    bool favoritesOnly = false,
+  }) async {
+    final normalizedQuery = normalizeQuery(query);
+
+    if (shouldSkipSearch(normalizedQuery, favoritesOnly: favoritesOnly)) {
+      return const <ImageSearchResult>[];
+    }
+
+    final response = await _supabase.functions.invoke(
+      'search-images',
+      body: {
+        'user_id': _userId,
+        'query': normalizedQuery,
+        'favorites_only': favoritesOnly,
+      },
+    );
+
+    return parseSearchResults(response.data);
   }
 }

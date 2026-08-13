@@ -62,6 +62,9 @@ class _UsersPageState extends State<UsersPage> {
         .where(
           (user) =>
               (user.email ?? '').toLowerCase().contains(query) ||
+              (widget.service.loginNameFor(user) ?? '').toLowerCase().contains(
+                query,
+              ) ||
               user.id.toLowerCase().contains(query),
         )
         .toList();
@@ -107,11 +110,13 @@ class _UsersPageState extends State<UsersPage> {
               child: Card(
                 clipBehavior: Clip.antiAlias,
                 child: SingleChildScrollView(
-                  child: SizedBox(
-                    width: double.infinity,
+                  scrollDirection: Axis.horizontal,
+                  child: SingleChildScrollView(
                     child: DataTable(
                       columns: const [
                         DataColumn(label: Text('Email')),
+                        DataColumn(label: Text('Login name')),
+                        DataColumn(label: Text('Admin')),
                         DataColumn(label: Text('Created')),
                         DataColumn(label: Text('Last sign-in')),
                         DataColumn(label: Text('Actions')),
@@ -121,52 +126,75 @@ class _UsersPageState extends State<UsersPage> {
                           DataRow(
                             cells: [
                               DataCell(
-                                SelectableText(user.email ?? '(no email)'),
+                                TextButton(
+                                  onPressed: user.email == null
+                                      ? null
+                                      : () => _showInventory(user.email!),
+                                  style: TextButton.styleFrom(
+                                    padding: EdgeInsets.zero,
+                                    alignment: Alignment.centerLeft,
+                                  ),
+                                  child: Text(user.email ?? '(no email)'),
+                                ),
+                              ),
+                              DataCell(
+                                Text(widget.service.loginNameFor(user) ?? '-'),
+                              ),
+                              DataCell(
+                                Switch(
+                                  value: widget.service.isAdmin(user),
+                                  onChanged: (value) => _setAdmin(user, value),
+                                ),
                               ),
                               DataCell(Text(_date(user.createdAt))),
                               DataCell(Text(_date(user.lastSignInAt))),
                               DataCell(
-                                Wrap(
-                                  spacing: 4,
-                                  children: [
-                                    IconButton(
-                                      tooltip: 'Inspect account',
-                                      onPressed: user.email == null
-                                          ? null
-                                          : () => _showInventory(user.email!),
-                                      icon: const Icon(
-                                        Icons.visibility_outlined,
+                                SizedBox(
+                                  width: 196,
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        tooltip: 'Inspect account',
+                                        onPressed: user.email == null
+                                            ? null
+                                            : () => _showInventory(user.email!),
+                                        icon: const Icon(
+                                          Icons.visibility_outlined,
+                                        ),
                                       ),
-                                    ),
-                                    IconButton(
-                                      tooltip: 'Send password reset',
-                                      onPressed: user.email == null
-                                          ? null
-                                          : () => _sendPasswordReset(user),
-                                      icon: const Icon(
-                                        Icons.mark_email_read_outlined,
+                                      IconButton(
+                                        tooltip: 'Send password reset',
+                                        onPressed: user.email == null
+                                            ? null
+                                            : () => _sendPasswordReset(user),
+                                        icon: const Icon(
+                                          Icons.mark_email_read_outlined,
+                                        ),
                                       ),
-                                    ),
-                                    IconButton(
-                                      tooltip: 'Set password',
-                                      onPressed: user.email == null
-                                          ? null
-                                          : () => _setPassword(user),
-                                      icon: const Icon(Icons.password_outlined),
-                                    ),
-                                    IconButton(
-                                      tooltip: 'Permanently remove user',
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.error,
-                                      onPressed: user.email == null
-                                          ? null
-                                          : () => _removeUser(user.email!),
-                                      icon: const Icon(
-                                        Icons.delete_forever_outlined,
+                                      IconButton(
+                                        tooltip: 'Set password',
+                                        onPressed: user.email == null
+                                            ? null
+                                            : () => _setPassword(user),
+                                        icon: const Icon(
+                                          Icons.password_outlined,
+                                        ),
                                       ),
-                                    ),
-                                  ],
+                                      IconButton(
+                                        tooltip: 'Permanently remove user',
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.error,
+                                        onPressed: user.email == null
+                                            ? null
+                                            : () => _removeUser(user.email!),
+                                        icon: const Icon(
+                                          Icons.delete_forever_outlined,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ],
@@ -188,10 +216,10 @@ class _UsersPageState extends State<UsersPage> {
       () => widget.service.inventoryForEmail(email),
     );
     if (inventory == null || !mounted) return;
-    await showDialog<void>(
+    final removeRequested = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(inventory.email),
+        title: const Text('User details'),
         content: SizedBox(
           width: 560,
           child: SelectionArea(
@@ -199,8 +227,15 @@ class _UsersPageState extends State<UsersPage> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                _DetailRow('Email', inventory.email),
+                _DetailRow('Login name', inventory.loginName ?? '-'),
                 _DetailRow('Auth user ID', inventory.user.id),
                 _DetailRow('Data owner ID', inventory.dataUserId),
+                _DetailRow(
+                  'Administrator',
+                  widget.service.isAdmin(inventory.user) ? 'Yes' : 'No',
+                ),
+                _DetailRow('Phone', inventory.user.phone ?? '-'),
                 _DetailRow('Created', _date(inventory.user.createdAt)),
                 _DetailRow('Last sign-in', _date(inventory.user.lastSignInAt)),
                 _DetailRow('Images', '${inventory.images.length}'),
@@ -216,13 +251,24 @@ class _UsersPageState extends State<UsersPage> {
           ),
         ),
         actions: [
+          TextButton.icon(
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.delete_forever_outlined),
+            label: const Text('Remove User'),
+          ),
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(context, false),
             child: const Text('Close'),
           ),
         ],
       ),
     );
+    if (removeRequested == true && mounted) {
+      await _removeUser(inventory.email);
+    }
   }
 
   Future<void> _sendPasswordReset(User user) async {
@@ -244,6 +290,38 @@ class _UsersPageState extends State<UsersPage> {
       ),
     );
     if (success) _message('Password-reset email requested for $email.');
+  }
+
+  Future<void> _setAdmin(User user, bool isAdmin) async {
+    final email = user.email ?? user.id;
+    final approved = await _confirm(
+      title: isAdmin
+          ? 'Grant administrator access?'
+          : 'Remove administrator access?',
+      body: isAdmin
+          ? '$email will see the Maintenance area in Painter Reference.'
+          : '$email will lose access after the app refreshes its session.',
+      confirmLabel: isAdmin ? 'Grant Access' : 'Remove Access',
+    );
+    if (!approved) return;
+    final success = await _runMutation(
+      label: isAdmin
+          ? 'Granting administrator access...'
+          : 'Removing administrator access...',
+      action: isAdmin ? 'users.grant-admin' : 'users.revoke-admin',
+      targetEmail: email,
+      authUserId: user.id,
+      details: {'is_admin': isAdmin},
+      operation: () => widget.service.setAdmin(user, isAdmin),
+    );
+    if (success) {
+      _message(
+        isAdmin
+            ? 'Administrator access granted.'
+            : 'Administrator access removed.',
+      );
+      await _load();
+    }
   }
 
   Future<void> _setPassword(User user) async {

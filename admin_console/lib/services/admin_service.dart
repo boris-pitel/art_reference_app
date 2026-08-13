@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 class UserInventory {
   const UserInventory({
     required this.user,
+    required this.loginName,
     required this.dataUserId,
     required this.images,
     required this.categories,
@@ -11,6 +12,7 @@ class UserInventory {
   });
 
   final User user;
+  final String? loginName;
   final String dataUserId;
   final List<Map<String, dynamic>> images;
   final List<Map<String, dynamic>> categories;
@@ -24,6 +26,7 @@ class UserInventory {
 
   Map<String, Object?> toAuditDetails() => {
     'data_user_id': dataUserId,
+    'login_name': loginName,
     'images': images.length,
     'categories': categories.length,
     'storage_files': storageFileCount,
@@ -57,6 +60,11 @@ class AdminService {
   );
 
   String normalizeEmail(String email) => email.trim().toLowerCase();
+
+  String? loginNameFor(User user) {
+    final value = user.userMetadata?['login_name']?.toString().trim();
+    return value == null || value.isEmpty ? null : value;
+  }
 
   Future<List<User>> listUsers() async {
     final users = <User>[];
@@ -95,6 +103,11 @@ class AdminService {
     final user = await findUserByEmail(email);
     final normalized = normalizeEmail(user.email ?? email);
     final dataUserId = dataUserIdForEmail(normalized);
+    final profile = await client
+        .from('user_profiles')
+        .select('login_name')
+        .eq('auth_user_id', user.id)
+        .maybeSingle();
     final images = await _listImageRows(dataUserId);
     final categories = await _listCategoryRows(dataUserId);
     final paths = <String, Set<String>>{
@@ -128,6 +141,7 @@ class AdminService {
     );
     return UserInventory(
       user: user,
+      loginName: profile?['login_name']?.toString(),
       dataUserId: dataUserId,
       images: images,
       categories: categories,
@@ -193,6 +207,17 @@ class AdminService {
               .eq('status', status)
               .order('created_at', ascending: false);
     return response.map((row) => Map<String, dynamic>.from(row)).toList();
+  }
+
+  bool isAdmin(User user) => user.appMetadata['is_admin'] == true;
+
+  Future<void> setAdmin(User user, bool isAdmin) async {
+    await client.auth.admin.updateUserById(
+      user.id,
+      attributes: AdminUserAttributes(
+        appMetadata: {...user.appMetadata, 'is_admin': isAdmin},
+      ),
+    );
   }
 
   Future<List<Map<String, dynamic>>> listUserActivity({

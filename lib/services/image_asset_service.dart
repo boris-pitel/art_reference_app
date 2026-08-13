@@ -38,12 +38,105 @@ class UnsupportedImageFormatException implements Exception {
   }
 }
 
+class PreparedImageUpload {
+  const PreparedImageUpload({
+    required this.imageId,
+    required this.existingImage,
+    required this.uploadRequired,
+    this.storagePath,
+    this.uploadToken,
+  });
+
+  final String imageId;
+  final bool existingImage;
+  final bool uploadRequired;
+  final String? storagePath;
+  final String? uploadToken;
+
+  bool get canSkipUpload => existingImage && !uploadRequired;
+
+  factory PreparedImageUpload.fromResponse(dynamic data) {
+    if (data is! Map) {
+      throw StateError(
+        'prepare-image-upload returned an unexpected response: $data',
+      );
+    }
+
+    final imageId = data['image_id'];
+    if (imageId is! String || imageId.trim().isEmpty) {
+      throw StateError(
+        'prepare-image-upload did not return a valid image ID. Response: $data',
+      );
+    }
+
+    final existingImage = data['existing_image'] == true;
+    final uploadRequired = data['upload_required'] == true;
+
+    if (!uploadRequired && !existingImage) {
+      throw StateError(
+        'prepare-image-upload returned an inconsistent response. '
+        'Response: $data',
+      );
+    }
+
+    if (!uploadRequired) {
+      return PreparedImageUpload(
+        imageId: imageId.trim(),
+        existingImage: true,
+        uploadRequired: false,
+      );
+    }
+
+    final storagePath = data['storage_path'];
+    final uploadToken = data['upload_token'];
+    if (storagePath is! String || storagePath.trim().isEmpty) {
+      throw StateError(
+        'prepare-image-upload did not return a valid Storage path. '
+        'Response: $data',
+      );
+    }
+    if (uploadToken is! String || uploadToken.trim().isEmpty) {
+      throw StateError(
+        'prepare-image-upload did not return a valid upload token. '
+        'Response: $data',
+      );
+    }
+
+    return PreparedImageUpload(
+      imageId: imageId.trim(),
+      existingImage: existingImage,
+      uploadRequired: true,
+      storagePath: storagePath.trim(),
+      uploadToken: uploadToken.trim(),
+    );
+  }
+}
+
 class ImageAssetService {
   ImageAssetService(this._supabase);
 
   final SupabaseClient _supabase;
 
   static const String _bucketName = 'reference-images';
+
+  Future<dynamic> _invokeListWithRetry(
+    Future<dynamic> Function() operation,
+  ) async {
+    Object? lastError;
+    for (var attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+        if (attempt < 2) {
+          await Future<void>.delayed(
+            Duration(milliseconds: attempt == 0 ? 350 : 900),
+          );
+        }
+      }
+    }
+    throw lastError!;
+  }
 
   String get _normalizedUserEmail {
     final email = _supabase.auth.currentUser?.email?.trim().toLowerCase();
@@ -213,47 +306,19 @@ class ImageAssetService {
 
       profiler.checkpoint('prepare-image-upload completed');
 
-      final prepareData = prepareResponse.data;
+      final preparedUpload = PreparedImageUpload.fromResponse(
+        prepareResponse.data,
+      );
+      final preparedImageId = preparedUpload.imageId;
 
-      if (prepareData is! Map) {
-        throw StateError(
-          'prepare-image-upload returned an '
-          'unexpected response: $prepareData',
-        );
-      }
-
-      final preparedImageId = prepareData['image_id'];
-
-      if (preparedImageId is! String || preparedImageId.isEmpty) {
-        throw StateError(
-          'prepare-image-upload did not return '
-          'a valid image ID. '
-          'Response: $prepareData',
-        );
-      }
-
-      final existingImage = prepareData['existing_image'] == true;
-
-      final uploadRequired = prepareData['upload_required'] == true;
-
-      if (existingImage && !uploadRequired) {
+      if (preparedUpload.canSkipUpload) {
         profiler.finish(
           isAssociatedImage
-              ? 'Existing image linked to parent; '
-                    'physical upload skipped'
-              : 'Existing image found; '
-                    'physical upload skipped',
+              ? 'Existing image linked to parent; physical upload skipped'
+              : 'Existing image found; physical upload skipped',
         );
 
         return preparedImageId;
-      }
-
-      if (!uploadRequired) {
-        throw StateError(
-          'prepare-image-upload returned an '
-          'inconsistent response. '
-          'Response: $prepareData',
-        );
       }
 
       late final Uint8List thumbnailBytes;
@@ -275,25 +340,8 @@ class ImageAssetService {
         throw const UnsupportedImageFormatException();
       }
 
-      final storagePath = prepareData['storage_path'];
-
-      final uploadToken = prepareData['upload_token'];
-
-      if (storagePath is! String || storagePath.isEmpty) {
-        throw StateError(
-          'prepare-image-upload did not return '
-          'a valid Storage path. '
-          'Response: $prepareData',
-        );
-      }
-
-      if (uploadToken is! String || uploadToken.isEmpty) {
-        throw StateError(
-          'prepare-image-upload did not return '
-          'a valid upload token. '
-          'Response: $prepareData',
-        );
-      }
+      final storagePath = preparedUpload.storagePath!;
+      final uploadToken = preparedUpload.uploadToken!;
 
       await _supabase.storage
           .from(_bucketName)
@@ -303,7 +351,7 @@ class ImageAssetService {
             normalizedImageBytes,
             FileOptions(
               cacheControl: '3600',
-              contentType: _detectContentType(normalizedImageBytes),
+              contentType: detectContentType(normalizedImageBytes),
               upsert: false,
             ),
           );
@@ -579,10 +627,15 @@ class ImageAssetService {
     }
     final cacheBuster = DateTime.now().millisecondsSinceEpoch;
 
-    final response = await _supabase.functions.invoke(
-      'list-images?refresh=$cacheBuster',
-      method: HttpMethod.get,
-      headers: {'x-user-id': _userId, 'x-category-code': category.databaseCode},
+    final response = await _invokeListWithRetry(
+      () => _supabase.functions.invoke(
+        'list-images?refresh=$cacheBuster',
+        method: HttpMethod.get,
+        headers: {
+          'x-user-id': _userId,
+          'x-category-code': category.databaseCode,
+        },
+      ),
     );
 
     final data = response.data;
@@ -594,15 +647,17 @@ class ImageAssetService {
       );
     }
 
-    return _parseImageAssetList(data, responseName: 'list-images');
+    return parseImageAssetList(data, responseName: 'list-images');
   }
 
   Future<List<ImageAssetInfo>> listFinishedArtworks() async {
     final cacheBuster = DateTime.now().millisecondsSinceEpoch;
-    final response = await _supabase.functions.invoke(
-      'list-finished-artworks?refresh=$cacheBuster',
-      method: HttpMethod.get,
-      headers: {'x-user-id': _userId},
+    final response = await _invokeListWithRetry(
+      () => _supabase.functions.invoke(
+        'list-finished-artworks?refresh=$cacheBuster',
+        method: HttpMethod.get,
+        headers: {'x-user-id': _userId},
+      ),
     );
     final data = response.data;
     if (data is! List) {
@@ -610,7 +665,7 @@ class ImageAssetService {
         'list-finished-artworks returned an unexpected response: $data',
       );
     }
-    return _parseImageAssetList(data, responseName: 'list-finished-artworks');
+    return parseImageAssetList(data, responseName: 'list-finished-artworks');
   }
 
   Future<List<ImageAssetInfo>> listAssociatedImages(
@@ -628,13 +683,15 @@ class ImageAssetService {
 
     final cacheBuster = DateTime.now().millisecondsSinceEpoch;
 
-    final response = await _supabase.functions.invoke(
-      'list-associated-images?refresh=$cacheBuster',
-      method: HttpMethod.get,
-      headers: {
-        'x-user-id': _userId,
-        'x-parent-image-id': normalizedParentImageId,
-      },
+    final response = await _invokeListWithRetry(
+      () => _supabase.functions.invoke(
+        'list-associated-images?refresh=$cacheBuster',
+        method: HttpMethod.get,
+        headers: {
+          'x-user-id': _userId,
+          'x-parent-image-id': normalizedParentImageId,
+        },
+      ),
     );
 
     final data = response.data;
@@ -646,10 +703,10 @@ class ImageAssetService {
       );
     }
 
-    return _parseImageAssetList(data, responseName: 'list-associated-images');
+    return parseImageAssetList(data, responseName: 'list-associated-images');
   }
 
-  List<ImageAssetInfo> _parseImageAssetList(
+  static List<ImageAssetInfo> parseImageAssetList(
     List<dynamic> data, {
     required String responseName,
   }) {
@@ -720,7 +777,7 @@ class ImageAssetService {
     }).toList();
   }
 
-  String _detectContentType(Uint8List imageBytes) {
+  static String detectContentType(Uint8List imageBytes) {
     if (imageBytes.length >= 3 &&
         imageBytes[0] == 0xff &&
         imageBytes[1] == 0xd8 &&

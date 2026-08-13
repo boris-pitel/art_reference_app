@@ -3,18 +3,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('Home button clears the stack and opens Categories', (
+  testWidgets('Home button returns to the existing Categories screen', (
     tester,
   ) async {
+    final navigatorKey = GlobalKey<NavigatorState>();
     await tester.pumpWidget(
       MaterialApp(
-        home: const _SecondaryScreen(),
-        routes: {
-          categoriesHomeRoute: (_) =>
-              const Scaffold(body: Text('Categories home')),
-        },
+        navigatorKey: navigatorKey,
+        home: const Scaffold(body: Text('Categories home')),
       ),
     );
+    navigatorKey.currentState!.push(
+      MaterialPageRoute<void>(builder: (_) => const _SecondaryScreen()),
+    );
+    await tester.pumpAndSettle();
 
     await tester.tap(find.byTooltip('Home — Categories'));
     await tester.pumpAndSettle();

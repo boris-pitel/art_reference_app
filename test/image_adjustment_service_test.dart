@@ -23,6 +23,43 @@ void main() {
     expect(decoded.height, 40);
   });
 
+  test(
+    'keeps a one-pixel crop when rounding reaches the bottom-right edge',
+    () async {
+      final source = img.Image(width: 10, height: 10);
+      img.fill(source, color: img.ColorRgb8(120, 80, 40));
+
+      final result = await ImageAdjustmentService.apply(
+        bytes: Uint8List.fromList(img.encodePng(source)),
+        angle: 0,
+        crop: const Rect.fromLTWH(0.96, 0.96, 0.04, 0.04),
+      );
+      final decoded = img.decodeImage(result);
+
+      expect(decoded, isNotNull);
+      expect(decoded!.width, 1);
+      expect(decoded.height, 1);
+    },
+  );
+
+  test(
+    'accepts an origin exactly on the normalized bottom-right boundary',
+    () async {
+      final source = img.Image(width: 3, height: 2);
+
+      final result = await ImageAdjustmentService.apply(
+        bytes: Uint8List.fromList(img.encodePng(source)),
+        angle: 0,
+        crop: const Rect.fromLTWH(1, 1, 0.01, 0.01),
+      );
+      final decoded = img.decodeImage(result);
+
+      expect(decoded, isNotNull);
+      expect(decoded!.width, 1);
+      expect(decoded.height, 1);
+    },
+  );
+
   test('detects an already-horizontal reference line as straight', () async {
     final source = img.Image(width: 160, height: 100);
     img.fill(source, color: img.ColorRgb8(40, 40, 40));

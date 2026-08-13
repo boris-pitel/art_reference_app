@@ -87,7 +87,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
 
   bool get _cameraIsAvailable {
     if (kIsWeb) {
-      return false;
+      return true;
     }
 
     return defaultTargetPlatform == TargetPlatform.android ||
@@ -843,7 +843,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
             : const Icon(Icons.add_photo_alternate_outlined),
-        label: Text(_isUploading ? 'Working...' : 'Gallery'),
+        label: Text(_isUploading ? 'Working...' : 'Add image'),
       );
     }
 
@@ -856,7 +856,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
               ? null
               : () => _addPhotoReference(ImageSource.gallery),
           icon: const Icon(Icons.photo_library_outlined),
-          label: const Text('Gallery'),
+          label: const Text('Add image'),
         ),
         const SizedBox(width: 12),
         FloatingActionButton.extended(

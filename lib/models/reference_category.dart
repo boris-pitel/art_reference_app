@@ -1,4 +1,11 @@
 class ReferenceCategory {
+  static const Set<String> visibleCategoryCodes = {
+    'portrait',
+    'landscape',
+    'still_life',
+    'inbox',
+  };
+
   static const ReferenceCategory myArt = ReferenceCategory(
     id: -1,
     databaseCode: 'my_art',
@@ -27,7 +34,11 @@ class ReferenceCategory {
 
   bool get canRename => !isBuiltIn;
 
+  bool get canChangeImage => !isMyArt && !isInbox;
+
   bool get isMyArt => databaseCode == myArt.databaseCode;
+
+  bool get isInbox => databaseCode == 'inbox';
 
   factory ReferenceCategory.fromJson(Map<String, dynamic> json) {
     final Object? rawId = json['id'];

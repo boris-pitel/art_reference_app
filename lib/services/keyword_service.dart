@@ -129,7 +129,7 @@ class KeywordService {
     required String keyword,
   }) async {
     final normalizedImageId = imageId.trim();
-    final normalizedKeyword = _normalizeKeyword(keyword);
+    final normalizedKeyword = normalizeKeyword(keyword);
 
     if (normalizedImageId.isEmpty) {
       throw ArgumentError.value(
@@ -186,7 +186,7 @@ class KeywordService {
     );
   }
 
-  String _normalizeKeyword(String keyword) {
+  static String normalizeKeyword(String keyword) {
     final normalizedKeyword = keyword.trim().replaceAll(RegExp(r'\s+'), ' ');
 
     if (normalizedKeyword.isEmpty) {

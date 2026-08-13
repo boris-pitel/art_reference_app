@@ -1,11 +1,7 @@
 import 'package:flutter/material.dart';
 
-const String categoriesHomeRoute = '/categories';
-
 void goToCategoriesHome(BuildContext context) {
-  Navigator.of(
-    context,
-  ).pushNamedAndRemoveUntil(categoriesHomeRoute, (route) => false);
+  Navigator.of(context).popUntil((route) => route.isFirst);
 }
 
 class HomeButton extends StatelessWidget {

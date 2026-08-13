@@ -12,6 +12,7 @@ import 'screens/category_screen.dart';
 import 'screens/feedback_screen.dart';
 import 'screens/help_screen.dart';
 import 'screens/login_screen.dart';
+import 'screens/maintenance_screen.dart';
 import 'services/user_activity_logger.dart';
 import 'screens/keyword_search_screen.dart';
 import 'screens/shared_image_import_screen.dart';
@@ -19,7 +20,6 @@ import 'services/category_service.dart';
 import 'services/library_home_cache.dart';
 import 'services/image_asset_service.dart';
 import 'utils/performance_profiler.dart';
-import 'widgets/home_button.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -256,7 +256,6 @@ class _ArtReferenceAppState extends State<ArtReferenceApp> {
           : _isSignedIn
           ? const CollectionsScreen()
           : LoginScreen(key: ValueKey<String?>(_pendingSharedImagePath)),
-      routes: {categoriesHomeRoute: (_) => const CollectionsScreen()},
     );
   }
 }
@@ -287,8 +286,16 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   final Map<String, int> _imageCountsByCategoryCode = <String, int>{};
 
   bool _isLoading = true;
+  bool _isIngesting = false;
   bool _isAddingCategory = false;
+  bool _isAdmin = false;
   String? _errorMessage;
+
+  bool get _cameraIsAvailable {
+    if (kIsWeb) return true;
+    return defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS;
+  }
 
   @override
   void initState() {
@@ -299,6 +306,31 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     _imageAssetService = ImageAssetService(supabase);
 
     _restoreThenRefreshCategories();
+    _refreshAdminStatus();
+  }
+
+  Future<void> _refreshAdminStatus() async {
+    try {
+      final response = await Supabase.instance.client.auth.getUser();
+      final isAdmin = response.user?.appMetadata['is_admin'] == true;
+      if (mounted && isAdmin != _isAdmin) {
+        setState(() => _isAdmin = isAdmin);
+      }
+    } catch (error) {
+      debugPrint('Unable to refresh administrator status: $error');
+      if (mounted && _isAdmin) setState(() => _isAdmin = false);
+    }
+  }
+
+  Future<void> _refreshHome() async {
+    await Future.wait<void>([_loadCategories(), _refreshAdminStatus()]);
+  }
+
+  Future<void> _openMaintenance() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(builder: (_) => const MaintenanceScreen()),
+    );
+    await _refreshAdminStatus();
   }
 
   Future<void> _restoreThenRefreshCategories() async {
@@ -306,10 +338,20 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     if (userId != null) {
       final cached = await LibraryHomeCache.read(userId);
       if (cached != null && mounted) {
+        final visibleCachedCategories = cached.categories
+            .where(
+              (category) =>
+                  category.isMyArt ||
+                  !category.isBuiltIn ||
+                  ReferenceCategory.visibleCategoryCodes.contains(
+                    category.databaseCode,
+                  ),
+            )
+            .toList();
         setState(() {
           _categories
             ..clear()
-            ..addAll(cached.categories);
+            ..addAll(visibleCachedCategories);
           _imageCountsByCategoryCode
             ..clear()
             ..addAll(cached.counts);
@@ -322,22 +364,16 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
 
   Future<void> _loadCategories({bool showLoading = true}) async {
     final profiler = PerformanceProfiler('CATEGORY RETURN/REFRESH');
-    setState(() {
-      if (showLoading) _isLoading = true;
-      _errorMessage = null;
-    });
+    if (showLoading) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    }
 
     try {
-      final categories = await _categoryService.listCategories();
+      final categories = await _loadOrderedCategoriesWithRetry();
       profiler.checkpoint('Category records loaded');
-      if (!categories.any((category) => category.isMyArt)) {
-        categories.add(ReferenceCategory.myArt);
-      }
-      categories.sort((left, right) {
-        if (left.isMyArt) return -1;
-        if (right.isMyArt) return 1;
-        return left.id.compareTo(right.id);
-      });
 
       final countEntries = await Future.wait(
         categories.map((category) async {
@@ -348,7 +384,10 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
             debugPrint(
               'Unable to load the ${category.displayName} count: $error',
             );
-            return MapEntry<String, int>(category.databaseCode, 0);
+            return MapEntry<String, int>(
+              category.databaseCode,
+              _imageCountsByCategoryCode[category.databaseCode] ?? 0,
+            );
           }
         }),
       );
@@ -358,25 +397,32 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         return;
       }
 
-      setState(() {
-        _categories
-          ..clear()
-          ..addAll(categories);
+      final counts = Map<String, int>.fromEntries(countEntries);
+      final shouldUpdateGrid =
+          _isLoading ||
+          _errorMessage != null ||
+          !_sameCategoryPresentation(_categories, categories) ||
+          !mapEquals(_imageCountsByCategoryCode, counts);
+      if (shouldUpdateGrid) {
+        setState(() {
+          _categories
+            ..clear()
+            ..addAll(categories);
 
-        _imageCountsByCategoryCode
-          ..clear()
-          ..addEntries(countEntries);
+          _imageCountsByCategoryCode
+            ..clear()
+            ..addAll(counts);
 
-        _isLoading = false;
-      });
-      profiler.checkpoint('Category grid updated');
+          _isLoading = false;
+          _errorMessage = null;
+        });
+        profiler.checkpoint('Category grid updated');
+      } else {
+        profiler.checkpoint('Category grid unchanged');
+      }
       final userId = Supabase.instance.client.auth.currentUser?.id;
       if (userId != null) {
-        await LibraryHomeCache.write(
-          userId,
-          categories,
-          Map<String, int>.fromEntries(countEntries),
-        );
+        await LibraryHomeCache.write(userId, categories, counts);
         profiler.checkpoint('Category cache written');
       }
       profiler.finish();
@@ -386,11 +432,65 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         return;
       }
 
-      setState(() {
-        _isLoading = false;
-        _errorMessage = error.toString();
-      });
+      final hasUsableCategories = _categories.isNotEmpty;
+      final nextError = hasUsableCategories ? null : error.toString();
+      if (_isLoading || _errorMessage != nextError) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = nextError;
+        });
+      }
+      if (hasUsableCategories) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Unable to refresh categories. Showing the saved library.',
+            ),
+          ),
+        );
+      }
     }
+  }
+
+  bool _sameCategoryPresentation(
+    List<ReferenceCategory> current,
+    List<ReferenceCategory> next,
+  ) {
+    if (current.length != next.length) return false;
+    for (var index = 0; index < current.length; index++) {
+      final left = current[index];
+      final right = next[index];
+      if (left.id != right.id ||
+          left.databaseCode != right.databaseCode ||
+          left.displayName != right.displayName ||
+          left.isBuiltIn != right.isBuiltIn ||
+          left.thumbnailAsset != right.thumbnailAsset ||
+          left.userId != right.userId) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  Future<List<ReferenceCategory>> _loadOrderedCategoriesWithRetry() async {
+    Object? lastError;
+    for (var attempt = 0; attempt < 3; attempt++) {
+      try {
+        final categories = await _categoryService.listCategories();
+        if (!categories.any((category) => category.isMyArt)) {
+          categories.add(ReferenceCategory.myArt);
+        }
+        return await _categoryService.applySavedOrder(categories);
+      } catch (error) {
+        lastError = error;
+        if (attempt < 2) {
+          await Future<void>.delayed(
+            Duration(milliseconds: attempt == 0 ? 350 : 900),
+          );
+        }
+      }
+    }
+    throw lastError!;
   }
 
   Future<void> _openHelp({int initialTabIndex = 0}) async {
@@ -434,15 +534,22 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       return;
     }
 
+    final auth = Supabase.instance.client.auth;
+    UserActivityLogger.instance.record(
+      operation: 'logout',
+      status: 'succeeded',
+      targetType: 'account',
+      targetId: auth.currentUser?.id,
+    );
     try {
-      await UserActivityLogger.instance.log(
-        operation: 'logout',
-        status: 'succeeded',
-        targetType: 'account',
-        targetId: Supabase.instance.client.auth.currentUser?.id,
-      );
-      await Supabase.instance.client.auth.signOut();
+      await auth.signOut(scope: SignOutScope.local);
     } on AuthException catch (error) {
+      // Supabase clears the local session before it attempts remote token
+      // revocation. A network failure must not undo a successful local logout.
+      if (auth.currentSession == null) {
+        debugPrint('Remote sign-out could not be completed: $error');
+        return;
+      }
       if (!mounted) {
         return;
       }
@@ -451,6 +558,10 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         SnackBar(content: Text('Unable to sign out: ${error.message}')),
       );
     } catch (error) {
+      if (auth.currentSession == null) {
+        debugPrint('Remote sign-out could not be completed: $error');
+        return;
+      }
       if (!mounted) {
         return;
       }
@@ -515,55 +626,102 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     );
   }
 
-  Future<void> _showAddCategoryDialog() async {
-    if (_isAddingCategory) {
-      return;
-    }
-
-    final categoryName = await showDialog<String>(
-      context: context,
-      builder: (dialogContext) {
-        return const _AddCategoryDialog();
-      },
-    );
-
-    if (categoryName == null || !mounted) {
-      return;
-    }
-
-    setState(() {
-      _isAddingCategory = true;
-    });
-
-    try {
-      final newCategory = await _categoryService.addCategory(categoryName);
-
-      if (!mounted) {
-        return;
+  Future<void> _ingestImagesToInbox(ImageSource source) async {
+    if (_isIngesting || _isLoading) return;
+    ReferenceCategory? inbox;
+    for (final category in _categories) {
+      if (category.isInbox) {
+        inbox = category;
+        break;
       }
+    }
+    if (inbox == null) {
+      _showCategoryMessage('Inbox is unavailable. Refresh and try again.');
+      return;
+    }
 
-      setState(() {
-        _categories.add(newCategory);
-        _imageCountsByCategoryCode[newCategory.databaseCode] = 0;
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${newCategory.displayName} added.')),
+    final picker = ImagePicker();
+    late final List<XFile> selected;
+    if (source == ImageSource.gallery) {
+      selected = await picker.pickMultiImage();
+    } else {
+      final captured = await picker.pickImage(source: ImageSource.camera);
+      selected = captured == null ? <XFile>[] : <XFile>[captured];
+    }
+    if (selected.isEmpty || !mounted) return;
+    if (selected.length > 1) {
+      final approved = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text('Add ${selected.length} images to Inbox?'),
+          content: const Text(
+            'Every selected image will be uploaded directly to Inbox.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Add images'),
+            ),
+          ],
+        ),
       );
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
+      if (approved != true || !mounted) return;
+    }
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Unable to add category: $error')));
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isAddingCategory = false;
-        });
+    setState(() => _isIngesting = true);
+    var saved = 0;
+    var failed = 0;
+    try {
+      for (final image in selected) {
+        try {
+          await _imageAssetService.uploadImage(
+            await image.readAsBytes(),
+            inbox,
+          );
+          saved += 1;
+        } catch (error) {
+          failed += 1;
+          debugPrint('Unable to ingest ${image.name}: $error');
+        }
       }
+      if (mounted) await _loadCategories(showLoading: false);
+      if (mounted) {
+        _showCategoryMessage(
+          failed == 0
+              ? '$saved ${saved == 1 ? 'image' : 'images'} added to Inbox.'
+              : '$saved added to Inbox; $failed failed.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isIngesting = false);
+    }
+  }
+
+  Future<void> _showAddCategoryDialog() async {
+    if (_isAddingCategory) return;
+    final name = await showDialog<String>(
+      context: context,
+      builder: (_) => const _AddCategoryDialog(title: 'Add category'),
+    );
+    if (name == null || !mounted) return;
+    setState(() => _isAddingCategory = true);
+    try {
+      final category = await _categoryService.addCategory(name);
+      if (!mounted) return;
+      setState(() {
+        _categories.add(category);
+        _imageCountsByCategoryCode[category.databaseCode] = 0;
+      });
+      await _persistCategoryOrder();
+      if (mounted) _showCategoryMessage('${category.displayName} added.');
+    } catch (error) {
+      if (mounted) _showCategoryMessage('Unable to add category: $error');
+    } finally {
+      if (mounted) setState(() => _isAddingCategory = false);
     }
   }
 
@@ -571,8 +729,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     final name = await showDialog<String>(
       context: context,
       builder: (_) => _AddCategoryDialog(
-        title: 'Rename Category',
-        actionLabel: 'Rename',
+        title: 'Rename category',
         initialValue: category.displayName,
       ),
     );
@@ -581,12 +738,88 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       final updated = await _categoryService.renameCategory(category, name);
       if (!mounted) return;
       setState(() {
-        final i = _categories.indexWhere((item) => item.id == updated.id);
-        if (i >= 0) _categories[i] = updated;
+        final index = _categories.indexWhere((item) => item.id == category.id);
+        if (index >= 0) _categories[index] = updated;
       });
-      _showCategoryMessage('${updated.displayName} renamed.');
+      _showCategoryMessage('Category renamed.');
     } catch (error) {
       if (mounted) _showCategoryMessage('Unable to rename category: $error');
+    }
+  }
+
+  Future<void> _deleteCategory(ReferenceCategory category) async {
+    final count = _imageCountsByCategoryCode[category.databaseCode] ?? 0;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Delete ${category.displayName}?'),
+        content: Text(
+          count == 0
+              ? 'The category will be permanently removed.'
+              : 'The category will be removed from its $count images. The images themselves will not be deleted.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await _categoryService.deleteCategory(category);
+      if (!mounted) return;
+      setState(() {
+        _categories.removeWhere((item) => item.id == category.id);
+        _imageCountsByCategoryCode.remove(category.databaseCode);
+      });
+      await _persistCategoryOrder();
+      if (mounted) _showCategoryMessage('Category deleted.');
+    } catch (error) {
+      if (mounted) _showCategoryMessage('Unable to delete category: $error');
+    }
+  }
+
+  Future<void> _moveCategory(int fromIndex, int toIndex) async {
+    if (fromIndex == toIndex ||
+        fromIndex < 0 ||
+        toIndex < 0 ||
+        fromIndex >= _categories.length ||
+        toIndex >= _categories.length) {
+      return;
+    }
+    final previous = List<ReferenceCategory>.of(_categories);
+    setState(() {
+      final category = _categories.removeAt(fromIndex);
+      _categories.insert(toIndex, category);
+    });
+    try {
+      await _persistCategoryOrder();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _categories
+          ..clear()
+          ..addAll(previous);
+      });
+      _showCategoryMessage('Unable to save category order: $error');
+    }
+  }
+
+  Future<void> _persistCategoryOrder() async {
+    await _categoryService.saveCategoryOrder(_categories);
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId != null) {
+      await LibraryHomeCache.write(
+        userId,
+        _categories,
+        _imageCountsByCategoryCode,
+      );
     }
   }
 
@@ -616,43 +849,6 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     }
   }
 
-  Future<void> _deleteCategory(ReferenceCategory category) async {
-    final count = _imageCountsByCategoryCode[category.databaseCode] ?? 0;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text('Delete ${category.displayName}?'),
-        content: Text(
-          count == 0
-              ? 'This category will be permanently removed.'
-              : 'This removes the category from $count ${count == 1 ? 'image' : 'images'}, but does not delete the original image files.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    try {
-      await _categoryService.deleteCategory(category);
-      if (!mounted) return;
-      setState(() {
-        _categories.removeWhere((item) => item.id == category.id);
-        _imageCountsByCategoryCode.remove(category.databaseCode);
-      });
-      _showCategoryMessage('${category.displayName} deleted.');
-    } catch (error) {
-      if (mounted) _showCategoryMessage('Unable to delete category: $error');
-    }
-  }
-
   void _showCategoryMessage(String message) => ScaffoldMessenger.of(
     context,
   ).showSnackBar(SnackBar(content: Text(message)));
@@ -674,12 +870,18 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
             tooltip: 'Search by keyword',
           ),
           IconButton(
-            onPressed: _isLoading || _isAddingCategory ? null : _loadCategories,
+            onPressed: _isLoading || _isIngesting ? null : _refreshHome,
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh categories',
           ),
+          if (_isAdmin)
+            IconButton(
+              onPressed: _openMaintenance,
+              icon: const Icon(Icons.settings_outlined),
+              tooltip: 'Maintenance',
+            ),
           PopupMenuButton<_AccountMenuAction>(
-            tooltip: 'Account, Help and About',
+            tooltip: 'Account and sign out',
             onSelected: _handleAccountMenuAction,
             itemBuilder: (context) {
               return [
@@ -698,6 +900,15 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
                       const SizedBox(height: 3),
                       Text(userEmail),
                     ],
+                  ),
+                ),
+                const PopupMenuDivider(),
+                const PopupMenuItem<_AccountMenuAction>(
+                  value: _AccountMenuAction.signOut,
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.logout),
+                    title: Text('Sign Out'),
                   ),
                 ),
                 const PopupMenuDivider(),
@@ -727,15 +938,6 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
                     subtitle: Text('Report a problem or share an idea'),
                   ),
                 ),
-                const PopupMenuDivider(),
-                const PopupMenuItem<_AccountMenuAction>(
-                  value: _AccountMenuAction.signOut,
-                  child: ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(Icons.logout),
-                    title: Text('Sign Out'),
-                  ),
-                ),
               ];
             },
             icon: const Icon(Icons.account_circle_outlined),
@@ -743,17 +945,53 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         ],
       ),
       body: _buildBody(),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _isAddingCategory ? null : _showAddCategoryDialog,
-        icon: _isAddingCategory
-            ? const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : const Icon(Icons.create_new_folder_outlined),
-        label: Text(_isAddingCategory ? 'Adding...' : 'Add Category'),
-      ),
+      floatingActionButton: _buildHomeActions(),
+    );
+  }
+
+  Widget _buildHomeActions() {
+    final addImages = FloatingActionButton.extended(
+      heroTag: 'inboxGalleryButton',
+      onPressed: _isIngesting
+          ? null
+          : () => _ingestImagesToInbox(ImageSource.gallery),
+      icon: _isIngesting
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.add_photo_alternate_outlined),
+      label: Text(_isIngesting ? 'Adding to Inbox...' : 'Add images'),
+    );
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        FloatingActionButton.small(
+          heroTag: 'addCategoryButton',
+          onPressed: _isAddingCategory ? null : _showAddCategoryDialog,
+          tooltip: 'Add category',
+          child: _isAddingCategory
+              ? const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.create_new_folder_outlined),
+        ),
+        const SizedBox(width: 12),
+        addImages,
+        if (_cameraIsAvailable) ...[
+          const SizedBox(width: 12),
+          FloatingActionButton.extended(
+            heroTag: 'inboxCameraButton',
+            onPressed: _isIngesting
+                ? null
+                : () => _ingestImagesToInbox(ImageSource.camera),
+            icon: const Icon(Icons.camera_alt_outlined),
+            label: const Text('Camera'),
+          ),
+        ],
+      ],
     );
   }
 
@@ -790,88 +1028,123 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     }
 
     return Padding(
-      padding: const EdgeInsets.all(16),
-      child: GridView.builder(
-        itemCount: _categories.length,
-        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-          maxCrossAxisExtent: 260,
-          crossAxisSpacing: 16,
-          mainAxisSpacing: 16,
-          childAspectRatio: 1,
-        ),
-        itemBuilder: (context, index) {
-          final category = _categories[index];
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.drag_indicator,
+                size: 18,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  'Press and hold a category, then drag it to rearrange.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Expanded(
+            child: GridView.builder(
+              itemCount: _categories.length,
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 260,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: 1,
+              ),
+              itemBuilder: (context, index) {
+                final category = _categories[index];
 
-          return CollectionCard(
-            category: category,
-            imageCount: _imageCountsByCategoryCode[category.databaseCode] ?? 0,
-            onTap: () => _openCategory(category),
-            onRename: category.canRename
-                ? () => _renameCategory(category)
-                : null,
-            onChangeImage: category.canRename
-                ? () => _changeCategoryImage(category)
-                : null,
-            onDelete: category.canDelete
-                ? () => _deleteCategory(category)
-                : null,
-          );
-        },
+                final card = CollectionCard(
+                  category: category,
+                  imageCount:
+                      _imageCountsByCategoryCode[category.databaseCode] ?? 0,
+                  onTap: () => _openCategory(category),
+                  onRename: category.canRename
+                      ? () => _renameCategory(category)
+                      : null,
+                  onChangeImage: category.canChangeImage
+                      ? () => _changeCategoryImage(category)
+                      : null,
+                  onDelete: category.canDelete
+                      ? () => _deleteCategory(category)
+                      : null,
+                );
+                return DragTarget<int>(
+                  onWillAcceptWithDetails: (details) => details.data != index,
+                  onAcceptWithDetails: (details) {
+                    unawaited(_moveCategory(details.data, index));
+                  },
+                  builder: (context, candidates, rejected) =>
+                      LongPressDraggable<int>(
+                        data: index,
+                        maxSimultaneousDrags: 1,
+                        feedback: Material(
+                          elevation: 10,
+                          borderRadius: BorderRadius.circular(12),
+                          child: SizedBox(
+                            width: 220,
+                            height: 220,
+                            child: CollectionCard(
+                              category: category,
+                              imageCount:
+                                  _imageCountsByCategoryCode[category
+                                      .databaseCode] ??
+                                  0,
+                              onTap: () {},
+                            ),
+                          ),
+                        ),
+                        childWhenDragging: Opacity(opacity: 0.25, child: card),
+                        child: AnimatedScale(
+                          duration: const Duration(milliseconds: 120),
+                          scale: candidates.isEmpty ? 1 : 0.96,
+                          child: card,
+                        ),
+                      ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
 class _AddCategoryDialog extends StatefulWidget {
-  const _AddCategoryDialog({
-    this.title = 'Add Category',
-    this.actionLabel = 'Add',
-    this.initialValue = '',
-  });
+  const _AddCategoryDialog({required this.title, this.initialValue});
 
   final String title;
-  final String actionLabel;
-  final String initialValue;
+  final String? initialValue;
 
   @override
   State<_AddCategoryDialog> createState() => _AddCategoryDialogState();
 }
 
 class _AddCategoryDialogState extends State<_AddCategoryDialog> {
-  late final TextEditingController _controller;
-
-  bool get _canSubmit => _controller.text.trim().isNotEmpty;
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initialValue,
+  );
 
   @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: widget.initialValue);
-    _controller.addListener(_handleTextChanged);
-  }
-
-  void _handleTextChanged() {
-    if (mounted) {
-      setState(() {});
-    }
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
   void _submit() {
     final value = _controller.text.trim();
-
-    if (value.isEmpty) {
-      return;
-    }
-
-    Navigator.of(context).pop(value);
-  }
-
-  @override
-  void dispose() {
-    _controller
-      ..removeListener(_handleTextChanged)
-      ..dispose();
-
-    super.dispose();
+    if (value.isNotEmpty) Navigator.of(context).pop(value);
   }
 
   @override
@@ -883,27 +1156,15 @@ class _AddCategoryDialogState extends State<_AddCategoryDialog> {
         autofocus: true,
         maxLength: 60,
         textCapitalization: TextCapitalization.words,
-        textInputAction: TextInputAction.done,
-        decoration: const InputDecoration(
-          labelText: 'Category name',
-          hintText: 'Animals',
-          border: OutlineInputBorder(),
-        ),
-        onSubmitted: (_) {
-          _submit();
-        },
+        decoration: const InputDecoration(labelText: 'Category name'),
+        onSubmitted: (_) => _submit(),
       ),
       actions: [
         TextButton(
-          onPressed: () {
-            Navigator.of(context).pop();
-          },
+          onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
         ),
-        FilledButton(
-          onPressed: _canSubmit ? _submit : null,
-          child: Text(widget.actionLabel),
-        ),
+        FilledButton(onPressed: _submit, child: const Text('Save')),
       ],
     );
   }
@@ -947,7 +1208,7 @@ class CollectionCard extends StatelessWidget {
                 ),
               ),
             ),
-            if (onRename != null)
+            if (onRename != null || onChangeImage != null || onDelete != null)
               Positioned(
                 top: 6,
                 right: 6,
@@ -959,11 +1220,24 @@ class CollectionCard extends StatelessWidget {
                     if (value == 'image') onChangeImage?.call();
                     if (value == 'delete') onDelete?.call();
                   },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(value: 'rename', child: Text('Rename')),
-                    PopupMenuItem(value: 'image', child: Text('Change image')),
-                    PopupMenuDivider(),
-                    PopupMenuItem(value: 'delete', child: Text('Delete')),
+                  itemBuilder: (_) => [
+                    if (onRename != null)
+                      const PopupMenuItem(
+                        value: 'rename',
+                        child: Text('Rename'),
+                      ),
+                    if (onChangeImage != null)
+                      const PopupMenuItem(
+                        value: 'image',
+                        child: Text('Change image'),
+                      ),
+                    if (onDelete != null) ...[
+                      const PopupMenuDivider(),
+                      const PopupMenuItem(
+                        value: 'delete',
+                        child: Text('Delete'),
+                      ),
+                    ],
                   ],
                   icon: Icon(Icons.more_vert, color: Colors.white),
                 ),
@@ -1032,7 +1306,9 @@ class CollectionCard extends StatelessWidget {
       ),
       child: Center(
         child: Icon(
-          Icons.collections_bookmark_outlined,
+          category.isInbox
+              ? Icons.inbox_outlined
+              : Icons.collections_bookmark_outlined,
           size: 72,
           color: colorScheme.onPrimaryContainer.withValues(alpha: 0.72),
         ),

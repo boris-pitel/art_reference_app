@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/app_user_profile.dart';
 import '../services/user_activity_logger.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -14,6 +15,8 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _emailController = TextEditingController();
 
   final TextEditingController _passwordController = TextEditingController();
+
+  final TextEditingController _loginNameController = TextEditingController();
 
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
 
@@ -29,6 +32,7 @@ class _LoginScreenState extends State<LoginScreen> {
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
+    _loginNameController.dispose();
 
     super.dispose();
   }
@@ -46,6 +50,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
     final email = _emailController.text.trim().toLowerCase();
     final password = _passwordController.text;
+    final loginName = _loginNameController.text.trim();
+    final creatingAccount = _isCreatingAccount;
+    AppUserProfile? registeredProfile;
 
     setState(() {
       _isWorking = true;
@@ -53,11 +60,26 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      if (_isCreatingAccount) {
+      if (creatingAccount) {
+        if (loginName.isNotEmpty && !await _isLoginNameAvailable(loginName)) {
+          if (mounted) {
+            setState(() {
+              _errorMessage =
+                  'That login name is already in use. Choose another name or leave it empty.';
+            });
+          }
+          return;
+        }
         final response = await _supabase.auth.signUp(
           email: email,
           password: password,
+          data: loginName.isEmpty ? null : {'login_name': loginName},
         );
+
+        final registeredUser = response.user;
+        registeredProfile = registeredUser == null
+            ? null
+            : AppUserProfile.fromAuthUser(registeredUser);
 
         if (!mounted) {
           return;
@@ -80,21 +102,36 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
       UserActivityLogger.instance.record(
-        operation: _isCreatingAccount ? 'account_create' : 'login',
+        operation: creatingAccount ? 'account_create' : 'login',
         status: 'succeeded',
         targetType: 'account',
         targetId: _supabase.auth.currentUser?.id,
+        details: creatingAccount && registeredProfile?.loginName != null
+            ? {'login_name': registeredProfile!.loginName}
+            : const {},
       );
 
       // main.dart listens to onAuthStateChange.
       // It will automatically replace this screen after authentication.
     } on AuthException catch (error) {
+      var message = error.message;
+      if (creatingAccount && loginName.isNotEmpty) {
+        try {
+          if (!await _isLoginNameAvailable(loginName)) {
+            message =
+                'That login name is already in use. Choose another name or leave it empty.';
+          }
+        } catch (_) {
+          // Preserve the original authentication error if availability cannot
+          // be checked while handling it.
+        }
+      }
       if (!mounted) {
         return;
       }
 
       setState(() {
-        _errorMessage = error.message;
+        _errorMessage = message;
       });
     } catch (error) {
       if (!mounted) {
@@ -157,6 +194,22 @@ class _LoginScreenState extends State<LoginScreen> {
     return null;
   }
 
+  String? _validateLoginName(String? value) {
+    final loginName = value?.trim() ?? '';
+    if (loginName.length > 50) {
+      return 'Login name cannot exceed 50 characters.';
+    }
+    return null;
+  }
+
+  Future<bool> _isLoginNameAvailable(String loginName) async {
+    final result = await _supabase.rpc(
+      'is_login_name_available',
+      params: {'candidate': loginName},
+    );
+    return result == true;
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -213,6 +266,23 @@ class _LoginScreenState extends State<LoginScreen> {
                               border: OutlineInputBorder(),
                             ),
                           ),
+                          if (_isCreatingAccount) ...[
+                            const SizedBox(height: 16),
+                            TextFormField(
+                              controller: _loginNameController,
+                              enabled: !_isWorking,
+                              textInputAction: TextInputAction.next,
+                              autocorrect: false,
+                              maxLength: 50,
+                              validator: _validateLoginName,
+                              decoration: const InputDecoration(
+                                labelText: 'Login name (optional)',
+                                helperText: 'Must be unique if provided.',
+                                prefixIcon: Icon(Icons.badge_outlined),
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ],
                           const SizedBox(height: 16),
                           TextFormField(
                             controller: _passwordController,
