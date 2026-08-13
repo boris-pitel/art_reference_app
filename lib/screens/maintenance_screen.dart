@@ -154,7 +154,7 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
     }
     if (!mounted) return;
     Navigator.pop(context);
-    final remove = await showDialog<bool>(
+    final action = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('User details'),
@@ -166,7 +166,33 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _DetailRow('Email', user['email']?.toString() ?? '-'),
-                _DetailRow('Login name', user['login_name']?.toString() ?? '-'),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 5),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(
+                        width: 150,
+                        child: Text(
+                          'Login name',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(user['login_name']?.toString() ?? '-'),
+                      ),
+                      IconButton(
+                        tooltip: 'Set login name',
+                        onPressed: () =>
+                            Navigator.pop(dialogContext, 'edit'),
+                        icon: const Icon(Icons.edit_outlined, size: 18),
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                    ],
+                  ),
+                ),
                 _DetailRow('Auth user ID', user['id']?.toString() ?? '-'),
                 _DetailRow(
                   'Administrator',
@@ -194,18 +220,19 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
               style: TextButton.styleFrom(
                 foregroundColor: Theme.of(context).colorScheme.error,
               ),
-              onPressed: () => Navigator.pop(dialogContext, true),
+              onPressed: () => Navigator.pop(dialogContext, 'remove'),
               icon: const Icon(Icons.delete_forever_outlined),
               label: const Text('Remove User'),
             ),
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
+            onPressed: () => Navigator.pop(dialogContext, null),
             child: const Text('Close'),
           ),
         ],
       ),
     );
-    if (remove == true && mounted) await _confirmRemoveUser(user);
+    if (action == 'remove' && mounted) await _confirmRemoveUser(user);
+    if (action == 'edit' && mounted) await _editLoginName(user);
   }
 
   Future<void> _confirmRemoveUser(Map<String, dynamic> user) async {
@@ -274,6 +301,71 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
       await _service.removeUser(userId: userId, email: email);
       if (mounted) Navigator.pop(context);
       if (mounted) _message('$email was removed.');
+      await _load();
+    } catch (error) {
+      if (mounted) Navigator.pop(context);
+      if (mounted) _message(error.toString(), error: true);
+    }
+  }
+
+  Future<void> _editLoginName(Map<String, dynamic> user) async {
+    final userId = user['id']?.toString();
+    if (userId == null || userId.isEmpty) return;
+    final controller = TextEditingController(
+      text: user['login_name']?.toString() ?? '',
+    );
+    String? validation;
+    final loginName = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('Set login name for ${user['email'] ?? userId}'),
+          content: SizedBox(
+            width: 420,
+            child: TextField(
+              controller: controller,
+              autofocus: true,
+              maxLength: 50,
+              decoration: InputDecoration(
+                labelText: 'Login name',
+                hintText: 'Leave blank to clear it',
+                errorText: validation,
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final value = controller.text.trim();
+                if (value.length > 50) {
+                  setDialogState(
+                    () => validation = 'Must be 50 characters or fewer.',
+                  );
+                  return;
+                }
+                Navigator.pop(dialogContext, value);
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    controller.dispose();
+    if (loginName == null || !mounted) return;
+    _showProgress('Setting login name...');
+    try {
+      await _service.setLoginName(
+        userId: userId,
+        loginName: loginName.isEmpty ? null : loginName,
+      );
+      if (mounted) Navigator.pop(context);
+      if (mounted) _message('Login name updated.');
       await _load();
     } catch (error) {
       if (mounted) Navigator.pop(context);

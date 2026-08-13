@@ -28,8 +28,37 @@ if ($null -eq $adbCommand) {
     $adb = $adbCommand.Source
 }
 
-$deviceLines = @(& $adb devices) | Select-Object -Skip 1 | Where-Object {
-    $_ -match '\S+\s+device$'
+# Piping `adb devices` straight through the PowerShell pipeline is
+# unreliable in this host: capturing via `| Where-Object { ... }` on the
+# direct pipe output, or reading a redirected-to-file copy immediately, can
+# both intermittently return truncated text (reproduced repeatedly - looked
+# like a native-command stdout interop race, confirmed by the fact that a
+# short delay before reading the redirected file consistently fixed it).
+# Retry with a brief delay until the parsed output actually looks complete,
+# instead of trusting the first read.
+$deviceLines = @()
+for ($attempt = 1; $attempt -le 5; $attempt++) {
+    $devicesFile = [System.IO.Path]::GetTempFileName()
+    try {
+        & $adb devices > $devicesFile 2>&1
+        Start-Sleep -Milliseconds 400
+        $rawDevices = Get-Content -LiteralPath $devicesFile -Raw
+    } finally {
+        Remove-Item -LiteralPath $devicesFile -Force -ErrorAction SilentlyContinue
+    }
+    $candidateLines = ($rawDevices -split "`r`n|`n") | Where-Object {
+        $_ -match '\S+\s+device$'
+    }
+    # A real serial is much longer than a single character; anything
+    # shorter means this read caught a still-flushing file.
+    $looksComplete = ($candidateLines.Count -gt 0) -and (
+        $candidateLines | Where-Object { $_.Length -lt 6 }
+    ).Count -eq 0
+    if ($looksComplete) {
+        $deviceLines = $candidateLines
+        break
+    }
+    Start-Sleep -Milliseconds (300 * $attempt)
 }
 if ($deviceLines.Count -eq 0) {
     throw 'No authorized Android phone found. Connect it and enable USB debugging.'

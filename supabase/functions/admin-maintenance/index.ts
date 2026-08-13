@@ -16,7 +16,7 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers':
     'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'GET, DELETE, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, PATCH, DELETE, OPTIONS',
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -184,6 +184,24 @@ async function userInventory(userId: string, currentAdminId: string) {
   };
 }
 
+async function setLoginName(userId: string, loginName: string | null) {
+  const normalized = loginName?.trim();
+  const value = !normalized ? null : normalized;
+  if (value !== null && value.length > 50) {
+    throw new Error('Login name must be 50 characters or fewer.');
+  }
+  const { error } = await adminClient
+    .from('user_profiles')
+    .update({ login_name: value })
+    .eq('auth_user_id', userId);
+  if (error) {
+    if (error.code === '23505') {
+      throw new Error('That login name is already taken.');
+    }
+    throw error;
+  }
+}
+
 async function removeUser(userId: string, email: string, adminId: string) {
   if (userId === adminId) throw new Error('You cannot remove your own account');
   const inventory = await userInventory(userId, adminId);
@@ -215,8 +233,12 @@ Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
-  if (request.method !== 'GET' && request.method !== 'DELETE') {
-    return jsonResponse({ error: 'GET or DELETE required' }, 405);
+  if (
+    request.method !== 'GET' &&
+    request.method !== 'PATCH' &&
+    request.method !== 'DELETE'
+  ) {
+    return jsonResponse({ error: 'GET, PATCH, or DELETE required' }, 405);
   }
 
   const admin = await requireAdmin(request);
@@ -234,6 +256,21 @@ Deno.serve(async (request) => {
       }
       await removeUser(userId, email, admin.id);
       return jsonResponse({ removed: true });
+    }
+
+    if (request.method === 'PATCH') {
+      const body = await request.json().catch(() => null);
+      const userId = body?.user_id;
+      const loginName = body?.login_name;
+      if (typeof userId !== 'string' || userId.trim().length === 0) {
+        return jsonResponse({ error: 'User ID is required' }, 400);
+      }
+      if (loginName !== null && typeof loginName !== 'string') {
+        return jsonResponse({ error: 'login_name must be a string or null' }, 400);
+      }
+      await setLoginName(userId, loginName);
+      const inventory = await userInventory(userId, admin.id);
+      return jsonResponse({ user: inventory.details });
     }
 
     const userId = new URL(request.url).searchParams.get('user_id');

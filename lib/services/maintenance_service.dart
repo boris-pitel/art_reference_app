@@ -45,6 +45,22 @@ class MaintenanceService {
     return Map<String, dynamic>.from(data['user'] as Map);
   }
 
+  Future<Map<String, dynamic>> setLoginName({
+    required String userId,
+    required String? loginName,
+  }) async {
+    final response = await _client.functions.invoke(
+      'admin-maintenance',
+      method: HttpMethod.patch,
+      body: {'user_id': userId, 'login_name': loginName},
+    );
+    final data = response.data;
+    if (data is! Map || data['user'] is! Map) {
+      throw StateError('The maintenance service returned an invalid response.');
+    }
+    return Map<String, dynamic>.from(data['user'] as Map);
+  }
+
   Future<void> removeUser({required String userId, required String email}) async {
     final response = await _client.functions.invoke(
       'admin-maintenance',

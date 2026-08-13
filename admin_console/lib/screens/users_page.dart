@@ -118,6 +118,7 @@ class _UsersPageState extends State<UsersPage> {
                   scrollDirection: Axis.horizontal,
                   child: SingleChildScrollView(
                     child: DataTable(
+                      columnSpacing: 24,
                       columns: const [
                         DataColumn(label: Text('Email')),
                         DataColumn(label: Text('Login name')),
@@ -703,7 +704,11 @@ class _ErrorCard extends StatelessWidget {
 
 String _date(Object? value) {
   if (value == null) return '-';
-  if (value is DateTime) return value.toLocal().toString();
-  final parsed = DateTime.tryParse(value.toString());
-  return parsed?.toLocal().toString() ?? value.toString();
+  final parsed = value is DateTime
+      ? value.toLocal()
+      : DateTime.tryParse(value.toString())?.toLocal();
+  if (parsed == null) return value.toString();
+  String pad(int n) => n.toString().padLeft(2, '0');
+  return '${parsed.year}-${pad(parsed.month)}-${pad(parsed.day)} '
+      '${pad(parsed.hour)}:${pad(parsed.minute)}';
 }

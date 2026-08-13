@@ -123,6 +123,12 @@ void main() {
       await tester.longPress(find.byType(Image).first);
       await tester.pumpAndSettle();
       await pumpUntil(tester, find.text('Remove'));
+      // The action sheet scrolls now that it has more items than fit on a
+      // short test window; ensureVisible finds the real render offset
+      // (unlike scrollUntilVisible, which no-ops when the target already
+      // exists in the tree but is merely scrolled out of the viewport).
+      await tester.ensureVisible(find.text('Remove'));
+      await tester.pump();
       await tester.tap(find.text('Remove'));
       await pumpUntil(tester, find.text('Reference removed.'));
 

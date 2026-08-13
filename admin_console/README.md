@@ -59,6 +59,7 @@ Copy the complete `Release` directory when moving the application. Do not copy o
 - Inspect Auth IDs, image/category counts, and Storage inventory.
 - Send a password recovery email.
 - Directly set a password of 12 or more characters.
+- Set or clear a user's login name.
 - Permanently delete a user, database records, and stored files after typed confirmation.
 - List and filter feedback.
 - View feedback details and temporary private attachment URLs.

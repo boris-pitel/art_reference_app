@@ -8,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/reference_category.dart';
+import '../services/category_service.dart';
 import '../services/image_asset_service.dart';
 import '../services/image_print_service.dart';
 import '../widgets/home_button.dart';
@@ -46,7 +47,7 @@ class _DownloadedImage {
   }
 }
 
-enum _ImageAction { edit, share, save, print, sendToFriend, remove }
+enum _ImageAction { edit, share, save, print, sendToFriend, move, remove }
 
 class CategoryScreen extends StatefulWidget {
   const CategoryScreen({super.key, required this.category});
@@ -76,6 +77,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
   String? _savingImageId;
   String? _printingImageId;
   String? _sendingImageId;
+  String? _movingImageId;
   String? _errorMessage;
 
   bool get _isBusy {
@@ -85,7 +87,8 @@ class _CategoryScreenState extends State<CategoryScreen> {
         _sharingImageId != null ||
         _savingImageId != null ||
         _printingImageId != null ||
-        _sendingImageId != null;
+        _sendingImageId != null ||
+        _movingImageId != null;
   }
 
   bool get _cameraIsAvailable {
@@ -568,6 +571,131 @@ class _CategoryScreenState extends State<CategoryScreen> {
     }
   }
 
+  Future<void> _moveImageToAnotherCategory(_LoadedImage image) async {
+    if (_isBusy) {
+      return;
+    }
+
+    setState(() {
+      _movingImageId = image.id;
+    });
+
+    try {
+      final categoryService = CategoryService(Supabase.instance.client);
+      final allCategories = await categoryService.listCategories();
+      final destinationCategories = allCategories
+          .where(
+            (category) =>
+                category.databaseCode != widget.category.databaseCode,
+          )
+          .toList(growable: false);
+
+      if (!mounted) {
+        return;
+      }
+
+      if (destinationCategories.isEmpty) {
+        _showMessage('There is no other category to move this image to.');
+        return;
+      }
+
+      final toCategory = await showDialog<ReferenceCategory>(
+        context: context,
+        builder: (dialogContext) {
+          ReferenceCategory? selected;
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              return AlertDialog(
+                title: const Text('Move Reference'),
+                content: SizedBox(
+                  width: 420,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Current category: ${widget.category.displayName}',
+                        style: Theme.of(context).textTheme.bodyLarge,
+                      ),
+                      const SizedBox(height: 18),
+                      const Text('Move to'),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<ReferenceCategory>(
+                        initialValue: selected,
+                        decoration: const InputDecoration(
+                          hintText: 'Choose a destination category',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: destinationCategories
+                            .map(
+                              (category) => DropdownMenuItem(
+                                value: category,
+                                child: Text(category.displayName),
+                              ),
+                            )
+                            .toList(growable: false),
+                        onChanged: (value) {
+                          setDialogState(() {
+                            selected = value;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton.icon(
+                    onPressed: selected == null
+                        ? null
+                        : () => Navigator.of(dialogContext).pop(selected),
+                    icon: const Icon(Icons.drive_file_move_outline),
+                    label: const Text('Move'),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+
+      if (toCategory == null || !mounted) {
+        return;
+      }
+
+      await _imageAssetService.moveImageToCategory(
+        imageId: image.id,
+        fromCategory: widget.category,
+        toCategory: toCategory,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _images.removeWhere((existingImage) => existingImage.id == image.id);
+      });
+
+      _showMessage('Image moved to ${toCategory.displayName}.');
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      _showMessage('Unable to move image: $error');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _movingImageId = null;
+        });
+      }
+    }
+  }
+
   String _detectMimeType(String? responseContentType, Uint8List bytes) {
     final normalizedHeader = responseContentType
         ?.split(';')
@@ -657,6 +785,10 @@ class _CategoryScreenState extends State<CategoryScreen> {
         await _sendToFriend(image);
         return;
 
+      case _ImageAction.move:
+        await _moveImageToAnotherCategory(image);
+        return;
+
       case _ImageAction.remove:
         await _removeFromCategory(image);
         return;
@@ -737,6 +869,13 @@ class _CategoryScreenState extends State<CategoryScreen> {
                   },
                 ),
                 if (!widget.category.isMyArt) ...[
+                  ListTile(
+                    leading: const Icon(Icons.drive_file_move_outline),
+                    title: const Text('Move...'),
+                    onTap: () {
+                      Navigator.of(sheetContext).pop(_ImageAction.move);
+                    },
+                  ),
                   const Divider(height: 1),
                   ListTile(
                     leading: Icon(
@@ -832,6 +971,14 @@ class _CategoryScreenState extends State<CategoryScreen> {
           ),
         ),
         if (!widget.category.isMyArt) ...[
+          const PopupMenuItem(
+            value: _ImageAction.move,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.drive_file_move_outline),
+              title: Text('Move...'),
+            ),
+          ),
           const PopupMenuDivider(),
           PopupMenuItem(
             value: _ImageAction.remove,
@@ -1032,6 +1179,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
         final isSaving = _savingImageId == image.id;
         final isPrinting = _printingImageId == image.id;
         final isSending = _sendingImageId == image.id;
+        final isMoving = _movingImageId == image.id;
 
         final isWorking =
             isOpening ||
@@ -1039,7 +1187,8 @@ class _CategoryScreenState extends State<CategoryScreen> {
             isSharing ||
             isSaving ||
             isPrinting ||
-            isSending;
+            isSending ||
+            isMoving;
 
         return GestureDetector(
           onLongPress: isWorking ? null : () => _handleLongPress(image),
@@ -1075,6 +1224,8 @@ class _CategoryScreenState extends State<CategoryScreen> {
                                   ? 'Preparing print...'
                                   : isSending
                                   ? 'Preparing...'
+                                  : isMoving
+                                  ? 'Moving...'
                                   : 'Opening...',
                               style: const TextStyle(
                                 color: Colors.white,
