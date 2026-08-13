@@ -1,4 +1,4 @@
-const String appVersion = '1.2.0+32';
+const String appVersion = '1.2.0+33';
 
 String get appVersionLabel {
   final parts = appVersion.split('+');
