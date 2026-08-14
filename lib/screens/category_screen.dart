@@ -80,6 +80,10 @@ class _CategoryScreenState extends State<CategoryScreen> {
   String? _movingImageId;
   String? _errorMessage;
 
+  bool _isSelecting = false;
+  bool _isBulkMoving = false;
+  final Set<String> _selectedImageIds = <String>{};
+
   bool get _isBusy {
     return _isUploading ||
         _openingImageId != null ||
@@ -88,7 +92,8 @@ class _CategoryScreenState extends State<CategoryScreen> {
         _savingImageId != null ||
         _printingImageId != null ||
         _sendingImageId != null ||
-        _movingImageId != null;
+        _movingImageId != null ||
+        _isBulkMoving;
   }
 
   bool get _cameraIsAvailable {
@@ -599,68 +604,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
         return;
       }
 
-      final toCategory = await showDialog<ReferenceCategory>(
-        context: context,
-        builder: (dialogContext) {
-          ReferenceCategory? selected;
-          return StatefulBuilder(
-            builder: (context, setDialogState) {
-              return AlertDialog(
-                title: const Text('Move Reference'),
-                content: SizedBox(
-                  width: 420,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Current category: ${widget.category.displayName}',
-                        style: Theme.of(context).textTheme.bodyLarge,
-                      ),
-                      const SizedBox(height: 18),
-                      const Text('Move to'),
-                      const SizedBox(height: 8),
-                      DropdownButtonFormField<ReferenceCategory>(
-                        initialValue: selected,
-                        decoration: const InputDecoration(
-                          hintText: 'Choose a destination category',
-                          border: OutlineInputBorder(),
-                        ),
-                        items: destinationCategories
-                            .map(
-                              (category) => DropdownMenuItem(
-                                value: category,
-                                child: Text(category.displayName),
-                              ),
-                            )
-                            .toList(growable: false),
-                        onChanged: (value) {
-                          setDialogState(() {
-                            selected = value;
-                          });
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.of(dialogContext).pop(),
-                    child: const Text('Cancel'),
-                  ),
-                  FilledButton.icon(
-                    onPressed: selected == null
-                        ? null
-                        : () => Navigator.of(dialogContext).pop(selected),
-                    icon: const Icon(Icons.drive_file_move_outline),
-                    label: const Text('Move'),
-                  ),
-                ],
-              );
-            },
-          );
-        },
-      );
+      final toCategory = await _pickDestinationCategory(destinationCategories);
 
       if (toCategory == null || !mounted) {
         return;
@@ -693,6 +637,135 @@ class _CategoryScreenState extends State<CategoryScreen> {
           _movingImageId = null;
         });
       }
+    }
+  }
+
+  Future<ReferenceCategory?> _pickDestinationCategory(
+    List<ReferenceCategory> destinationCategories,
+  ) {
+    return showDialog<ReferenceCategory>(
+      context: context,
+      builder: (dialogContext) {
+        ReferenceCategory? selected;
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Move Reference'),
+              content: SizedBox(
+                width: 420,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Current category: ${widget.category.displayName}',
+                      style: Theme.of(context).textTheme.bodyLarge,
+                    ),
+                    const SizedBox(height: 18),
+                    const Text('Move to'),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<ReferenceCategory>(
+                      initialValue: selected,
+                      decoration: const InputDecoration(
+                        hintText: 'Choose a destination category',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: destinationCategories
+                          .map(
+                            (category) => DropdownMenuItem(
+                              value: category,
+                              child: Text(category.displayName),
+                            ),
+                          )
+                          .toList(growable: false),
+                      onChanged: (value) {
+                        setDialogState(() {
+                          selected = value;
+                        });
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton.icon(
+                  onPressed: selected == null
+                      ? null
+                      : () => Navigator.of(dialogContext).pop(selected),
+                  icon: const Icon(Icons.drive_file_move_outline),
+                  label: const Text('Move'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _bulkMoveSelectedImages() async {
+    if (_isBusy || _selectedImageIds.isEmpty) {
+      return;
+    }
+
+    setState(() => _isBulkMoving = true);
+
+    try {
+      final categoryService = CategoryService(Supabase.instance.client);
+      final allCategories = await categoryService.listCategories();
+      final destinationCategories = allCategories
+          .where(
+            (category) => category.databaseCode != widget.category.databaseCode,
+          )
+          .toList(growable: false);
+
+      if (!mounted) return;
+
+      if (destinationCategories.isEmpty) {
+        _showMessage('There is no other category to move these images to.');
+        return;
+      }
+
+      final toCategory = await _pickDestinationCategory(destinationCategories);
+      if (toCategory == null || !mounted) return;
+
+      final movingIds = _selectedImageIds.toList(growable: false);
+      final movedIds = <String>{};
+      var failed = 0;
+      for (final imageId in movingIds) {
+        try {
+          await _imageAssetService.moveImageToCategory(
+            imageId: imageId,
+            fromCategory: widget.category,
+            toCategory: toCategory,
+          );
+          movedIds.add(imageId);
+        } catch (_) {
+          failed += 1;
+        }
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _images.removeWhere((image) => movedIds.contains(image.id));
+        _selectedImageIds.removeAll(movedIds);
+        if (_selectedImageIds.isEmpty) _isSelecting = false;
+      });
+
+      _showMessage(
+        failed == 0
+            ? '${movedIds.length} ${movedIds.length == 1 ? 'image' : 'images'} moved to ${toCategory.displayName}.'
+            : '${movedIds.length} moved to ${toCategory.displayName}; $failed failed.',
+      );
+    } catch (error) {
+      if (mounted) _showMessage('Unable to move images: $error');
+    } finally {
+      if (mounted) setState(() => _isBulkMoving = false);
     }
   }
 
@@ -799,6 +872,22 @@ class _CategoryScreenState extends State<CategoryScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
     );
+  }
+
+  void _toggleSelecting() {
+    if (_isBusy) return;
+    setState(() {
+      _isSelecting = !_isSelecting;
+      if (!_isSelecting) _selectedImageIds.clear();
+    });
+  }
+
+  void _toggleImageSelected(_LoadedImage image) {
+    setState(() {
+      if (!_selectedImageIds.remove(image.id)) {
+        _selectedImageIds.add(image.id);
+      }
+    });
   }
 
   Future<void> _showMobileActions(_LoadedImage image) async {
@@ -1017,19 +1106,42 @@ class _CategoryScreenState extends State<CategoryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.category.displayName),
+        title: Text(
+          _isSelecting
+              ? '${_selectedImageIds.length} selected'
+              : widget.category.displayName,
+        ),
+        leading: _isSelecting
+            ? IconButton(
+                onPressed: _isBulkMoving ? null : _toggleSelecting,
+                icon: const Icon(Icons.close),
+                tooltip: 'Cancel selection',
+              )
+            : null,
         actions: [
-          const HomeButton(),
-          IconButton(
-            onPressed: _openHelp,
-            icon: const Icon(Icons.help_outline),
-            tooltip: 'Help and About',
-          ),
-          IconButton(
-            onPressed: _isLoading || _isBusy ? null : _loadImages,
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Refresh',
-          ),
+          if (!widget.category.isMyArt)
+            IconButton(
+              onPressed: _isLoading || (_isBusy && !_isSelecting)
+                  ? null
+                  : _toggleSelecting,
+              icon: Icon(
+                _isSelecting ? Icons.checklist : Icons.checklist_outlined,
+              ),
+              tooltip: _isSelecting ? 'Cancel selection' : 'Select images',
+            ),
+          if (!_isSelecting) ...[
+            const HomeButton(),
+            IconButton(
+              onPressed: _openHelp,
+              icon: const Icon(Icons.help_outline),
+              tooltip: 'Help and About',
+            ),
+            IconButton(
+              onPressed: _isLoading || _isBusy ? null : _loadImages,
+              icon: const Icon(Icons.refresh),
+              tooltip: 'Refresh',
+            ),
+          ],
         ],
       ),
       body: Stack(
@@ -1038,7 +1150,40 @@ class _CategoryScreenState extends State<CategoryScreen> {
           if (_isUploading) Positioned.fill(child: _buildUploadOverlay()),
         ],
       ),
-      floatingActionButton: widget.category.isMyArt ? null : _buildAddButtons(),
+      floatingActionButton: widget.category.isMyArt || _isSelecting
+          ? null
+          : _buildAddButtons(),
+      bottomNavigationBar: _isSelecting ? _buildSelectionBar() : null,
+    );
+  }
+
+  Widget _buildSelectionBar() {
+    final hasSelection = _selectedImageIds.isNotEmpty;
+    return BottomAppBar(
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          TextButton(
+            onPressed: _isBulkMoving ? null : _toggleSelecting,
+            child: const Text('Cancel'),
+          ),
+          const SizedBox(width: 8),
+          FilledButton.icon(
+            onPressed: !hasSelection || _isBulkMoving
+                ? null
+                : _bulkMoveSelectedImages,
+            icon: _isBulkMoving
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.drive_file_move_outline),
+            label: Text('Move (${_selectedImageIds.length})'),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
     );
   }
 
@@ -1190,20 +1335,65 @@ class _CategoryScreenState extends State<CategoryScreen> {
             isSending ||
             isMoving;
 
+        final isSelected = _selectedImageIds.contains(image.id);
+
         return GestureDetector(
-          onLongPress: isWorking ? null : () => _handleLongPress(image),
-          onSecondaryTapDown: isWorking
+          onLongPress: isWorking || _isSelecting
+              ? null
+              : () => _handleLongPress(image),
+          onSecondaryTapDown: isWorking || _isSelecting
               ? null
               : (details) => _showDesktopActions(image, details.globalPosition),
           child: Material(
             borderRadius: BorderRadius.circular(12),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
-              onTap: isWorking ? null : () => _openImageDetails(image),
+              onTap: isWorking
+                  ? null
+                  : _isSelecting
+                  ? () => _toggleImageSelected(image)
+                  : () => _openImageDetails(image),
               child: Stack(
                 fit: StackFit.expand,
                 children: [
                   _buildThumbnail(image),
+                  if (_isSelecting)
+                    Positioned(
+                      top: 8,
+                      left: 8,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.black45,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Checkbox(
+                          value: isSelected,
+                          onChanged: isWorking
+                              ? null
+                              : (_) => _toggleImageSelected(image),
+                          fillColor: WidgetStateProperty.resolveWith(
+                            (states) => states.contains(WidgetState.selected)
+                                ? Theme.of(context).colorScheme.primary
+                                : Colors.transparent,
+                          ),
+                          checkColor: Colors.white,
+                          side: const BorderSide(color: Colors.white, width: 2),
+                        ),
+                      ),
+                    ),
+                  if (isSelected)
+                    Positioned.fill(
+                      child: IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                              color: Theme.of(context).colorScheme.primary,
+                              width: 3,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                   if (isWorking)
                     Container(
                       color: Colors.black38,
