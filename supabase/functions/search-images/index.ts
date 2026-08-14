@@ -50,10 +50,12 @@ type SearchRow = {
   date_added: string;
   title: string | null;
   notes: string | null;
+  original_owner_name: string | null;
   storage_path: string;
   thumbnail_storage_path: string | null;
   title_matches: boolean;
   notes_match: boolean;
+  owner_matches: boolean;
   matching_keywords: string[] | null;
 };
 
@@ -207,6 +209,7 @@ Deno.serve(async (request) => {
           image.date_added::text,
           image.title,
           image.notes,
+          image.original_owner_name,
           image.storage_path,
           image.thumbnail_storage_path,
 
@@ -219,6 +222,11 @@ Deno.serve(async (request) => {
             ${normalizedQuery}
             in lower(coalesce(image.notes, ''))
           ) > 0 as notes_match,
+
+          position(
+            ${normalizedQuery}
+            in lower(coalesce(image.original_owner_name, ''))
+          ) > 0 as owner_matches,
 
           coalesce(
             array_agg(
@@ -265,6 +273,11 @@ Deno.serve(async (request) => {
               in lower(coalesce(image.notes, ''))
             ) > 0
 
+            or position(
+              ${normalizedQuery}
+              in lower(coalesce(image.original_owner_name, ''))
+            ) > 0
+
             or exists (
               select 1
               from public.image_keywords matching_keyword
@@ -282,6 +295,7 @@ Deno.serve(async (request) => {
           image.date_added,
           image.title,
           image.notes,
+          image.original_owner_name,
           image.storage_path,
           image.thumbnail_storage_path
 
@@ -316,6 +330,10 @@ Deno.serve(async (request) => {
           matchedIn.push('Notes');
         }
 
+        if (row.owner_matches) {
+          matchedIn.push('Owner');
+        }
+
         if ((row.matching_keywords ?? []).length > 0) {
           matchedIn.push('Keyword');
         }
@@ -331,6 +349,7 @@ Deno.serve(async (request) => {
           thumbnail_url: thumbnailUrl,
           title: row.title,
           notes: row.notes,
+          original_owner_name: row.original_owner_name,
           matching_keywords: row.matching_keywords ?? [],
           matched_in: matchedIn,
         };

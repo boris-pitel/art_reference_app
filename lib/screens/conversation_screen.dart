@@ -1,13 +1,30 @@
 import 'dart:async';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/chat_message.dart';
+import '../models/reference_category.dart';
+import '../services/category_service.dart';
+import '../services/image_asset_service.dart';
+import '../services/image_save_service.dart';
 import '../services/messaging_service.dart';
 import '../widgets/home_button.dart';
+
+Future<Uint8List> _downloadImageBytes(String url) async {
+  final response = await http.get(Uri.parse(url));
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw StateError('Image download failed with status ${response.statusCode}.');
+  }
+  if (response.bodyBytes.isEmpty) {
+    throw StateError('The downloaded image is empty.');
+  }
+  return response.bodyBytes;
+}
 
 String initialsFor(String? name) {
   final trimmed = (name ?? '').trim();
@@ -45,6 +62,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
   List<ChatMessage> _messages = const [];
   bool _isLoading = true;
   bool _isSending = false;
+  String? _busyImageMessageId;
   String? _errorMessage;
 
   SupabaseClient get _supabase => Supabase.instance.client;
@@ -159,6 +177,181 @@ class _ConversationScreenState extends State<ConversationScreen> {
     } finally {
       if (mounted) setState(() => _isSending = false);
     }
+  }
+
+  Future<void> _showImageActions(ChatMessage message) async {
+    final imageUrl = message.imageUrl;
+    if (imageUrl == null || _busyImageMessageId != null) return;
+
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.add_photo_alternate_outlined),
+                  title: const Text('Save to a category'),
+                  subtitle: const Text('Add this image to your library'),
+                  onTap: () => Navigator.of(sheetContext).pop('library'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.ios_share_outlined),
+                  title: const Text('Share'),
+                  onTap: () => Navigator.of(sheetContext).pop('share'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.photo_library_outlined),
+                  title: const Text('Save to Photos'),
+                  onTap: () => Navigator.of(sheetContext).pop('photos'),
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (action == null || !mounted) return;
+
+    switch (action) {
+      case 'library':
+        await _saveImageToLibrary(message, imageUrl);
+      case 'share':
+        await _shareImage(message, imageUrl);
+      case 'photos':
+        await _saveImageToPhotos(message, imageUrl);
+    }
+  }
+
+  Future<void> _saveImageToLibrary(ChatMessage message, String imageUrl) async {
+    setState(() => _busyImageMessageId = message.id);
+    try {
+      final categories = await CategoryService(_supabase).listCategories();
+      if (!mounted) return;
+      if (categories.isEmpty) {
+        _showSnack('No categories are available.');
+        return;
+      }
+
+      final category = await showDialog<ReferenceCategory>(
+        context: context,
+        builder: (dialogContext) {
+          ReferenceCategory? selected;
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              return AlertDialog(
+                title: const Text('Save to a category'),
+                content: SizedBox(
+                  width: 420,
+                  child: DropdownButtonFormField<ReferenceCategory>(
+                    initialValue: selected,
+                    decoration: const InputDecoration(
+                      hintText: 'Choose a category',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: categories
+                        .map(
+                          (category) => DropdownMenuItem(
+                            value: category,
+                            child: Text(category.displayName),
+                          ),
+                        )
+                        .toList(growable: false),
+                    onChanged: (value) {
+                      setDialogState(() => selected = value);
+                    },
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton(
+                    onPressed: selected == null
+                        ? null
+                        : () => Navigator.of(dialogContext).pop(selected),
+                    child: const Text('Save'),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+
+      if (category == null || !mounted) return;
+
+      final bytes = await _downloadImageBytes(imageUrl);
+      await ImageAssetService(_supabase).uploadImage(
+        bytes,
+        category,
+        // Only record an original owner for images someone else sent -
+        // saving your own sent image isn't "from" anyone.
+        originalOwnerName: message.isMine ? null : widget.otherLoginName,
+      );
+      if (!mounted) return;
+      _showSnack('Saved to ${category.displayName}.');
+    } catch (error) {
+      if (mounted) _showSnack('Unable to save image: $error');
+    } finally {
+      if (mounted) setState(() => _busyImageMessageId = null);
+    }
+  }
+
+  Future<void> _shareImage(ChatMessage message, String imageUrl) async {
+    setState(() => _busyImageMessageId = message.id);
+    try {
+      final bytes = await _downloadImageBytes(imageUrl);
+      final mimeType = ImageAssetService.detectContentType(bytes);
+      final extension = mimeType == 'image/png' ? 'png' : 'jpg';
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [
+            XFile.fromData(
+              bytes,
+              mimeType: mimeType,
+              name: 'message_image_${message.id}.$extension',
+            ),
+          ],
+          subject: 'Painter Reference',
+        ),
+      );
+    } catch (error) {
+      if (mounted) _showSnack('Unable to share image: $error');
+    } finally {
+      if (mounted) setState(() => _busyImageMessageId = null);
+    }
+  }
+
+  Future<void> _saveImageToPhotos(ChatMessage message, String imageUrl) async {
+    setState(() => _busyImageMessageId = message.id);
+    try {
+      final bytes = await _downloadImageBytes(imageUrl);
+      final mimeType = ImageAssetService.detectContentType(bytes);
+      final extension = mimeType == 'image/png' ? 'png' : 'jpg';
+      await ImageSaveService.save(
+        bytes,
+        fileName: 'message_image_${message.id}.$extension',
+      );
+      if (!mounted) return;
+      _showSnack(kIsWeb ? 'Image downloaded.' : 'Image saved to Photos.');
+    } catch (error) {
+      if (mounted) _showSnack('Unable to save image: $error');
+    } finally {
+      if (mounted) setState(() => _busyImageMessageId = null);
+    }
+  }
+
+  void _showSnack(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _confirmBlock() async {
@@ -295,15 +488,34 @@ class _ConversationScreenState extends State<ConversationScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (message.imageUrl != null)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Image.network(
-                  message.imageUrl!,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) => const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Icon(Icons.broken_image_outlined),
-                  ),
+              GestureDetector(
+                onLongPress: _busyImageMessageId != null
+                    ? null
+                    : () => _showImageActions(message),
+                child: Stack(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.network(
+                        message.imageUrl!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) =>
+                            const Padding(
+                              padding: EdgeInsets.all(24),
+                              child: Icon(Icons.broken_image_outlined),
+                            ),
+                      ),
+                    ),
+                    if (_busyImageMessageId == message.id)
+                      Positioned.fill(
+                        child: ColoredBox(
+                          color: Colors.black38,
+                          child: const Center(
+                            child: CircularProgressIndicator(),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
             if (message.body != null)

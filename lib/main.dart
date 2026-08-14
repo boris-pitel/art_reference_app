@@ -21,6 +21,7 @@ import 'screens/shared_image_import_screen.dart';
 import 'services/category_service.dart';
 import 'services/library_home_cache.dart';
 import 'services/image_asset_service.dart';
+import 'services/messaging_service.dart';
 import 'utils/performance_profiler.dart';
 
 Future<void> main() async {
@@ -283,6 +284,7 @@ class CollectionsScreen extends StatefulWidget {
 class _CollectionsScreenState extends State<CollectionsScreen> {
   late final CategoryService _categoryService;
   late final ImageAssetService _imageAssetService;
+  late final MessagingService _messagingService;
 
   final List<ReferenceCategory> _categories = <ReferenceCategory>[];
   final Map<String, int> _imageCountsByCategoryCode = <String, int>{};
@@ -291,6 +293,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   bool _isIngesting = false;
   bool _isAddingCategory = false;
   bool _isAdmin = false;
+  int _unreadMessageCount = 0;
   String? _errorMessage;
 
   bool get _cameraIsAvailable {
@@ -306,9 +309,11 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
 
     _categoryService = CategoryService(supabase);
     _imageAssetService = ImageAssetService(supabase);
+    _messagingService = MessagingService(supabase);
 
     _restoreThenRefreshCategories();
     _refreshAdminStatus();
+    _refreshUnreadMessageCount();
   }
 
   Future<void> _refreshAdminStatus() async {
@@ -324,8 +329,27 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     }
   }
 
+  Future<void> _refreshUnreadMessageCount() async {
+    try {
+      final conversations = await _messagingService.listConversations();
+      final unread = conversations.fold<int>(
+        0,
+        (total, conversation) => total + conversation.unreadCount,
+      );
+      if (mounted && unread != _unreadMessageCount) {
+        setState(() => _unreadMessageCount = unread);
+      }
+    } catch (error) {
+      debugPrint('Unable to refresh unread message count: $error');
+    }
+  }
+
   Future<void> _refreshHome() async {
-    await Future.wait<void>([_loadCategories(), _refreshAdminStatus()]);
+    await Future.wait<void>([
+      _loadCategories(),
+      _refreshAdminStatus(),
+      _refreshUnreadMessageCount(),
+    ]);
   }
 
   Future<void> _openMaintenance() async {
@@ -623,6 +647,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (context) => const MessagesScreen()),
     );
+    if (mounted) await _refreshUnreadMessageCount();
   }
 
   Future<void> _openKeywordSearch() async {
@@ -879,8 +904,14 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         actions: [
           IconButton(
             onPressed: _openMessages,
-            icon: const Icon(Icons.mail_outline),
-            tooltip: 'Messages',
+            icon: Badge(
+              label: Text('$_unreadMessageCount'),
+              isLabelVisible: _unreadMessageCount > 0,
+              child: const Icon(Icons.mail_outline),
+            ),
+            tooltip: _unreadMessageCount > 0
+                ? 'Messages ($_unreadMessageCount unread)'
+                : 'Messages',
           ),
           IconButton(
             onPressed: _isLoading || _categories.isEmpty

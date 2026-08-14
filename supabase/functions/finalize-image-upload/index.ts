@@ -51,6 +51,7 @@ type FinalizeRequest = {
   image_hash?: unknown;
   image_id?: unknown;
   storage_path?: unknown;
+  original_owner_name?: unknown;
 };
 
 type UploadDestination =
@@ -261,6 +262,7 @@ Deno.serve(async (request) => {
   let imageHash: string;
   let imageId: string;
   let storagePath: string;
+  let originalOwnerName: string | null;
   let destination: UploadDestination;
 
   try {
@@ -287,6 +289,11 @@ Deno.serve(async (request) => {
     storagePath = requiredString(
       body.storage_path,
       'storage_path',
+    );
+
+    originalOwnerName = optionalString(
+      body.original_owner_name,
+      'original_owner_name',
     );
 
     destination = readUploadDestination(body);
@@ -655,14 +662,16 @@ Deno.serve(async (request) => {
         user_id,
         user_email,
         image_hash,
-        storage_path
+        storage_path,
+        original_owner_name
       )
       values (
         ${imageId},
         ${userId},
         ${userEmail},
         ${imageHash},
-        ${storagePath}
+        ${storagePath},
+        ${originalOwnerName}
       )
     `;
 

@@ -231,6 +231,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   bool _isFavorite = false;
   bool _isFinishedArtwork = false;
   bool _isNavigatingHorizontally = false;
+  String? _originalOwnerName;
 
   late String _currentImageId;
   late String _currentImageUrl;
@@ -412,6 +413,9 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       setState(() {
         _isFavorite = data['is_favorite'] == true;
         _isFinishedArtwork = data['is_finished_artwork'] == true;
+        _originalOwnerName = (data['original_owner_name'] as String?)
+            ?.trim();
+        if (_originalOwnerName?.isEmpty ?? false) _originalOwnerName = null;
         _lastSavedMetadata = _currentMetadata;
 
         _aiAnalysis = loadedAnalysis;
@@ -1085,6 +1089,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       _authorController.clear();
       _isFavorite = false;
       _isFinishedArtwork = false;
+      _originalOwnerName = null;
       _isNavigatingHorizontally = false;
     });
     await _loadMetadata();
@@ -1759,6 +1764,26 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
           ],
         ),
         const SizedBox(height: 12),
+        if (!_isLoadingMetadata && _originalOwnerName != null) ...[
+          Row(
+            children: [
+              Icon(
+                Icons.person_outline,
+                size: 16,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'Originally from $_originalOwnerName',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+        ],
         if (widget.isAssociatedImage && dateAdded != null) ...[
           ListTile(
             contentPadding: EdgeInsets.zero,

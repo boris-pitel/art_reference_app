@@ -76,6 +76,7 @@ Deno.serve(async (request) => {
       title: string | null;
       notes: string | null;
       source_url: string | null;
+      original_owner_name: string | null;
       is_favorite: boolean;
       is_finished_artwork: boolean;
 
@@ -97,6 +98,7 @@ Deno.serve(async (request) => {
         title,
         notes,
         source_url,
+        original_owner_name,
         is_favorite,
         is_finished_artwork,
 
@@ -134,6 +136,7 @@ Deno.serve(async (request) => {
       title: row.title,
       notes: row.notes,
       source_url: row.source_url,
+      original_owner_name: row.original_owner_name,
       is_favorite: row.is_favorite,
       is_finished_artwork: row.is_finished_artwork,
 

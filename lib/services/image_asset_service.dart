@@ -159,11 +159,16 @@ class ImageAssetService {
 
   Future<String> uploadImage(
     Uint8List imageBytes,
-    ReferenceCategory category,
-  ) async {
+    ReferenceCategory category, {
+    String? originalOwnerName,
+  }) async {
     final stopwatch = Stopwatch()..start();
     try {
-      final id = await _uploadImage(imageBytes: imageBytes, category: category);
+      final id = await _uploadImage(
+        imageBytes: imageBytes,
+        category: category,
+        originalOwnerName: originalOwnerName,
+      );
       UserActivityLogger.instance.record(
         operation: 'image_upload',
         status: 'succeeded',
@@ -240,6 +245,7 @@ class ImageAssetService {
     required Uint8List imageBytes,
     ReferenceCategory? category,
     String? parentImageId,
+    String? originalOwnerName,
   }) async {
     if ((category == null) == (parentImageId == null)) {
       throw ArgumentError(
@@ -370,6 +376,7 @@ class ImageAssetService {
           'image_hash': imageHash,
           'image_id': preparedImageId,
           'storage_path': storagePath,
+          'original_owner_name': ?originalOwnerName,
         },
       );
 

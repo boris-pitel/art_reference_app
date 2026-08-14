@@ -9,6 +9,7 @@ class ImageSearchResult {
     required this.thumbnailUrl,
     required this.title,
     required this.notes,
+    required this.originalOwnerName,
     required this.matchingKeywords,
     required this.matchedIn,
   });
@@ -19,6 +20,7 @@ class ImageSearchResult {
   final String? thumbnailUrl;
   final String? title;
   final String? notes;
+  final String? originalOwnerName;
   final List<String> matchingKeywords;
   final List<String> matchedIn;
 
@@ -29,6 +31,7 @@ class ImageSearchResult {
     final thumbnailUrl = json['thumbnail_url'];
     final title = json['title'];
     final notes = json['notes'];
+    final originalOwnerName = json['original_owner_name'];
 
     if (id is! String || id.trim().isEmpty) {
       throw StateError('Invalid image ID returned by search-images: $json');
@@ -50,6 +53,11 @@ class ImageSearchResult {
     if (notes != null && notes is! String) {
       throw StateError('Invalid notes returned by search-images: $json');
     }
+    if (originalOwnerName != null && originalOwnerName is! String) {
+      throw StateError(
+        'Invalid original_owner_name returned by search-images: $json',
+      );
+    }
 
     return ImageSearchResult(
       id: id.trim(),
@@ -60,6 +68,10 @@ class ImageSearchResult {
           : null,
       title: title is String && title.trim().isNotEmpty ? title.trim() : null,
       notes: notes is String && notes.trim().isNotEmpty ? notes.trim() : null,
+      originalOwnerName:
+          originalOwnerName is String && originalOwnerName.trim().isNotEmpty
+          ? originalOwnerName.trim()
+          : null,
       matchingKeywords: _stringList(json['matching_keywords']),
       matchedIn: _stringList(json['matched_in']),
     );
