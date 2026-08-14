@@ -25,11 +25,28 @@ void main() {
         'upload_required': true,
         'storage_path': ' owner/originals/new-id ',
         'upload_token': ' signed-token ',
+        'thumbnail_storage_path': ' owner/thumbnails/new-id.jpg ',
+        'thumbnail_upload_token': ' signed-thumbnail-token ',
       });
 
       expect(prepared.canSkipUpload, isFalse);
       expect(prepared.storagePath, 'owner/originals/new-id');
       expect(prepared.uploadToken, 'signed-token');
+      expect(prepared.thumbnailStoragePath, 'owner/thumbnails/new-id.jpg');
+      expect(prepared.thumbnailUploadToken, 'signed-thumbnail-token');
+    });
+
+    test('rejects a new upload response missing thumbnail signing info', () {
+      expect(
+        () => PreparedImageUpload.fromResponse({
+          'image_id': 'new-id',
+          'existing_image': false,
+          'upload_required': true,
+          'storage_path': 'owner/originals/new-id',
+          'upload_token': 'signed-token',
+        }),
+        throwsStateError,
+      );
     });
 
     test('rejects inconsistent and incomplete prepare responses', () {

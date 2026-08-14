@@ -524,20 +524,36 @@ Deno.serve(async (request) => {
     const storagePath =
       `${userId}/originals/${imageId}`;
 
-    const {
-      data: signedUploadData,
-      error: signedUploadError,
-    } = await supabase.storage
-      .from(bucketName)
-      .createSignedUploadUrl(storagePath);
+    const thumbnailStoragePath =
+      `${userId}/thumbnails/${imageId}.jpg`;
 
-    if (signedUploadError) {
+    const [
+      {
+        data: signedUploadData,
+        error: signedUploadError,
+      },
+      {
+        data: signedThumbnailUploadData,
+        error: signedThumbnailUploadError,
+      },
+    ] = await Promise.all([
+      supabase.storage
+        .from(bucketName)
+        .createSignedUploadUrl(storagePath),
+      supabase.storage
+        .from(bucketName)
+        .createSignedUploadUrl(thumbnailStoragePath),
+    ]);
+
+    if (signedUploadError || signedThumbnailUploadError) {
       await connection.queryArray`rollback`;
 
       return jsonResponse(
         {
           error:
-            `Unable to prepare Storage upload: ${signedUploadError.message}`,
+            `Unable to prepare Storage upload: ${
+              (signedUploadError ?? signedThumbnailUploadError)!.message
+            }`,
         },
         500,
       );
@@ -559,6 +575,9 @@ Deno.serve(async (request) => {
           storage_path: storagePath,
           upload_token:
             signedUploadData.token,
+          thumbnail_storage_path: thumbnailStoragePath,
+          thumbnail_upload_token:
+            signedThumbnailUploadData.token,
         },
         200,
       );
@@ -577,6 +596,9 @@ Deno.serve(async (request) => {
         storage_path: storagePath,
         upload_token:
           signedUploadData.token,
+        thumbnail_storage_path: thumbnailStoragePath,
+        thumbnail_upload_token:
+          signedThumbnailUploadData.token,
       },
       200,
     );

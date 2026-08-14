@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -45,6 +46,8 @@ class PreparedImageUpload {
     required this.uploadRequired,
     this.storagePath,
     this.uploadToken,
+    this.thumbnailStoragePath,
+    this.thumbnailUploadToken,
   });
 
   final String imageId;
@@ -52,6 +55,8 @@ class PreparedImageUpload {
   final bool uploadRequired;
   final String? storagePath;
   final String? uploadToken;
+  final String? thumbnailStoragePath;
+  final String? thumbnailUploadToken;
 
   bool get canSkipUpload => existingImage && !uploadRequired;
 
@@ -89,6 +94,8 @@ class PreparedImageUpload {
 
     final storagePath = data['storage_path'];
     final uploadToken = data['upload_token'];
+    final thumbnailStoragePath = data['thumbnail_storage_path'];
+    final thumbnailUploadToken = data['thumbnail_upload_token'];
     if (storagePath is! String || storagePath.trim().isEmpty) {
       throw StateError(
         'prepare-image-upload did not return a valid Storage path. '
@@ -101,6 +108,18 @@ class PreparedImageUpload {
         'Response: $data',
       );
     }
+    if (thumbnailStoragePath is! String || thumbnailStoragePath.trim().isEmpty) {
+      throw StateError(
+        'prepare-image-upload did not return a valid thumbnail Storage path. '
+        'Response: $data',
+      );
+    }
+    if (thumbnailUploadToken is! String || thumbnailUploadToken.trim().isEmpty) {
+      throw StateError(
+        'prepare-image-upload did not return a valid thumbnail upload token. '
+        'Response: $data',
+      );
+    }
 
     return PreparedImageUpload(
       imageId: imageId.trim(),
@@ -108,6 +127,8 @@ class PreparedImageUpload {
       uploadRequired: true,
       storagePath: storagePath.trim(),
       uploadToken: uploadToken.trim(),
+      thumbnailStoragePath: thumbnailStoragePath.trim(),
+      thumbnailUploadToken: thumbnailUploadToken.trim(),
     );
   }
 }
@@ -286,6 +307,21 @@ class ImageAssetService {
         '${(imageBytes.lengthInBytes / 1024 / 1024).toStringAsFixed(2)} MB',
       );
 
+      // Thumbnail generation only depends on the normalized bytes, so it
+      // starts now and overlaps with the hash calculation and the
+      // prepare-image-upload network call below instead of running after
+      // them. A listener is attached immediately (rather than only once we
+      // reach the `await` further down) so Dart doesn't report this future's
+      // error as unhandled while it's sitting unobserved during the
+      // hash/network work below; a second, independent listener (the later
+      // `await`) still collects the real result or error.
+      final thumbnailFuture = ThumbnailService.createThumbnail(
+        normalizedImageBytes,
+        maximumDimension: 500,
+        jpegQuality: 80,
+      );
+      unawaited(thumbnailFuture.catchError((_) => Uint8List(0)));
+
       final imageHash = await ImageHashService.calculateSha256(
         normalizedImageBytes,
       );
@@ -329,11 +365,7 @@ class ImageAssetService {
 
       late final Uint8List thumbnailBytes;
       try {
-        thumbnailBytes = await ThumbnailService.createThumbnail(
-          normalizedImageBytes,
-          maximumDimension: 500,
-          jpegQuality: 80,
-        );
+        thumbnailBytes = await thumbnailFuture;
       } catch (error) {
         profiler.checkpoint('Thumbnail creation failed: $error');
         throw const UnsupportedImageFormatException();
@@ -348,22 +380,38 @@ class ImageAssetService {
 
       final storagePath = preparedUpload.storagePath!;
       final uploadToken = preparedUpload.uploadToken!;
+      final thumbnailStoragePath = preparedUpload.thumbnailStoragePath!;
+      final thumbnailUploadToken = preparedUpload.thumbnailUploadToken!;
 
-      await _supabase.storage
-          .from(_bucketName)
-          .uploadBinaryToSignedUrl(
-            storagePath,
-            uploadToken,
-            normalizedImageBytes,
-            FileOptions(
-              cacheControl: '3600',
-              contentType: detectContentType(normalizedImageBytes),
-              upsert: false,
+      await Future.wait([
+        _supabase.storage
+            .from(_bucketName)
+            .uploadBinaryToSignedUrl(
+              storagePath,
+              uploadToken,
+              normalizedImageBytes,
+              FileOptions(
+                cacheControl: '3600',
+                contentType: detectContentType(normalizedImageBytes),
+                upsert: false,
+              ),
             ),
-          );
+        _supabase.storage
+            .from(_bucketName)
+            .uploadBinaryToSignedUrl(
+              thumbnailStoragePath,
+              thumbnailUploadToken,
+              thumbnailBytes,
+              const FileOptions(
+                cacheControl: '86400',
+                contentType: 'image/jpeg',
+                upsert: false,
+              ),
+            ),
+      ]);
 
       profiler.checkpoint(
-        'Original image uploaded directly '
+        'Original and thumbnail uploaded directly '
         'to Supabase Storage',
       );
 
@@ -376,6 +424,7 @@ class ImageAssetService {
           'image_hash': imageHash,
           'image_id': preparedImageId,
           'storage_path': storagePath,
+          'thumbnail_storage_path': thumbnailStoragePath,
           'original_owner_name': ?originalOwnerName,
         },
       );
@@ -415,35 +464,11 @@ class ImageAssetService {
       if (imageAlreadyExisted) {
         profiler.finish(
           isAssociatedImage
-              ? 'Existing image linked during '
-                    'finalization; thumbnail upload skipped'
-              : 'Existing image found during '
-                    'finalization; thumbnail upload skipped',
+              ? 'Existing image linked during finalization'
+              : 'Existing image found during finalization',
         );
 
         return finalizedImageId;
-      }
-
-      final thumbnailResponse = await _supabase.functions.invoke(
-        'upload-thumbnail',
-        body: thumbnailBytes,
-        headers: {
-          'Content-Type': 'image/jpeg',
-          'x-user-id': _userId,
-          'x-image-id': finalizedImageId,
-        },
-      );
-
-      profiler.checkpoint('Thumbnail uploaded');
-
-      final thumbnailData = thumbnailResponse.data;
-
-      if (thumbnailData is! Map || thumbnailData['thumbnail_saved'] != true) {
-        throw StateError(
-          'The original image was saved, '
-          'but its thumbnail could not be saved. '
-          'Response: $thumbnailData',
-        );
       }
 
       profiler.finish();

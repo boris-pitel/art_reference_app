@@ -51,6 +51,7 @@ type FinalizeRequest = {
   image_hash?: unknown;
   image_id?: unknown;
   storage_path?: unknown;
+  thumbnail_storage_path?: unknown;
   original_owner_name?: unknown;
 };
 
@@ -207,18 +208,18 @@ async function storageFileExists(
   );
 }
 
-async function removeStorageFile(
-  storagePath: string,
+async function removeStorageFiles(
+  storagePaths: string[],
 ): Promise<void> {
   const {
     error,
   } = await supabase.storage
     .from(bucketName)
-    .remove([storagePath]);
+    .remove(storagePaths);
 
   if (error) {
     console.error(
-      'Unable to remove redundant Storage file:',
+      'Unable to remove redundant Storage files:',
       error,
     );
   }
@@ -262,6 +263,7 @@ Deno.serve(async (request) => {
   let imageHash: string;
   let imageId: string;
   let storagePath: string;
+  let thumbnailStoragePath: string;
   let originalOwnerName: string | null;
   let destination: UploadDestination;
 
@@ -289,6 +291,11 @@ Deno.serve(async (request) => {
     storagePath = requiredString(
       body.storage_path,
       'storage_path',
+    );
+
+    thumbnailStoragePath = requiredString(
+      body.thumbnail_storage_path,
+      'thumbnail_storage_path',
     );
 
     originalOwnerName = optionalString(
@@ -331,6 +338,19 @@ Deno.serve(async (request) => {
     );
   }
 
+  const expectedThumbnailStoragePath =
+    `${userId}/thumbnails/${imageId}.jpg`;
+
+  if (thumbnailStoragePath !== expectedThumbnailStoragePath) {
+    return jsonResponse(
+      {
+        error:
+          'thumbnail_storage_path does not match the user and image ID',
+      },
+      400,
+    );
+  }
+
   if (
     destination.type === 'associated' &&
     destination.parentImageId === imageId
@@ -344,11 +364,14 @@ Deno.serve(async (request) => {
     );
   }
 
-  let uploadedFileExists: boolean;
+  let originalExists: boolean;
+  let thumbnailExists: boolean;
 
   try {
-    uploadedFileExists =
-      await storageFileExists(storagePath);
+    [originalExists, thumbnailExists] = await Promise.all([
+      storageFileExists(storagePath),
+      storageFileExists(thumbnailStoragePath),
+    ]);
   } catch (error) {
     console.error(error);
 
@@ -356,17 +379,17 @@ Deno.serve(async (request) => {
       {
         error: error instanceof Error
           ? error.message
-          : 'Unable to verify uploaded file',
+          : 'Unable to verify uploaded files',
       },
       500,
     );
   }
 
-  if (!uploadedFileExists) {
+  if (!originalExists || !thumbnailExists) {
     return jsonResponse(
       {
         error:
-          'The original image was not found in Storage',
+          'The uploaded image files were not found in Storage',
       },
       409,
     );
@@ -392,7 +415,7 @@ Deno.serve(async (request) => {
       if (parentImage.rows.length === 0) {
         await connection.queryArray`rollback`;
 
-        await removeStorageFile(storagePath);
+        await removeStorageFiles([storagePath, thumbnailStoragePath]);
 
         return jsonResponse(
           {
@@ -416,7 +439,7 @@ Deno.serve(async (request) => {
       if (parentCategory.rows.length === 0) {
         await connection.queryArray`rollback`;
 
-        await removeStorageFile(storagePath);
+        await removeStorageFiles([storagePath, thumbnailStoragePath]);
 
         return jsonResponse(
           {
@@ -460,7 +483,7 @@ Deno.serve(async (request) => {
           await connection.queryArray`rollback`;
 
           if (existingImageId !== imageId) {
-            await removeStorageFile(storagePath);
+            await removeStorageFiles([storagePath, thumbnailStoragePath]);
           }
 
           return jsonResponse(
@@ -505,7 +528,7 @@ Deno.serve(async (request) => {
         await connection.queryArray`commit`;
 
         if (existingImageId !== imageId) {
-          await removeStorageFile(storagePath);
+          await removeStorageFiles([storagePath, thumbnailStoragePath]);
         }
 
         return jsonResponse(
@@ -531,7 +554,7 @@ Deno.serve(async (request) => {
         await connection.queryArray`rollback`;
 
         if (existingImageId !== imageId) {
-          await removeStorageFile(storagePath);
+          await removeStorageFiles([storagePath, thumbnailStoragePath]);
         }
 
         return jsonResponse(
@@ -557,7 +580,7 @@ Deno.serve(async (request) => {
         await connection.queryArray`rollback`;
 
         if (existingImageId !== imageId) {
-          await removeStorageFile(storagePath);
+          await removeStorageFiles([storagePath, thumbnailStoragePath]);
         }
 
         return jsonResponse(
@@ -592,7 +615,7 @@ Deno.serve(async (request) => {
         await connection.queryArray`rollback`;
 
         if (existingImageId !== imageId) {
-          await removeStorageFile(storagePath);
+          await removeStorageFiles([storagePath, thumbnailStoragePath]);
         }
 
         if (
@@ -638,7 +661,7 @@ Deno.serve(async (request) => {
       await connection.queryArray`commit`;
 
       if (existingImageId !== imageId) {
-        await removeStorageFile(storagePath);
+        await removeStorageFiles([storagePath, thumbnailStoragePath]);
       }
 
       return jsonResponse(
@@ -663,6 +686,7 @@ Deno.serve(async (request) => {
         user_email,
         image_hash,
         storage_path,
+        thumbnail_storage_path,
         original_owner_name
       )
       values (
@@ -671,6 +695,7 @@ Deno.serve(async (request) => {
         ${userEmail},
         ${imageHash},
         ${storagePath},
+        ${thumbnailStoragePath},
         ${originalOwnerName}
       )
     `;
@@ -744,7 +769,7 @@ Deno.serve(async (request) => {
       'code' in error &&
       error.code === '23505'
     ) {
-      await removeStorageFile(storagePath);
+      await removeStorageFiles([storagePath, thumbnailStoragePath]);
 
       return jsonResponse(
         {

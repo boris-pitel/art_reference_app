@@ -6,8 +6,6 @@ verify_jwt = false
 verify_jwt = false
 [functions.get-image]
 verify_jwt = false
-[functions.upload-thumbnail]
-verify_jwt = false
 [functions.get-thumbnail]
 verify_jwt = false
 [functions.prepare-image-upload]
