@@ -47,7 +47,16 @@ class _DownloadedImage {
   }
 }
 
-enum _ImageAction { edit, share, save, print, sendToFriend, move, remove }
+enum _ImageAction {
+  edit,
+  share,
+  save,
+  print,
+  sendToFriend,
+  selectMode,
+  move,
+  remove,
+}
 
 class CategoryScreen extends StatefulWidget {
   const CategoryScreen({super.key, required this.category});
@@ -858,6 +867,10 @@ class _CategoryScreenState extends State<CategoryScreen> {
         await _sendToFriend(image);
         return;
 
+      case _ImageAction.selectMode:
+        _enterSelectModeWithImage(image);
+        return;
+
       case _ImageAction.move:
         await _moveImageToAnotherCategory(image);
         return;
@@ -890,6 +903,13 @@ class _CategoryScreenState extends State<CategoryScreen> {
     });
   }
 
+  void _enterSelectModeWithImage(_LoadedImage image) {
+    setState(() {
+      _isSelecting = true;
+      _selectedImageIds.add(image.id);
+    });
+  }
+
   Future<void> _showMobileActions(_LoadedImage image) async {
     if (_isBusy) {
       return;
@@ -916,6 +936,19 @@ class _CategoryScreenState extends State<CategoryScreen> {
                     Navigator.of(sheetContext).pop(_ImageAction.edit);
                   },
                 ),
+                if (!widget.category.isMyArt) ...[
+                  ListTile(
+                    leading: const Icon(Icons.checklist_outlined),
+                    title: const Text('Select images'),
+                    subtitle: const Text(
+                      'Pick several images to move at once',
+                    ),
+                    onTap: () {
+                      Navigator.of(sheetContext).pop(_ImageAction.selectMode);
+                    },
+                  ),
+                  const Divider(height: 1),
+                ],
                 const Padding(
                   padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
                   child: Align(
@@ -1027,6 +1060,18 @@ class _CategoryScreenState extends State<CategoryScreen> {
             subtitle: const Text('Open titles, notes, and image options'),
           ),
         ),
+        if (!widget.category.isMyArt) ...[
+          const PopupMenuItem(
+            value: _ImageAction.selectMode,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.checklist_outlined),
+              title: Text('Select images'),
+              subtitle: Text('Pick several images to move at once'),
+            ),
+          ),
+          const PopupMenuDivider(),
+        ],
         const PopupMenuItem(
           value: _ImageAction.share,
           child: ListTile(
