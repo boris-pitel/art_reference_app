@@ -763,12 +763,27 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     }
 
     final picker = ImagePicker();
-    late final List<XFile> selected;
-    if (source == ImageSource.gallery) {
-      selected = await picker.pickMultiImage();
-    } else {
-      final captured = await picker.pickImage(source: ImageSource.camera);
-      selected = captured == null ? <XFile>[] : <XFile>[captured];
+    List<XFile> selected;
+    try {
+      if (source == ImageSource.gallery) {
+        selected = await picker.pickMultiImage();
+      } else {
+        final captured = await picker.pickImage(source: ImageSource.camera);
+        selected = captured == null ? <XFile>[] : <XFile>[captured];
+      }
+    } catch (error) {
+      // Unlike the upload loop below, nothing catches a failure from the
+      // picker call itself here, and the app has no global error handler —
+      // without this, a thrown PlatformException (camera busy, activity
+      // recreation, etc.) would silently vanish with no feedback at all.
+      if (mounted) {
+        _showCategoryMessage(
+          source == ImageSource.camera
+              ? 'Unable to open the camera: $error'
+              : 'Unable to open the photo library: $error',
+        );
+      }
+      return;
     }
     if (selected.isEmpty || !mounted) return;
     if (selected.length > 1) {

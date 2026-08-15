@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:art_reference_app/services/photo_metadata_service.dart';
@@ -79,6 +80,42 @@ void main() {
       expect(const PhotoMetadata().isEmpty, isTrue);
       expect(const PhotoMetadata(iso: 100).isEmpty, isFalse);
     });
+
+    test(
+      'strips null-byte padding from EXIF strings so they never reach '
+      'JSON/Postgres, which hard-rejects an embedded null escape',
+      () {
+        final image = img.Image(width: 10, height: 10);
+        // Real cameras store Make/Model/LensModel as fixed-length,
+        // null-padded ASCII per the TIFF spec.
+        image.exif.imageIfd.make = 'Canon\x00\x00\x00';
+        image.exif.imageIfd.model = 'EOS R5\x00';
+        image.exif.exifIfd[_tagLensModel] = img.IfdValueAscii(
+          'RF50mm\x00F1.2L USM\x00',
+        );
+
+        final bytes = Uint8List.fromList(img.encodeJpg(image));
+        final metadata = PhotoMetadataService.extract(bytes).metadata;
+
+        expect(metadata, isNotNull);
+        expect(metadata!.cameraMake, 'Canon');
+        expect(metadata.cameraModel, 'EOS R5');
+        // An embedded (not just trailing) null is also stripped, not just
+        // truncated at the first one.
+        expect(metadata.lensModel, 'RF50mmF1.2L USM');
+        for (final value in [
+          metadata.cameraMake,
+          metadata.cameraModel,
+          metadata.lensModel,
+        ]) {
+          expect(value!.contains('\x00'), isFalse);
+          // This is the exact escape sequence Postgres's jsonb type
+          // rejects with "unsupported Unicode escape sequence" - confirm
+          // it can never appear in the JSON-encoded output.
+          expect(jsonEncode(value).contains('\\u0000'), isFalse);
+        }
+      },
+    );
 
     test(
       'EXIF survives a resize + re-encode, so extracting from a '
