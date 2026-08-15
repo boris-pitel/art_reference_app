@@ -131,6 +131,7 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
               icon: (row) => row['status'] == 'failed'
                   ? Icons.error_outline
                   : Icons.check_circle_outline,
+              selectable: true,
             ),
           ],
         ),
@@ -442,6 +443,7 @@ class _RecordList extends StatelessWidget {
     required this.subtitle,
     required this.icon,
     this.onTap,
+    this.selectable = false,
   });
 
   final List<Map<String, dynamic>> records;
@@ -450,6 +452,7 @@ class _RecordList extends StatelessWidget {
   final String Function(Map<String, dynamic>) subtitle;
   final IconData Function(Map<String, dynamic>) icon;
   final ValueChanged<Map<String, dynamic>>? onTap;
+  final bool selectable;
 
   @override
   Widget build(BuildContext context) {
@@ -463,8 +466,12 @@ class _RecordList extends StatelessWidget {
         return Card(
           child: ListTile(
             leading: Icon(icon(row)),
-            title: Text(title(row)),
-            subtitle: Text(subtitle(row)),
+            title: selectable
+                ? SelectableText(title(row))
+                : Text(title(row)),
+            subtitle: selectable
+                ? SelectableText(subtitle(row))
+                : Text(subtitle(row)),
             isThreeLine: true,
             onTap: onTap == null ? null : () => onTap!(row),
           ),

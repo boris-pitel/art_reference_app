@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 
 import '../models/reference_category.dart';
 import '../utils/performance_profiler.dart';
+import 'heif_exif_reader.dart';
 import 'image_hash_service.dart';
 import 'image_import_service.dart';
 import 'photo_metadata_service.dart';
@@ -327,20 +328,37 @@ class ImageAssetService {
       );
       unawaited(thumbnailFuture.catchError((_) => Uint8List(0)));
 
-      // EXIF extraction requires decoding full pixel data (this package has
-      // no lightweight header-only reader), so on native it piggybacks on
-      // the thumbnail instead of paying for a second full-resolution decode
-      // of a possibly multi-megapixel camera photo — package:image clones
-      // EXIF onto resized copies and writes it back out when re-encoding, so
-      // the thumbnail carries the same metadata. Web's thumbnail path goes
-      // through an HTML canvas instead, which strips EXIF on re-encode, so
-      // it still reads the full image there.
-      final photoMetadataFuture = thumbnailFuture.then(
-        (thumbnailBytes) => PhotoMetadataService.extract(
-          kIsWeb ? normalizedImageBytes : thumbnailBytes,
-        ),
-        onError: (_) => const PhotoMetadataExtraction(),
-      );
+      final Future<PhotoMetadataExtraction> photoMetadataFuture;
+      if (ImageImportService.isHeif(imageBytes)) {
+        // HEIC (the default iPhone capture format) stores EXIF as a
+        // distinct metadata item in the container rather than inline the
+        // way JPEG does, and the HEIC-to-JPEG conversion above discards it
+        // (it only bakes in orientation). So for HEIC specifically, read
+        // EXIF directly from the untouched original bytes instead — a
+        // fast, decode-free container parse, not an image decode at all.
+        photoMetadataFuture = Future(() {
+          final rawExif = HeifExifReader.findExifPayload(imageBytes);
+          return rawExif == null
+              ? const PhotoMetadataExtraction()
+              : PhotoMetadataService.extractFromRawExif(rawExif);
+        });
+      } else {
+        // EXIF extraction requires decoding full pixel data (this package
+        // has no lightweight header-only reader), so on native it
+        // piggybacks on the thumbnail instead of paying for a second
+        // full-resolution decode of a possibly multi-megapixel camera
+        // photo — package:image clones EXIF onto resized copies and writes
+        // it back out when re-encoding, so the thumbnail carries the same
+        // metadata. Web's thumbnail path goes through an HTML canvas
+        // instead, which strips EXIF on re-encode, so it still reads the
+        // full image there.
+        photoMetadataFuture = thumbnailFuture.then(
+          (thumbnailBytes) => PhotoMetadataService.extract(
+            kIsWeb ? normalizedImageBytes : thumbnailBytes,
+          ),
+          onError: (_) => const PhotoMetadataExtraction(),
+        );
+      }
       unawaited(
         photoMetadataFuture.catchError(
           (_) => const PhotoMetadataExtraction(),

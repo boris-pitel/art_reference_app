@@ -84,31 +84,49 @@ class PhotoMetadataService {
       if (decoded == null || !decoded.hasExif) {
         return const PhotoMetadataExtraction();
       }
-
-      final exif = decoded.exif;
-      final captureTimestamp =
-          _parseExifDateTime(exif.exifIfd[_tagDateTimeOriginal]?.toString()) ??
-          _parseExifDateTime(exif.imageIfd[_tagDateTime]?.toString());
-
-      final metadata = PhotoMetadata(
-        cameraMake: _nullIfEmpty(exif.imageIfd.make),
-        cameraModel: _nullIfEmpty(exif.imageIfd.model),
-        lensModel: _nullIfEmpty(exif.exifIfd[_tagLensModel]?.toString()),
-        aperture: _positiveOrNull(exif.exifIfd[_tagFNumber]?.toDouble()),
-        shutterSpeed: _formatShutterSpeed(exif.exifIfd[_tagExposureTime]),
-        iso: _positiveIntOrNull(exif.exifIfd[_tagIsoSpeed]?.toInt()),
-        focalLengthMm: _positiveOrNull(
-          exif.exifIfd[_tagFocalLength]?.toDouble(),
-        ),
-      );
-
-      return PhotoMetadataExtraction(
-        captureTimestamp: captureTimestamp,
-        metadata: metadata.isEmpty ? null : metadata,
-      );
+      return _extractFromExifData(decoded.exif);
     } catch (_) {
       return const PhotoMetadataExtraction();
     }
+  }
+
+  /// Same extraction, but from a raw TIFF/EXIF byte blob (starting at the
+  /// "II"/"MM" header) rather than a full JPEG/PNG image — used for HEIC
+  /// photos, where [HeifExifReader] pulls the EXIF item straight out of the
+  /// container instead of decoding pixels at all.
+  static PhotoMetadataExtraction extractFromRawExif(Uint8List tiffBytes) {
+    try {
+      final exif = img.ExifData.fromInputBuffer(img.InputBuffer(tiffBytes));
+      if (exif.isEmpty) {
+        return const PhotoMetadataExtraction();
+      }
+      return _extractFromExifData(exif);
+    } catch (_) {
+      return const PhotoMetadataExtraction();
+    }
+  }
+
+  static PhotoMetadataExtraction _extractFromExifData(img.ExifData exif) {
+    final captureTimestamp =
+        _parseExifDateTime(exif.exifIfd[_tagDateTimeOriginal]?.toString()) ??
+        _parseExifDateTime(exif.imageIfd[_tagDateTime]?.toString());
+
+    final metadata = PhotoMetadata(
+      cameraMake: _nullIfEmpty(exif.imageIfd.make),
+      cameraModel: _nullIfEmpty(exif.imageIfd.model),
+      lensModel: _nullIfEmpty(exif.exifIfd[_tagLensModel]?.toString()),
+      aperture: _positiveOrNull(exif.exifIfd[_tagFNumber]?.toDouble()),
+      shutterSpeed: _formatShutterSpeed(exif.exifIfd[_tagExposureTime]),
+      iso: _positiveIntOrNull(exif.exifIfd[_tagIsoSpeed]?.toInt()),
+      focalLengthMm: _positiveOrNull(
+        exif.exifIfd[_tagFocalLength]?.toDouble(),
+      ),
+    );
+
+    return PhotoMetadataExtraction(
+      captureTimestamp: captureTimestamp,
+      metadata: metadata.isEmpty ? null : metadata,
+    );
   }
 
   static String? _nullIfEmpty(String? value) {
