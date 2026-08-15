@@ -1,4 +1,4 @@
-import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 
 /// Locates and extracts the raw EXIF/TIFF payload embedded in a HEIF/HEIC
 /// container (ISO/IEC 23008-12), reading directly from the *original* file
@@ -21,24 +21,49 @@ class HeifExifReader {
   static Uint8List? findExifPayload(Uint8List bytes) {
     try {
       final meta = _findBox(bytes, 0, bytes.length, 'meta');
-      if (meta == null) return null;
+      if (meta == null) {
+        debugPrint('[HeifExifReader] no meta box found (${bytes.length} bytes)');
+        return null;
+      }
 
       // `meta` is a full box: 4 bytes of version/flags precede its children.
       final childrenStart = meta.payloadStart + 4;
-      if (childrenStart > meta.payloadEnd) return null;
+      if (childrenStart > meta.payloadEnd) {
+        debugPrint('[HeifExifReader] meta box too small for version/flags');
+        return null;
+      }
 
       final iinf = _findBox(bytes, childrenStart, meta.payloadEnd, 'iinf');
       final iloc = _findBox(bytes, childrenStart, meta.payloadEnd, 'iloc');
-      if (iinf == null || iloc == null) return null;
+      if (iinf == null || iloc == null) {
+        debugPrint(
+          '[HeifExifReader] iinf/iloc not found under meta '
+          '(iinf=${iinf != null}, iloc=${iloc != null})',
+        );
+        return null;
+      }
 
       final exifItemId = _findExifItemId(bytes, iinf);
-      if (exifItemId == null) return null;
+      if (exifItemId == null) {
+        debugPrint('[HeifExifReader] no infe item with type "Exif" found in iinf');
+        return null;
+      }
 
       final extent = _findItemExtent(bytes, iloc, exifItemId);
-      if (extent == null) return null;
+      if (extent == null) {
+        debugPrint(
+          '[HeifExifReader] iloc has no usable extent for item $exifItemId '
+          '(construction_method != 0, or malformed)',
+        );
+        return null;
+      }
 
       final (offset, length) = extent;
       if (offset < 0 || length < 4 || offset + length > bytes.length) {
+        debugPrint(
+          '[HeifExifReader] extent out of bounds: offset=$offset '
+          'length=$length fileLength=${bytes.length}',
+        );
         return null;
       }
 
@@ -52,11 +77,21 @@ class HeifExifReader {
       ).getUint32(0, Endian.big);
       final tiffStart = offset + 4 + headerOffset;
       if (tiffStart < offset + 4 || tiffStart >= offset + length) {
+        debugPrint(
+          '[HeifExifReader] tiff header offset out of bounds: '
+          'headerOffset=$headerOffset tiffStart=$tiffStart '
+          'extent=($offset, $length)',
+        );
         return null;
       }
 
+      debugPrint(
+        '[HeifExifReader] found Exif item $exifItemId at '
+        '($offset, $length), tiff data starts at $tiffStart',
+      );
       return bytes.sublist(tiffStart, offset + length);
-    } catch (_) {
+    } catch (error, stackTrace) {
+      debugPrint('[HeifExifReader] threw while parsing: $error\n$stackTrace');
       return null;
     }
   }

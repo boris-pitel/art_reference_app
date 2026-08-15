@@ -328,8 +328,11 @@ class ImageAssetService {
       );
       unawaited(thumbnailFuture.catchError((_) => Uint8List(0)));
 
+      final isHeif = ImageImportService.isHeif(imageBytes);
+      profiler.checkpoint('EXIF source detected: ${isHeif ? 'HEIC' : 'non-HEIC'}');
+
       final Future<PhotoMetadataExtraction> photoMetadataFuture;
-      if (ImageImportService.isHeif(imageBytes)) {
+      if (isHeif) {
         // HEIC (the default iPhone capture format) stores EXIF as a
         // distinct metadata item in the container rather than inline the
         // way JPEG does, and the HEIC-to-JPEG conversion above discards it
@@ -459,6 +462,11 @@ class ImageAssetService {
       );
 
       final photoMetadata = await photoMetadataFuture;
+      profiler.checkpoint(
+        'Photo metadata extraction result: '
+        'captureTimestamp=${photoMetadata.captureTimestamp != null}, '
+        'metadata=${photoMetadata.metadata != null}',
+      );
 
       final finalizeResponse = await _supabase.functions.invoke(
         'finalize-image-upload',
