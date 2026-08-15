@@ -53,6 +53,9 @@ type FinalizeRequest = {
   storage_path?: unknown;
   thumbnail_storage_path?: unknown;
   original_owner_name?: unknown;
+  original_filename?: unknown;
+  capture_timestamp?: unknown;
+  photo_metadata?: unknown;
 };
 
 type UploadDestination =
@@ -119,6 +122,45 @@ function optionalString(
   }
 
   return normalizedValue;
+}
+
+function optionalTimestamp(
+  value: unknown,
+  fieldName: string,
+): string | null {
+  const stringValue = optionalString(value, fieldName);
+
+  if (stringValue === null) {
+    return null;
+  }
+
+  const parsed = new Date(stringValue);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed.toISOString();
+}
+
+function optionalJsonObject(
+  value: unknown,
+  fieldName: string,
+): Record<string, unknown> | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (
+    typeof value !== 'object' ||
+    Array.isArray(value)
+  ) {
+    throw new Error(
+      `${fieldName} must be an object`,
+    );
+  }
+
+  return value as Record<string, unknown>;
 }
 
 function readUploadDestination(
@@ -265,6 +307,9 @@ Deno.serve(async (request) => {
   let storagePath: string;
   let thumbnailStoragePath: string;
   let originalOwnerName: string | null;
+  let originalFilename: string | null;
+  let captureTimestamp: string | null;
+  let photoMetadata: Record<string, unknown> | null;
   let destination: UploadDestination;
 
   try {
@@ -301,6 +346,21 @@ Deno.serve(async (request) => {
     originalOwnerName = optionalString(
       body.original_owner_name,
       'original_owner_name',
+    );
+
+    originalFilename = optionalString(
+      body.original_filename,
+      'original_filename',
+    );
+
+    captureTimestamp = optionalTimestamp(
+      body.capture_timestamp,
+      'capture_timestamp',
+    );
+
+    photoMetadata = optionalJsonObject(
+      body.photo_metadata,
+      'photo_metadata',
     );
 
     destination = readUploadDestination(body);
@@ -687,7 +747,10 @@ Deno.serve(async (request) => {
         image_hash,
         storage_path,
         thumbnail_storage_path,
-        original_owner_name
+        original_owner_name,
+        original_filename,
+        capture_timestamp,
+        photo_metadata
       )
       values (
         ${imageId},
@@ -696,7 +759,10 @@ Deno.serve(async (request) => {
         ${imageHash},
         ${storagePath},
         ${thumbnailStoragePath},
-        ${originalOwnerName}
+        ${originalOwnerName},
+        ${originalFilename},
+        ${captureTimestamp}::timestamptz,
+        ${photoMetadata === null ? null : JSON.stringify(photoMetadata)}::jsonb
       )
     `;
 

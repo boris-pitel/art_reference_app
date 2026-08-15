@@ -154,7 +154,11 @@ class _SharedImageImportScreenState extends State<SharedImageImportScreen> {
         _uploadStatus = 'Saving to ${category.displayName}...';
       });
 
-      await _imageAssetService.uploadImage(bytes, category);
+      await _imageAssetService.uploadImage(
+        bytes,
+        category,
+        originalFilename: XFile(widget.sharedImagePath.trim()).name,
+      );
 
       if (!mounted) {
         return;

@@ -8,6 +8,7 @@ import '../models/reference_category.dart';
 import '../utils/performance_profiler.dart';
 import 'image_hash_service.dart';
 import 'image_import_service.dart';
+import 'photo_metadata_service.dart';
 import 'thumbnail_service.dart';
 import 'user_activity_logger.dart';
 
@@ -182,6 +183,7 @@ class ImageAssetService {
     Uint8List imageBytes,
     ReferenceCategory category, {
     String? originalOwnerName,
+    String? originalFilename,
   }) async {
     final stopwatch = Stopwatch()..start();
     try {
@@ -189,6 +191,7 @@ class ImageAssetService {
         imageBytes: imageBytes,
         category: category,
         originalOwnerName: originalOwnerName,
+        originalFilename: originalFilename,
       );
       UserActivityLogger.instance.record(
         operation: 'image_upload',
@@ -267,6 +270,7 @@ class ImageAssetService {
     ReferenceCategory? category,
     String? parentImageId,
     String? originalOwnerName,
+    String? originalFilename,
   }) async {
     if ((category == null) == (parentImageId == null)) {
       throw ArgumentError(
@@ -321,6 +325,18 @@ class ImageAssetService {
         jpegQuality: 80,
       );
       unawaited(thumbnailFuture.catchError((_) => Uint8List(0)));
+
+      // Same overlap treatment for EXIF extraction (capture timestamp,
+      // camera/exposure fields) — it never throws internally, but the
+      // safety-net listener is kept for consistency with thumbnailFuture.
+      final photoMetadataFuture = Future(
+        () => PhotoMetadataService.extract(normalizedImageBytes),
+      );
+      unawaited(
+        photoMetadataFuture.catchError(
+          (_) => const PhotoMetadataExtraction(),
+        ),
+      );
 
       final imageHash = await ImageHashService.calculateSha256(
         normalizedImageBytes,
@@ -415,6 +431,8 @@ class ImageAssetService {
         'to Supabase Storage',
       );
 
+      final photoMetadata = await photoMetadataFuture;
+
       final finalizeResponse = await _supabase.functions.invoke(
         'finalize-image-upload',
         body: {
@@ -426,6 +444,11 @@ class ImageAssetService {
           'storage_path': storagePath,
           'thumbnail_storage_path': thumbnailStoragePath,
           'original_owner_name': ?originalOwnerName,
+          'original_filename': ?originalFilename,
+          'capture_timestamp': ?photoMetadata
+              .captureTimestamp
+              ?.toIso8601String(),
+          'photo_metadata': ?photoMetadata.metadata?.toJson(),
         },
       );
 

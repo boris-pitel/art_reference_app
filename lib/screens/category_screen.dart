@@ -283,7 +283,11 @@ class _CategoryScreenState extends State<CategoryScreen> {
       });
       try {
         final bytes = await files[index].readAsBytes();
-        await _imageAssetService.uploadImage(bytes, widget.category);
+        await _imageAssetService.uploadImage(
+          bytes,
+          widget.category,
+          originalFilename: files[index].name,
+        );
         saved++;
       } catch (_) {
         failures.add(files[index]);

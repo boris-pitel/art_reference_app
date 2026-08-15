@@ -1,0 +1,83 @@
+import 'dart:typed_data';
+
+import 'package:art_reference_app/services/photo_metadata_service.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
+
+const _tagDateTimeOriginal = 0x9003;
+const _tagExposureTime = 0x829A;
+const _tagFNumber = 0x829D;
+const _tagIsoSpeed = 0x8827;
+const _tagFocalLength = 0x920A;
+const _tagLensModel = 0xA434;
+
+void main() {
+  group('PhotoMetadataService', () {
+    test('returns an empty extraction for an image with no EXIF data', () {
+      final image = img.Image(width: 10, height: 10);
+      final bytes = Uint8List.fromList(img.encodeJpg(image));
+
+      final result = PhotoMetadataService.extract(bytes);
+
+      expect(result.captureTimestamp, isNull);
+      expect(result.metadata, isNull);
+    });
+
+    test('extracts capture timestamp and camera/exposure fields from EXIF', () {
+      final image = img.Image(width: 10, height: 10);
+      image.exif.imageIfd.make = 'Canon';
+      image.exif.imageIfd.model = 'EOS R5';
+      image.exif.exifIfd[_tagDateTimeOriginal] = img.IfdValueAscii(
+        '2024:06:15 14:30:00',
+      );
+      image.exif.exifIfd[_tagFNumber] = img.IfdValueRational(28, 10);
+      image.exif.exifIfd[_tagExposureTime] = img.IfdValueRational(1, 125);
+      image.exif.exifIfd[_tagIsoSpeed] = img.IfdValueLong(400);
+      image.exif.exifIfd[_tagFocalLength] = img.IfdValueRational(50, 1);
+      image.exif.exifIfd[_tagLensModel] = img.IfdValueAscii('RF50mm F1.2L');
+
+      final bytes = Uint8List.fromList(img.encodeJpg(image));
+
+      final result = PhotoMetadataService.extract(bytes);
+
+      expect(result.captureTimestamp, DateTime(2024, 6, 15, 14, 30, 0));
+
+      final metadata = result.metadata;
+      expect(metadata, isNotNull);
+      expect(metadata!.cameraMake, 'Canon');
+      expect(metadata.cameraModel, 'EOS R5');
+      expect(metadata.lensModel, 'RF50mm F1.2L');
+      expect(metadata.aperture, closeTo(2.8, 0.01));
+      expect(metadata.shutterSpeed, '1/125s');
+      expect(metadata.iso, 400);
+      expect(metadata.focalLengthMm, 50.0);
+    });
+
+    test('round-trips through toJson/fromJson', () {
+      const metadata = PhotoMetadata(
+        cameraMake: 'Nikon',
+        cameraModel: 'Z9',
+        lensModel: '24-70mm',
+        aperture: 4.0,
+        shutterSpeed: '1/500s',
+        iso: 800,
+        focalLengthMm: 35.0,
+      );
+
+      final roundTripped = PhotoMetadata.fromJson(metadata.toJson());
+
+      expect(roundTripped.cameraMake, metadata.cameraMake);
+      expect(roundTripped.cameraModel, metadata.cameraModel);
+      expect(roundTripped.lensModel, metadata.lensModel);
+      expect(roundTripped.aperture, metadata.aperture);
+      expect(roundTripped.shutterSpeed, metadata.shutterSpeed);
+      expect(roundTripped.iso, metadata.iso);
+      expect(roundTripped.focalLengthMm, metadata.focalLengthMm);
+    });
+
+    test('an all-null PhotoMetadata reports itself as empty', () {
+      expect(const PhotoMetadata().isEmpty, isTrue);
+      expect(const PhotoMetadata(iso: 100).isEmpty, isFalse);
+    });
+  });
+}

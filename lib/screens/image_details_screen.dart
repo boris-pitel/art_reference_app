@@ -16,6 +16,7 @@ import '../services/image_adjustment_service.dart';
 import '../services/image_print_service.dart';
 import '../services/image_save_service.dart';
 import '../services/keyword_service.dart';
+import '../services/photo_metadata_service.dart';
 import '../services/user_activity_logger.dart';
 import '../widgets/image_keywords_section.dart';
 import '../widgets/home_button.dart';
@@ -232,6 +233,9 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   bool _isFinishedArtwork = false;
   bool _isNavigatingHorizontally = false;
   String? _originalOwnerName;
+  String? _originalFilename;
+  DateTime? _captureTimestamp;
+  PhotoMetadata? _photoMetadata;
 
   late String _currentImageId;
   late String _currentImageUrl;
@@ -416,6 +420,21 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         _originalOwnerName = (data['original_owner_name'] as String?)
             ?.trim();
         if (_originalOwnerName?.isEmpty ?? false) _originalOwnerName = null;
+
+        _originalFilename = (data['original_filename'] as String?)?.trim();
+        if (_originalFilename?.isEmpty ?? false) _originalFilename = null;
+
+        _captureTimestamp = DateTime.tryParse(
+          (data['capture_timestamp'] as String?) ?? '',
+        );
+
+        final photoMetadataJson = data['photo_metadata'];
+        _photoMetadata = photoMetadataJson is Map
+            ? PhotoMetadata.fromJson(
+                Map<String, dynamic>.from(photoMetadataJson),
+              )
+            : null;
+
         _lastSavedMetadata = _currentMetadata;
 
         _aiAnalysis = loadedAnalysis;
@@ -1090,6 +1109,9 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       _isFavorite = false;
       _isFinishedArtwork = false;
       _originalOwnerName = null;
+      _originalFilename = null;
+      _captureTimestamp = null;
+      _photoMetadata = null;
       _isNavigatingHorizontally = false;
     });
     await _loadMetadata();
@@ -1575,6 +1597,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                   const SizedBox(height: 24),
                   _buildMetadataSection(context),
                   const SizedBox(height: 24),
+                  _buildPhotoDetailsSection(context),
 
                   if (!widget.isAssociatedImage) ...[
                     ImageKeywordsSection(
@@ -1899,6 +1922,108 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
           ],
         ],
       ],
+    );
+  }
+
+  Widget _buildPhotoDetailsSection(BuildContext context) {
+    if (_isLoadingMetadata) {
+      return const SizedBox.shrink();
+    }
+
+    final rows = <Widget>[
+      if (_originalFilename != null)
+        _buildPhotoDetailRow(
+          context,
+          icon: Icons.insert_drive_file_outlined,
+          label: 'Original filename',
+          value: _originalFilename!,
+        ),
+      if (_captureTimestamp != null)
+        _buildPhotoDetailRow(
+          context,
+          icon: Icons.calendar_today_outlined,
+          label: 'Taken',
+          value: MaterialLocalizations.of(
+            context,
+          ).formatFullDate(_captureTimestamp!.toLocal()),
+        ),
+      if (_photoMetadata?.cameraMake != null || _photoMetadata?.cameraModel != null)
+        _buildPhotoDetailRow(
+          context,
+          icon: Icons.camera_alt_outlined,
+          label: 'Camera',
+          value: [
+            _photoMetadata?.cameraMake,
+            _photoMetadata?.cameraModel,
+          ].whereType<String>().join(' '),
+        ),
+      if (_photoMetadata?.lensModel != null)
+        _buildPhotoDetailRow(
+          context,
+          icon: Icons.camera_outlined,
+          label: 'Lens',
+          value: _photoMetadata!.lensModel!,
+        ),
+      if (_photoMetadata?.aperture != null)
+        _buildPhotoDetailRow(
+          context,
+          icon: Icons.lens_outlined,
+          label: 'Aperture',
+          value: 'f/${_photoMetadata!.aperture!.toStringAsFixed(1)}',
+        ),
+      if (_photoMetadata?.shutterSpeed != null)
+        _buildPhotoDetailRow(
+          context,
+          icon: Icons.shutter_speed_outlined,
+          label: 'Shutter speed',
+          value: _photoMetadata!.shutterSpeed!,
+        ),
+      if (_photoMetadata?.iso != null)
+        _buildPhotoDetailRow(
+          context,
+          icon: Icons.iso_outlined,
+          label: 'ISO',
+          value: '${_photoMetadata!.iso}',
+        ),
+      if (_photoMetadata?.focalLengthMm != null)
+        _buildPhotoDetailRow(
+          context,
+          icon: Icons.zoom_in_outlined,
+          label: 'Focal length',
+          value: '${_photoMetadata!.focalLengthMm!.toStringAsFixed(0)}mm',
+        ),
+    ];
+
+    if (rows.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      children: [
+        ExpansionTile(
+          key: ValueKey('photo-details-$_currentImageId'),
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: const EdgeInsets.only(bottom: 8),
+          leading: const Icon(Icons.info_outline),
+          title: const Text('Photo details'),
+          children: rows,
+        ),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  Widget _buildPhotoDetailRow(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(icon, size: 20),
+      title: Text(label),
+      subtitle: Text(value),
     );
   }
 

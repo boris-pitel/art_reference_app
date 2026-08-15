@@ -77,6 +77,9 @@ Deno.serve(async (request) => {
       notes: string | null;
       source_url: string | null;
       original_owner_name: string | null;
+      original_filename: string | null;
+      capture_timestamp: Date | null;
+      photo_metadata: Record<string, unknown> | null;
       is_favorite: boolean;
       is_finished_artwork: boolean;
 
@@ -99,6 +102,9 @@ Deno.serve(async (request) => {
         notes,
         source_url,
         original_owner_name,
+        original_filename,
+        capture_timestamp,
+        photo_metadata,
         is_favorite,
         is_finished_artwork,
 
@@ -137,6 +143,9 @@ Deno.serve(async (request) => {
       notes: row.notes,
       source_url: row.source_url,
       original_owner_name: row.original_owner_name,
+      original_filename: row.original_filename,
+      capture_timestamp: row.capture_timestamp?.toISOString() ?? null,
+      photo_metadata: row.photo_metadata,
       is_favorite: row.is_favorite,
       is_finished_artwork: row.is_finished_artwork,
 
