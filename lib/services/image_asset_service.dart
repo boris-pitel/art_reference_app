@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
@@ -326,11 +327,19 @@ class ImageAssetService {
       );
       unawaited(thumbnailFuture.catchError((_) => Uint8List(0)));
 
-      // Same overlap treatment for EXIF extraction (capture timestamp,
-      // camera/exposure fields) — it never throws internally, but the
-      // safety-net listener is kept for consistency with thumbnailFuture.
-      final photoMetadataFuture = Future(
-        () => PhotoMetadataService.extract(normalizedImageBytes),
+      // EXIF extraction requires decoding full pixel data (this package has
+      // no lightweight header-only reader), so on native it piggybacks on
+      // the thumbnail instead of paying for a second full-resolution decode
+      // of a possibly multi-megapixel camera photo — package:image clones
+      // EXIF onto resized copies and writes it back out when re-encoding, so
+      // the thumbnail carries the same metadata. Web's thumbnail path goes
+      // through an HTML canvas instead, which strips EXIF on re-encode, so
+      // it still reads the full image there.
+      final photoMetadataFuture = thumbnailFuture.then(
+        (thumbnailBytes) => PhotoMetadataService.extract(
+          kIsWeb ? normalizedImageBytes : thumbnailBytes,
+        ),
+        onError: (_) => const PhotoMetadataExtraction(),
       );
       unawaited(
         photoMetadataFuture.catchError(

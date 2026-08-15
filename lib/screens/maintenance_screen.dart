@@ -127,9 +127,7 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
               emptyMessage: 'No activity found.',
               title: (row) =>
                   '${row['operation'] ?? 'Activity'} • ${row['status'] ?? ''}',
-              subtitle: (row) =>
-                  '${row['user_email'] ?? '(unknown user)'} • ${_date(row['created_at'])}\n'
-                  '${row['target_type'] ?? ''} ${row['target_id'] ?? ''}',
+              subtitle: _activitySubtitle,
               icon: (row) => row['status'] == 'failed'
                   ? Icons.error_outline
                   : Icons.check_circle_outline,
@@ -507,4 +505,24 @@ String _date(dynamic value) {
   if (value == null) return '-';
   return DateTime.tryParse(value.toString())?.toLocal().toString() ??
       value.toString();
+}
+
+String _activitySubtitle(Map<String, dynamic> row) {
+  final duration = row['duration_ms'];
+  final durationText = duration is num ? ' • ${duration.toInt()}ms' : '';
+
+  final lines = [
+    '${row['user_email'] ?? '(unknown user)'} • '
+        '${_date(row['created_at'])}$durationText',
+    '${row['target_type'] ?? ''} ${row['target_id'] ?? ''}'.trim(),
+  ];
+
+  final errorMessage = row['error_message'];
+  if (row['status'] == 'failed' &&
+      errorMessage is String &&
+      errorMessage.trim().isNotEmpty) {
+    lines.add(errorMessage.trim());
+  }
+
+  return lines.where((line) => line.isNotEmpty).join('\n');
 }

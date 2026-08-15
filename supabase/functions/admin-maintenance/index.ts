@@ -366,7 +366,7 @@ Deno.serve(async (request) => {
       adminClient
         .from('user_activity_logs')
         .select(
-          'id,user_email,operation,status,target_type,target_id,duration_ms,created_at',
+          'id,user_email,operation,status,target_type,target_id,duration_ms,error_code,error_message,created_at',
         )
         .order('created_at', { ascending: false })
         .limit(300),

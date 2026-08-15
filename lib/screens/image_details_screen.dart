@@ -236,6 +236,9 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   String? _originalFilename;
   DateTime? _captureTimestamp;
   PhotoMetadata? _photoMetadata;
+  String? _storagePath;
+  String? _thumbnailStoragePath;
+  String? _imageHash;
 
   late String _currentImageId;
   late String _currentImageUrl;
@@ -434,6 +437,10 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                 Map<String, dynamic>.from(photoMetadataJson),
               )
             : null;
+
+        _storagePath = data['storage_path'] as String?;
+        _thumbnailStoragePath = data['thumbnail_storage_path'] as String?;
+        _imageHash = data['image_hash'] as String?;
 
         _lastSavedMetadata = _currentMetadata;
 
@@ -1112,6 +1119,9 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       _originalFilename = null;
       _captureTimestamp = null;
       _photoMetadata = null;
+      _storagePath = null;
+      _thumbnailStoragePath = null;
+      _imageHash = null;
       _isNavigatingHorizontally = false;
     });
     await _loadMetadata();
@@ -1595,6 +1605,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                 children: [
                   _buildImageViewer(context, imageHeight),
                   const SizedBox(height: 24),
+                  _buildTechnicalSection(context),
                   _buildMetadataSection(context),
                   const SizedBox(height: 24),
                   _buildPhotoDetailsSection(context),
@@ -1757,6 +1768,81 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
           ],
         ],
       ),
+    );
+  }
+
+  Widget _buildTechnicalSection(BuildContext context) {
+    if (_isLoadingMetadata) {
+      return const SizedBox.shrink();
+    }
+
+    final dateAdded = _currentDateAdded;
+
+    final rows = <Widget>[
+      _buildTechnicalDetailRow(
+        context,
+        icon: Icons.tag,
+        label: 'Image ID',
+        value: _currentImageId,
+      ),
+      if (dateAdded != null)
+        _buildTechnicalDetailRow(
+          context,
+          icon: Icons.calendar_today_outlined,
+          label: 'Date added',
+          value: MaterialLocalizations.of(
+            context,
+          ).formatFullDate(dateAdded.toLocal()),
+        ),
+      if (_imageHash != null)
+        _buildTechnicalDetailRow(
+          context,
+          icon: Icons.fingerprint,
+          label: 'Image hash',
+          value: _imageHash!,
+        ),
+      if (_storagePath != null)
+        _buildTechnicalDetailRow(
+          context,
+          icon: Icons.folder_outlined,
+          label: 'Storage path',
+          value: _storagePath!,
+        ),
+      if (_thumbnailStoragePath != null)
+        _buildTechnicalDetailRow(
+          context,
+          icon: Icons.image_outlined,
+          label: 'Thumbnail path',
+          value: _thumbnailStoragePath!,
+        ),
+    ];
+
+    return Column(
+      children: [
+        ExpansionTile(
+          key: ValueKey('technical-details-$_currentImageId'),
+          tilePadding: EdgeInsets.zero,
+          childrenPadding: const EdgeInsets.only(bottom: 8),
+          leading: const Icon(Icons.terminal_outlined),
+          title: const Text('Technical'),
+          children: rows,
+        ),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  Widget _buildTechnicalDetailRow(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(icon, size: 20),
+      title: Text(label),
+      subtitle: SelectableText(value),
     );
   }
 

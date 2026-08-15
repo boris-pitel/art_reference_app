@@ -80,6 +80,9 @@ Deno.serve(async (request) => {
       original_filename: string | null;
       capture_timestamp: Date | null;
       photo_metadata: Record<string, unknown> | null;
+      storage_path: string | null;
+      thumbnail_storage_path: string | null;
+      image_hash: string | null;
       is_favorite: boolean;
       is_finished_artwork: boolean;
 
@@ -105,6 +108,9 @@ Deno.serve(async (request) => {
         original_filename,
         capture_timestamp,
         photo_metadata,
+        storage_path,
+        thumbnail_storage_path,
+        image_hash,
         is_favorite,
         is_finished_artwork,
 
@@ -146,6 +152,9 @@ Deno.serve(async (request) => {
       original_filename: row.original_filename,
       capture_timestamp: row.capture_timestamp?.toISOString() ?? null,
       photo_metadata: row.photo_metadata,
+      storage_path: row.storage_path,
+      thumbnail_storage_path: row.thumbnail_storage_path,
+      image_hash: row.image_hash,
       is_favorite: row.is_favorite,
       is_finished_artwork: row.is_finished_artwork,
 

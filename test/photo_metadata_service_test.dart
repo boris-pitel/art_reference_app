@@ -79,5 +79,34 @@ void main() {
       expect(const PhotoMetadata().isEmpty, isTrue);
       expect(const PhotoMetadata(iso: 100).isEmpty, isFalse);
     });
+
+    test(
+      'EXIF survives a resize + re-encode, so extracting from a '
+      'thumbnail (as image_asset_service does on native, to avoid '
+      'decoding a full-resolution camera photo twice) still works',
+      () {
+        final original = img.Image(width: 4000, height: 3000);
+        original.exif.imageIfd.make = 'Sony';
+        original.exif.imageIfd.model = 'A7R V';
+        original.exif.exifIfd[_tagDateTimeOriginal] = img.IfdValueAscii(
+          '2025:01:20 08:00:00',
+        );
+        original.exif.exifIfd[_tagFNumber] = img.IfdValueRational(18, 10);
+        original.exif.exifIfd[_tagIsoSpeed] = img.IfdValueLong(100);
+
+        final thumbnail = img.copyResize(original, width: 500);
+        final thumbnailBytes = Uint8List.fromList(
+          img.encodeJpg(thumbnail, quality: 80),
+        );
+
+        final result = PhotoMetadataService.extract(thumbnailBytes);
+
+        expect(result.captureTimestamp, DateTime(2025, 1, 20, 8, 0, 0));
+        expect(result.metadata?.cameraMake, 'Sony');
+        expect(result.metadata?.cameraModel, 'A7R V');
+        expect(result.metadata?.aperture, closeTo(1.8, 0.01));
+        expect(result.metadata?.iso, 100);
+      },
+    );
   });
 }
