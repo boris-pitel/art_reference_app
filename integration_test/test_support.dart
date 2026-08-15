@@ -41,6 +41,7 @@ class TestSession {
 Future<TestSession> createTestSession(
   WidgetTester tester, {
   String? loginName,
+  Map<String, dynamic>? appMetadata,
 }) async {
   final publicConfig = readEnvironmentFile('env');
   final adminConfig = readEnvironmentFile('.env.admin');
@@ -67,6 +68,7 @@ Future<TestSession> createTestSession(
       password: password,
       emailConfirm: true,
       userMetadata: loginName == null ? null : {'login_name': loginName},
+      appMetadata: appMetadata,
     ),
   );
 

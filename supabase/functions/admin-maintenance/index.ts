@@ -16,7 +16,7 @@ const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers':
     'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'GET, PATCH, DELETE, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -202,6 +202,56 @@ async function setLoginName(userId: string, loginName: string | null) {
   }
 }
 
+async function logAdminAction(
+  adminId: string,
+  adminEmail: string,
+  operation: string,
+  targetId: string,
+  details: Record<string, unknown>,
+) {
+  const { error } = await adminClient.from('user_activity_logs').insert({
+    user_id: adminId,
+    user_email: adminEmail,
+    session_id: crypto.randomUUID(),
+    operation,
+    status: 'succeeded',
+    target_type: 'user',
+    target_id: targetId,
+    platform: 'admin-maintenance',
+    app_version: 'server',
+    details,
+  });
+  if (error) {
+    console.error('Unable to record admin activity log', error);
+  }
+}
+
+async function impersonateUser(userId: string, adminId: string) {
+  if (userId === adminId) {
+    throw new Error('You cannot impersonate your own account');
+  }
+  const { data: userResult, error: userError } =
+    await adminClient.auth.admin.getUserById(userId);
+  if (userError || !userResult.user) {
+    throw new Error('User not found');
+  }
+  const email = userResult.user.email;
+  if (!email) {
+    throw new Error('That user has no email address to sign in with');
+  }
+  const { data: linkData, error: linkError } =
+    await adminClient.auth.admin.generateLink({
+      type: 'magiclink',
+      email,
+    });
+  if (linkError || !linkData?.properties?.hashed_token) {
+    throw new Error(
+      linkError?.message ?? 'Unable to generate an impersonation token',
+    );
+  }
+  return { email, token_hash: linkData.properties.hashed_token };
+}
+
 async function removeUser(userId: string, email: string, adminId: string) {
   if (userId === adminId) throw new Error('You cannot remove your own account');
   const inventory = await userInventory(userId, adminId);
@@ -235,10 +285,14 @@ Deno.serve(async (request) => {
   }
   if (
     request.method !== 'GET' &&
+    request.method !== 'POST' &&
     request.method !== 'PATCH' &&
     request.method !== 'DELETE'
   ) {
-    return jsonResponse({ error: 'GET, PATCH, or DELETE required' }, 405);
+    return jsonResponse(
+      { error: 'GET, POST, PATCH, or DELETE required' },
+      405,
+    );
   }
 
   const admin = await requireAdmin(request);
@@ -247,6 +301,27 @@ Deno.serve(async (request) => {
   }
 
   try {
+    if (request.method === 'POST') {
+      const body = await request.json().catch(() => null);
+      const action = body?.action;
+      const userId = body?.user_id;
+      if (typeof userId !== 'string' || userId.trim().length === 0) {
+        return jsonResponse({ error: 'User ID is required' }, 400);
+      }
+      if (action === 'impersonate') {
+        const result = await impersonateUser(userId, admin.id);
+        await logAdminAction(
+          admin.id,
+          admin.email ?? '',
+          'admin_impersonate_user',
+          userId,
+          { impersonated_email: result.email },
+        );
+        return jsonResponse(result);
+      }
+      return jsonResponse({ error: 'Unsupported action' }, 400);
+    }
+
     if (request.method === 'DELETE') {
       const body = await request.json().catch(() => null);
       const userId = body?.user_id;

@@ -8,6 +8,7 @@ import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'models/reference_category.dart';
+import 'navigation.dart';
 import 'screens/category_screen.dart';
 import 'screens/feedback_screen.dart';
 import 'screens/help_screen.dart';
@@ -19,6 +20,7 @@ import 'screens/messages_screen.dart';
 import 'screens/messaging_settings_screen.dart';
 import 'screens/shared_image_import_screen.dart';
 import 'services/category_service.dart';
+import 'services/impersonation_controller.dart';
 import 'services/library_home_cache.dart';
 import 'services/image_asset_service.dart';
 import 'services/messaging_service.dart';
@@ -52,8 +54,6 @@ class ArtReferenceApp extends StatefulWidget {
 }
 
 class _ArtReferenceAppState extends State<ArtReferenceApp> {
-  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
-
   StreamSubscription<AuthState>? _authSubscription;
   StreamSubscription<List<SharedMediaFile>>? _sharingSubscription;
 
@@ -191,7 +191,7 @@ class _ArtReferenceAppState extends State<ArtReferenceApp> {
       }
 
       final sharedPath = _pendingSharedImagePath;
-      final navigator = _navigatorKey.currentState;
+      final navigator = rootNavigatorKey.currentState;
 
       if (sharedPath == null || navigator == null || _shareScreenIsOpen) {
         return;
@@ -233,7 +233,7 @@ class _ArtReferenceAppState extends State<ArtReferenceApp> {
       }
 
       _shareScreenIsOpen = false;
-      _navigatorKey.currentState?.popUntil((route) => route.isFirst);
+      rootNavigatorKey.currentState?.popUntil((route) => route.isFirst);
     });
   }
 
@@ -247,7 +247,7 @@ class _ArtReferenceAppState extends State<ArtReferenceApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      navigatorKey: _navigatorKey,
+      navigatorKey: rootNavigatorKey,
       title: 'Painter Reference',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -259,6 +259,71 @@ class _ArtReferenceAppState extends State<ArtReferenceApp> {
           : _isSignedIn
           ? const CollectionsScreen()
           : LoginScreen(key: ValueKey<String?>(_pendingSharedImagePath)),
+      builder: (context, child) {
+        if (child == null) return const SizedBox.shrink();
+        return _ImpersonationBanner(child: child);
+      },
+    );
+  }
+}
+
+class _ImpersonationBanner extends StatelessWidget {
+  const _ImpersonationBanner({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<String?>(
+      valueListenable: ImpersonationController.instance.impersonatedEmail,
+      builder: (context, impersonatedEmail, _) {
+        if (impersonatedEmail == null) {
+          return child;
+        }
+        final colors = Theme.of(context).colorScheme;
+        return Column(
+          children: [
+            SafeArea(
+              bottom: false,
+              child: Material(
+                color: colors.errorContainer,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.visibility, color: colors.onErrorContainer),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Impersonating $impersonatedEmail',
+                          style: TextStyle(
+                            color: colors.onErrorContainer,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          ImpersonationController.instance
+                              .returnToOriginalAccount();
+                        },
+                        child: Text(
+                          'Return to my account',
+                          style: TextStyle(color: colors.onErrorContainer),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Expanded(child: child),
+          ],
+        );
+      },
     );
   }
 }

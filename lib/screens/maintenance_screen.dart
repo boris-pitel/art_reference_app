@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../services/impersonation_controller.dart';
 import '../services/maintenance_service.dart';
 import '../widgets/home_button.dart';
 
@@ -217,6 +218,12 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
         actions: [
           if (user['is_current_user'] != true)
             TextButton.icon(
+              onPressed: () => Navigator.pop(dialogContext, 'impersonate'),
+              icon: const Icon(Icons.visibility_outlined),
+              label: const Text('Impersonate'),
+            ),
+          if (user['is_current_user'] != true)
+            TextButton.icon(
               style: TextButton.styleFrom(
                 foregroundColor: Theme.of(context).colorScheme.error,
               ),
@@ -233,6 +240,35 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
     );
     if (action == 'remove' && mounted) await _confirmRemoveUser(user);
     if (action == 'edit' && mounted) await _editLoginName(user);
+    if (action == 'impersonate' && mounted) await _impersonateUser(user);
+  }
+
+  Future<void> _impersonateUser(Map<String, dynamic> user) async {
+    final userId = user['id']?.toString();
+    if (userId == null || userId.isEmpty) return;
+    final currentSession = Supabase.instance.client.auth.currentSession;
+    final originalRefreshToken = currentSession?.refreshToken;
+    if (originalRefreshToken == null) {
+      _message('No active session to restore afterward.', error: true);
+      return;
+    }
+    _showProgress('Signing in as ${user['email'] ?? 'user'}...');
+    try {
+      final result = await _service.impersonate(userId);
+      final targetEmail = result['email'] as String;
+      final tokenHash = result['token_hash'] as String;
+      await Supabase.instance.client.auth.verifyOTP(
+        type: OtpType.magiclink,
+        tokenHash: tokenHash,
+      );
+      ImpersonationController.instance.begin(
+        targetEmail: targetEmail,
+        originalRefreshToken: originalRefreshToken,
+      );
+    } catch (error) {
+      if (mounted) Navigator.pop(context);
+      if (mounted) _message(error.toString(), error: true);
+    }
   }
 
   Future<void> _confirmRemoveUser(Map<String, dynamic> user) async {

@@ -61,6 +61,23 @@ class MaintenanceService {
     return Map<String, dynamic>.from(data['user'] as Map);
   }
 
+  Future<Map<String, dynamic>> impersonate(String userId) async {
+    final response = await _client.functions.invoke(
+      'admin-maintenance',
+      method: HttpMethod.post,
+      body: {'action': 'impersonate', 'user_id': userId},
+    );
+    final data = response.data;
+    if (data is! Map ||
+        data['email'] is! String ||
+        data['token_hash'] is! String) {
+      throw StateError(
+        'The maintenance service returned an invalid impersonation response.',
+      );
+    }
+    return Map<String, dynamic>.from(data);
+  }
+
   Future<void> removeUser({required String userId, required String email}) async {
     final response = await _client.functions.invoke(
       'admin-maintenance',
