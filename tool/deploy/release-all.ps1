@@ -2,6 +2,9 @@
 #.\release-all.ps1 -Backend -Web -Phone -Windows
 #Or everything:
 #.\release-all.ps1 -All
+#StressTest is optional and not included in -All (it's a slow benchmark,
+#not a release gate) - opt in explicitly:
+#.\release-all.ps1 -All -StressTest
 
 [CmdletBinding()]
 param(
@@ -11,6 +14,7 @@ param(
     [switch]$Windows,
     [switch]$AdminConsole,
     [switch]$All,
+    [switch]$StressTest,
     [string]$DeviceId
 )
 
@@ -23,10 +27,11 @@ if ($All) {
     $Windows = $true
     $AdminConsole = $true
 }
-if (-not ($Backend -or $Web -or $Phone -or $Windows -or $AdminConsole)) {
+if (-not ($Backend -or $Web -or $Phone -or $Windows -or $AdminConsole -or $StressTest)) {
     Write-Host 'Select at least one target:'
     Write-Host '  .\release-all.ps1 -Backend -Web -Phone -Windows'
     Write-Host '  .\release-all.ps1 -All -DeviceId PHONE_SERIAL'
+    Write-Host '  .\release-all.ps1 -All -StressTest'
     exit 1
 }
 
@@ -48,6 +53,9 @@ if ($Phone) {
 if ($Windows -or $AdminConsole) {
     & (Join-Path $PSScriptRoot 'build-windows.ps1') `
         -MainApp:$Windows -AdminConsole:$AdminConsole -SkipVersionBump
+}
+if ($StressTest) {
+    & (Join-Path $PSScriptRoot 'stress-test.ps1')
 }
 
 Write-Host 'All selected release tasks completed.' -ForegroundColor Green
