@@ -379,6 +379,23 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     _restoreThenRefreshCategories();
     _refreshAdminStatus();
     _refreshUnreadMessageCount();
+
+    // This screen's State is never recreated by an impersonation switch
+    // (Navigator.popUntil reuses the existing root route rather than
+    // rebuilding it), so without this listener the category grid would keep
+    // showing whichever identity's data was loaded when initState first
+    // ran, regardless of who the app is actually signed in as afterward.
+    ImpersonationController.instance.impersonatedEmail.addListener(
+      _refreshHome,
+    );
+  }
+
+  @override
+  void dispose() {
+    ImpersonationController.instance.impersonatedEmail.removeListener(
+      _refreshHome,
+    );
+    super.dispose();
   }
 
   Future<void> _refreshAdminStatus() async {
