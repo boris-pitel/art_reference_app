@@ -1,5 +1,4 @@
-import 'dart:typed_data';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../services/gesture_share.dart';
@@ -15,6 +14,21 @@ import '../services/image_save_service.dart';
 /// gesture, and the share happens synchronously inside it.
 class ImageDelivery {
   const ImageDelivery._();
+
+  /// Whether a Print control is worth offering.
+  ///
+  /// Mobile browsers cannot reach a print dialog: the printing package checks
+  /// for a mobile user agent and skips that path entirely, and its fallback of
+  /// opening the PDF in a new tab is blocked without user activation, which the
+  /// image download has already spent. The result is a control that appears to
+  /// work and does nothing, so it is hidden rather than shown broken. Sharing
+  /// and downloading still reach a printer.
+  static bool get printingIsAvailable {
+    if (!kIsWeb) return true;
+
+    return defaultTargetPlatform != TargetPlatform.iOS &&
+        defaultTargetPlatform != TargetPlatform.android;
+  }
 
   static Future<ImageSaveResult> save(
     BuildContext context,

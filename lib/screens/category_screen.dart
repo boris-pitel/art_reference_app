@@ -985,13 +985,14 @@ class _CategoryScreenState extends State<CategoryScreen> {
                     Navigator.of(sheetContext).pop(_ImageAction.save);
                   },
                 ),
-                ListTile(
-                  leading: const Icon(Icons.print_outlined),
-                  title: const Text('Print'),
-                  onTap: () {
-                    Navigator.of(sheetContext).pop(_ImageAction.print);
-                  },
-                ),
+                if (ImageDelivery.printingIsAvailable)
+                  ListTile(
+                    leading: const Icon(Icons.print_outlined),
+                    title: const Text('Print'),
+                    onTap: () {
+                      Navigator.of(sheetContext).pop(_ImageAction.print);
+                    },
+                  ),
                 ListTile(
                   leading: const Icon(Icons.person_add_alt_outlined),
                   title: const Text('Send to friend'),
@@ -1097,14 +1098,15 @@ class _CategoryScreenState extends State<CategoryScreen> {
             title: Text(ImageSaveService.actionLabel),
           ),
         ),
-        const PopupMenuItem(
-          value: _ImageAction.print,
-          child: ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.print_outlined),
-            title: Text('Print'),
+        if (ImageDelivery.printingIsAvailable)
+          const PopupMenuItem(
+            value: _ImageAction.print,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.print_outlined),
+              title: Text('Print'),
+            ),
           ),
-        ),
         const PopupMenuItem(
           value: _ImageAction.sendToFriend,
           child: ListTile(

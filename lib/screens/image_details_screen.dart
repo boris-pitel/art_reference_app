@@ -1775,14 +1775,15 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
           }
         },
         itemBuilder: (context) => [
-          const PopupMenuItem<_ImageAction>(
-            value: _ImageAction.print,
-            child: ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.print_outlined),
-              title: Text('Print'),
+          if (ImageDelivery.printingIsAvailable)
+            const PopupMenuItem<_ImageAction>(
+              value: _ImageAction.print,
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.print_outlined),
+                title: Text('Print'),
+              ),
             ),
-          ),
           const PopupMenuItem<_ImageAction>(
             value: _ImageAction.sendToFriend,
             child: ListTile(
@@ -2661,14 +2662,15 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                           title: Text(ImageSaveService.actionLabel),
                         ),
                       ),
-                      const PopupMenuItem<_AssociatedImageAction>(
-                        value: _AssociatedImageAction.print,
-                        child: ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          leading: Icon(Icons.print_outlined),
-                          title: Text('Print'),
+                      if (ImageDelivery.printingIsAvailable)
+                        const PopupMenuItem<_AssociatedImageAction>(
+                          value: _AssociatedImageAction.print,
+                          child: ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: Icon(Icons.print_outlined),
+                            title: Text('Print'),
+                          ),
                         ),
-                      ),
                       const PopupMenuDivider(),
                       const PopupMenuItem<_AssociatedImageAction>(
                         value: _AssociatedImageAction.delete,
