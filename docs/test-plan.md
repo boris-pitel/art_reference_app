@@ -87,7 +87,10 @@ why saving now takes two steps.
       sheet opens. The extra tap is deliberate.
 - [ ] **C5** Choose **Save Image**, then open Photos. → It is in the camera roll.
 - [ ] **C6** Repeat but dismiss the sheet. → No success message.
-- [ ] **C7** Open the 6000×8000 photo full-screen. → **Known risk**: may blank
+- [x] **C7** Save the 6000×8000 photo. → A red warning appears saying the image
+      is 48 megapixels and Photos will not take it. *Confirmed 18 August.*
+      Choosing another destination saves it at full resolution.
+- [ ] **C8** Open the 6000×8000 photo full-screen. → **Known risk**: may blank
       or fail. Record it; do not treat it as new.
 
 ## D. Android app
@@ -126,6 +129,13 @@ message — every toggle so far sent none.
 
 ## Known — do not raise these
 
+- **iPhone Photos refuses images above ~32 megapixels.** iOS decodes a JPEG
+  only to about that size and importing to Photos requires a decode, so a 48MP
+  photo is accepted by the share sheet and silently dropped. Not an app defect
+  and not detectable — iOS reports nothing back — so the app warns beforehand
+  instead. Other destinations take the full-resolution file: confirmed by
+  uploading the same 6000×8000 photo to a cloud app intact, since an upload
+  copies bytes without decoding them.
 - **Printing on iPhone goes via the share sheet.** Safari cannot open a print
   dialog directly, so Print builds a PDF and hands it to iOS, where AirPrint
   does the printing. The extra tap is required, not a defect.
