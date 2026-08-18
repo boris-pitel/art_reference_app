@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../app_version.dart';
+import 'device_profile.dart';
 import 'package:uuid/uuid.dart';
 
 class UserActivityLogger {
@@ -41,7 +42,9 @@ class UserActivityLogger {
         'duration_ms': durationMs,
         'platform': _platform,
         'app_version': appVersion,
-        'details': details,
+        // Device facts ride along with every entry so a report that only
+        // reproduces on one person's hardware can be traced to that hardware.
+        'details': {...details, 'device': DeviceProfile.current},
         if (error != null) 'error_message': _sanitizeError(error),
       });
     } catch (loggingError) {

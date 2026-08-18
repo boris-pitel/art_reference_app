@@ -2862,6 +2862,42 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
     _transformationController.value = Matrix4.identity();
   }
 
+  // Full-screen viewing of very large images fails on some devices and not
+  // others, producing a blank view rather than an error — a GPU that cannot
+  // hold the texture renders nothing and reports nothing. That cannot be
+  // reproduced on hardware where it works, so each attempt is recorded with
+  // the device attached: a device that logs 'started' and never 'succeeded'
+  // has hit exactly that failure, which is otherwise invisible.
+  String? _reportedRenderKey;
+
+  void _reportFullViewStarted(int? expectedBytes) {
+    final key = 'started:${widget.exportImageId ?? _imageUrl}';
+    if (_reportedRenderKey == key) return;
+    _reportedRenderKey = key;
+
+    UserActivityLogger.instance.record(
+      operation: 'image_full_view',
+      status: 'started',
+      targetType: 'image',
+      targetId: widget.exportImageId,
+      details: {'expected_bytes': expectedBytes},
+    );
+  }
+
+  void _reportFullViewRender(String status, {Object? error}) {
+    final key = '$status:${widget.exportImageId ?? _imageUrl}';
+    if (_reportedRenderKey == key) return;
+    _reportedRenderKey = key;
+
+    UserActivityLogger.instance.record(
+      operation: 'image_full_view',
+      status: status,
+      targetType: 'image',
+      targetId: widget.exportImageId,
+      error: error,
+    );
+  }
+
   Future<void> _startEditing() async {
     if (_isLoadingEditor || _isApplyingEdit) return;
     setState(() => _isLoadingEditor = true);
@@ -3286,11 +3322,33 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
                                   height: double.infinity,
                                   fit: BoxFit.contain,
                                   gaplessPlayback: true,
+                                  frameBuilder:
+                                      (
+                                        context,
+                                        child,
+                                        frame,
+                                        wasSynchronouslyLoaded,
+                                      ) {
+                                        // A frame means the decode succeeded
+                                        // and a texture was produced. Recorded
+                                        // so a device that never gets here is
+                                        // identifiable from its logs alone.
+                                        if (frame != null) {
+                                          _reportFullViewRender(
+                                            'succeeded',
+                                          );
+                                        }
+                                        return child;
+                                      },
                                   loadingBuilder:
                                       (context, child, loadingProgress) {
                                         if (loadingProgress == null) {
                                           return child;
                                         }
+
+                                        _reportFullViewStarted(
+                                          loadingProgress.expectedTotalBytes,
+                                        );
 
                                         final expectedBytes =
                                             loadingProgress.expectedTotalBytes;
@@ -3309,6 +3367,10 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
                                         );
                                       },
                                   errorBuilder: (context, error, stackTrace) {
+                                    _reportFullViewRender(
+                                      'failed',
+                                      error: error,
+                                    );
                                     return const Center(
                                       child: Column(
                                         mainAxisSize: MainAxisSize.min,

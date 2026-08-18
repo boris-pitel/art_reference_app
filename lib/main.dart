@@ -21,6 +21,7 @@ import 'screens/messaging_settings_screen.dart';
 import 'screens/shared_image_import_screen.dart';
 import 'services/app_status_service.dart';
 import 'services/category_service.dart';
+import 'services/device_profile.dart';
 import 'services/impersonation_controller.dart';
 import 'services/library_home_cache.dart';
 import 'services/image_asset_service.dart';
@@ -43,6 +44,12 @@ Future<void> main() async {
   }
 
   await Supabase.initialize(url: supabaseUrl, publishableKey: publishableKey);
+
+  // Resolved before the first screen so activity logs carry device details
+  // from the outset. Diagnostic only, so a failure here must not stop launch.
+  await DeviceProfile.load().catchError(
+    (_) => const <String, Object?>{},
+  );
 
   runApp(const ArtReferenceApp());
 }
