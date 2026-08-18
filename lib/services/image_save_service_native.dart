@@ -29,7 +29,7 @@ class ImageSaveService {
       return _saveToChosenFile(bytes, fileName: fileName);
     }
 
-    return _saveToGallery(bytes);
+    return _saveToGallery(bytes, fileName: fileName);
   }
 
   static Future<ImageSaveResult> _saveToChosenFile(
@@ -89,7 +89,10 @@ class ImageSaveService {
     return fileName.substring(separatorIndex + 1).toLowerCase();
   }
 
-  static Future<ImageSaveResult> _saveToGallery(Uint8List bytes) async {
+  static Future<ImageSaveResult> _saveToGallery(
+    Uint8List bytes, {
+    required String fileName,
+  }) async {
     var hasAccess = await Gal.hasAccess();
 
     if (!hasAccess) {
@@ -100,8 +103,19 @@ class ImageSaveService {
       throw StateError('Permission to save images was not granted.');
     }
 
-    await Gal.putImageBytes(bytes);
+    // Without a name every save lands in the gallery as "image", "image (1)",
+    // and so on. Gal derives the extension from the bytes and appends it
+    // itself, so the name is passed without one.
+    await Gal.putImageBytes(bytes, name: _baseNameOf(fileName));
 
     return const ImageSaveResult.savedToGallery();
+  }
+
+  static String _baseNameOf(String fileName) {
+    final separatorIndex = fileName.lastIndexOf('.');
+
+    if (separatorIndex <= 0) return fileName;
+
+    return fileName.substring(0, separatorIndex);
   }
 }
