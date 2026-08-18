@@ -22,9 +22,11 @@ narrows the cause rather than leaving it ambiguous.
 Have ready: one very large photo (~6000×8000), one small image (under 500px on
 its longest side), and an empty folder such as `C:\testimages`.
 
-> **Two checks need a build that has not happened yet.** Hiding Print on mobile
-> web is committed but not built or deployed. Steps C2 and D5 assume it is live;
-> skip them otherwise.
+> **Print on iPhone works.** An earlier report that it did nothing turned out to
+> be a cached Safari build. Confirmed 18 August: Print opens the share sheet,
+> which offers Print, which reaches a printer dialog. A change to hide the
+> control on mobile web was written against that false report and has been
+> reverted — Print stays everywhere.
 
 ## A. Windows desktop app
 
@@ -77,8 +79,9 @@ The most fragile surface. Safari only allows a share from a live tap, which is
 why saving now takes two steps.
 
 - [ ] **C1** Open and hard-refresh (Safari caches aggressively).
-- [ ] **C2** Open an image menu, look for Print. *Needs the pending deploy.* →
-      Print is **absent**; Share and Download still reach a printer.
+- [x] **C2** Press Print, tap **Continue**, choose **Print** in the share sheet.
+      → A printer dialog appears. *Confirmed 18 August.* Safari cannot show a
+      print dialog directly, so it routes through the share sheet's AirPrint.
 - [ ] **C3** Check the save button wording. → Reads **Save image**.
 - [ ] **C4** Tap it, wait for the confirmation, tap **Continue**. → iOS share
       sheet opens. The extra tap is deliberate.
@@ -98,8 +101,7 @@ The gallery filename fix is the thing to confirm. Existing saves are named
       `art_reference_<id>.jpg` in Pictures, **not** `image (9).jpg`.
 - [ ] **D4** Save a second image, then re-save the first. → Distinct names; a
       repeat gains a numeric suffix rather than overwriting.
-- [ ] **D5** Confirm Print is still offered. *Needs the pending build.* →
-      Print **remains** in the native app; only Android web loses it.
+- [ ] **D5** Press Print. → The native Android print dialog opens.
 - [ ] **D6** Share an image, and upload a camera photo. → Share sheet appears;
       upload completes.
 
@@ -124,8 +126,9 @@ message — every toggle so far sent none.
 
 ## Known — do not raise these
 
-- **Print missing on mobile web.** Removed deliberately; a print dialog is
-  unreachable there.
+- **Printing on iPhone goes via the share sheet.** Safari cannot open a print
+  dialog directly, so Print builds a PDF and hands it to iOS, where AirPrint
+  does the printing. The extra tap is required, not a defect.
 - **A network blip at launch strands the app.** No timeout, retry, or message.
   Force-quit and reopen. Unfixed.
 - **Very large images may fail on mobile.** Consequence of removing the display
