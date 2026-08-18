@@ -631,6 +631,44 @@ String _date(dynamic value) {
       value.toString();
 }
 
+/// One line naming the device a log entry came from, so a fault that only
+/// occurs on particular hardware can be attributed without asking the user.
+///
+/// Returns null for entries recorded before device details were captured.
+String? _deviceSummary(Map<String, dynamic> row) {
+  final details = row['details'];
+  if (details is! Map) return null;
+
+  final device = details['device'];
+  if (device is! Map || device.isEmpty) return null;
+
+  final platform = row['platform']?.toString();
+
+  final parts = <String>[
+    if (platform != null && platform.isNotEmpty) platform,
+    // Native reports the manufacturer and model directly; the web build gets
+    // the model from Client Hints, since the user agent masks it.
+    [
+      device['manufacturer'],
+      device['model'],
+    ].whereType<String>().where((value) => value.isNotEmpty).join(' '),
+    [
+      device['android_version'],
+      device['system_version'],
+      device['platform_version'],
+    ].whereType<String>().where((value) => value.isNotEmpty).firstOrNull ?? '',
+    if (device['screen'] is String) device['screen'] as String,
+  ].where((value) => value.isNotEmpty).toList();
+
+  if (parts.isEmpty) {
+    // Nothing identifying resolved, but the raw agent is better than silence.
+    final userAgent = device['user_agent'];
+    return userAgent is String ? userAgent : null;
+  }
+
+  return parts.join(' • ');
+}
+
 String _activitySubtitle(Map<String, dynamic> row) {
   final duration = row['duration_ms'];
   final durationText = duration is num ? ' • ${duration.toInt()}ms' : '';
@@ -640,6 +678,11 @@ String _activitySubtitle(Map<String, dynamic> row) {
         '${_date(row['created_at'])}$durationText',
     '${row['target_type'] ?? ''} ${row['target_id'] ?? ''}'.trim(),
   ];
+
+  final device = _deviceSummary(row);
+  if (device != null) {
+    lines.add(device);
+  }
 
   final errorMessage = row['error_message'];
   if (row['status'] == 'failed' &&

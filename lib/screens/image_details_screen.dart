@@ -2774,6 +2774,7 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
     super.initState();
     _imageUrl = widget.imageUrl;
     _imageId = widget.exportImageId;
+    _reportFullViewStarted();
     if (widget.startEditing) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _startEditing();
@@ -2868,26 +2869,22 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
   // reproduced on hardware where it works, so each attempt is recorded with
   // the device attached: a device that logs 'started' and never 'succeeded'
   // has hit exactly that failure, which is otherwise invisible.
-  String? _reportedRenderKey;
+  final Set<String> _reportedRenderKeys = <String>{};
 
-  void _reportFullViewStarted(int? expectedBytes) {
-    final key = 'started:${widget.exportImageId ?? _imageUrl}';
-    if (_reportedRenderKey == key) return;
-    _reportedRenderKey = key;
-
-    UserActivityLogger.instance.record(
-      operation: 'image_full_view',
-      status: 'started',
-      targetType: 'image',
-      targetId: widget.exportImageId,
-      details: {'expected_bytes': expectedBytes},
-    );
+  /// Logged when the viewer opens, not when the image starts downloading:
+  /// loadingBuilder never runs for a cached image, which would leave the
+  /// failing case indistinguishable from one that was never attempted.
+  void _reportFullViewStarted() {
+    _reportFullView('started');
   }
 
   void _reportFullViewRender(String status, {Object? error}) {
+    _reportFullView(status, error: error);
+  }
+
+  void _reportFullView(String status, {Object? error}) {
     final key = '$status:${widget.exportImageId ?? _imageUrl}';
-    if (_reportedRenderKey == key) return;
-    _reportedRenderKey = key;
+    if (!_reportedRenderKeys.add(key)) return;
 
     UserActivityLogger.instance.record(
       operation: 'image_full_view',
@@ -3345,10 +3342,6 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
                                         if (loadingProgress == null) {
                                           return child;
                                         }
-
-                                        _reportFullViewStarted(
-                                          loadingProgress.expectedTotalBytes,
-                                        );
 
                                         final expectedBytes =
                                             loadingProgress.expectedTotalBytes;
