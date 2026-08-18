@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../services/gesture_share.dart';
+import '../services/image_dimensions_reader.dart';
 import '../services/image_print_service.dart';
 import '../services/image_save_service.dart';
 
@@ -84,12 +85,29 @@ class ImageDelivery {
     required String fileName,
     required String mimeType,
   }) async {
+    final tooLargeForPhotos = _exceedsPhotosLimit(bytes, mimeType);
+
     final shared = await showDialog<bool>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
           title: Text(title),
-          content: Text(body),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(body),
+              if (tooLargeForPhotos != null) ...[
+                const SizedBox(height: 14),
+                Text(
+                  tooLargeForPhotos,
+                  style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(dialogContext).colorScheme.error,
+                  ),
+                ),
+              ],
+            ],
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -112,5 +130,35 @@ class ImageDelivery {
     );
 
     return shared ?? false;
+  }
+
+  /// iOS decodes a JPEG only up to roughly 32 megapixels, and importing to
+  /// Photos requires a decode — so above that the share sheet accepts the file
+  /// and Photos silently discards it. Documented in Apple's Safari Web Content
+  /// Guide and confirmed here: a 6000x8000 (48MP) photo never reached Photos,
+  /// while the same file uploaded to a cloud app intact, because an upload
+  /// copies bytes without decoding them.
+  ///
+  /// Whether newer hardware raises the ceiling is unconfirmed. Warning when a
+  /// save would have worked is a far smaller cost than staying silent when it
+  /// will not, so the documented figure stands until measured otherwise.
+  static const _photosMegapixelLimit = 32;
+
+  /// The warning to show, or null when the image is safely within the limit.
+  ///
+  /// The failure itself cannot be detected: iOS reports nothing back once the
+  /// share sheet takes the file, so this predicts rather than reacts.
+  static String? _exceedsPhotosLimit(Uint8List bytes, String mimeType) {
+    if (!mimeType.startsWith('image/')) return null;
+
+    final dimensions = ImageDimensionsReader.read(bytes);
+    if (dimensions == null) return null;
+
+    final megapixels = dimensions.megapixels;
+    if (megapixels <= _photosMegapixelLimit) return null;
+
+    return 'This image is $megapixels megapixels. iPhone cannot add images '
+        'above about $_photosMegapixelLimit megapixels to Photos — use AirDrop, '
+        'Mail, or a cloud app instead.';
   }
 }
