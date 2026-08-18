@@ -155,8 +155,9 @@ class _BuiltInHowToPage extends StatelessWidget {
         _HelpSectionTitle('View and export a reference'),
         _HelpParagraph(
           'Tap a thumbnail to open its details. The image menu provides Share, '
-          'Save to Photos, and Print actions. On a desktop or web browser, '
-          'available actions may depend on the operating system and browser.',
+          'Print, and a save action. On a phone or tablet the image is saved to '
+          'Photos; on Windows, macOS, or Linux you choose the folder to save '
+          'it into; in a web browser it downloads.',
         ),
         _HelpParagraph(
           'While viewing image details, swipe left for the next reference or '

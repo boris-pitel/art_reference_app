@@ -1,6 +1,8 @@
 import 'package:supabase/supabase.dart';
 import 'package:uuid/uuid.dart';
 
+import 'photo_backfill.dart';
+
 class UserInventory {
   const UserInventory({
     required this.user,
@@ -233,6 +235,193 @@ class AdminService {
     return client.storage
         .from('feedback-attachments')
         .createSignedUrl(path, 3600);
+  }
+
+  Future<BackfillResult> backfillPhotoDimensions({
+    required bool dryRun,
+    required void Function(String message) onProgress,
+  }) async {
+    final rows = await _listImagesMissingDimensions();
+    final total = rows.length;
+    var processed = 0;
+    var updated = 0;
+    var skipped = 0;
+    var failed = 0;
+
+    for (final row in rows) {
+      processed += 1;
+      final id = row['id'] as String;
+      final storagePath = row['storage_path'] as String?;
+
+      if (storagePath == null || storagePath.trim().isEmpty) {
+        onProgress('[$processed/$total] $id: skipped (no storage_path)');
+        skipped += 1;
+        continue;
+      }
+
+      try {
+        final bytes = await client.storage
+            .from('reference-images')
+            .download(storagePath);
+        final info = decodeImageInfo(bytes);
+        if (info == null) {
+          onProgress('[$processed/$total] $id: skipped (could not decode)');
+          skipped += 1;
+          continue;
+        }
+
+        final updateBody = <String, dynamic>{
+          'width': info.width,
+          'height': info.height,
+        };
+
+        final hadPhotoMetadata = row['photo_metadata'] != null;
+        if (!hadPhotoMetadata && info.photoMetadata != null) {
+          updateBody['photo_metadata'] = info.photoMetadata;
+        }
+
+        final hadCaptureTimestamp = row['capture_timestamp'] != null;
+        if (!hadCaptureTimestamp && info.captureTimestamp != null) {
+          updateBody['capture_timestamp'] = info.captureTimestamp!
+              .toIso8601String();
+        }
+
+        final exifNote = updateBody.containsKey('photo_metadata')
+            ? ', exif recovered'
+            : '';
+        onProgress(
+          '[$processed/$total] $id: ${info.width}x${info.height}$exifNote'
+          '${dryRun ? ' (dry run, not written)' : ''}',
+        );
+
+        if (!dryRun) {
+          await client.from('image_assets').update(updateBody).eq('id', id);
+        }
+        updated += 1;
+      } on Object catch (error) {
+        onProgress('[$processed/$total] $id: FAILED ($error)');
+        failed += 1;
+      }
+    }
+
+    return BackfillResult(
+      total: total,
+      updated: updated,
+      skipped: skipped,
+      failed: failed,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> _listImagesMissingDimensions() async {
+    final rows = <Map<String, dynamic>>[];
+    var from = 0;
+    while (true) {
+      final response = await client
+          .from('image_assets')
+          .select('id,storage_path,photo_metadata,capture_timestamp')
+          .isFilter('width', null)
+          .range(from, from + _pageSize - 1);
+      final batch = response
+          .map((row) => Map<String, dynamic>.from(row))
+          .toList();
+      rows.addAll(batch);
+      if (batch.length < _pageSize) break;
+      from += _pageSize;
+    }
+    return rows;
+  }
+
+  Future<BackfillResult> backfillDisplayImages({
+    required bool dryRun,
+    required void Function(String message) onProgress,
+  }) async {
+    final rows = await _listImagesMissingDisplay();
+    final total = rows.length;
+    var processed = 0;
+    var updated = 0;
+    var skipped = 0;
+    var failed = 0;
+
+    for (final row in rows) {
+      processed += 1;
+      final id = row['id'] as String;
+      final userId = row['user_id'] as String;
+      final storagePath = row['storage_path'] as String?;
+
+      if (storagePath == null || storagePath.trim().isEmpty) {
+        onProgress('[$processed/$total] $id: skipped (no storage_path)');
+        skipped += 1;
+        continue;
+      }
+
+      try {
+        final bytes = await client.storage
+            .from('reference-images')
+            .download(storagePath);
+        final displayBytes = generateDisplayJpeg(bytes);
+        if (displayBytes == null) {
+          onProgress('[$processed/$total] $id: skipped (could not decode)');
+          skipped += 1;
+          continue;
+        }
+
+        final displayStoragePath = '$userId/display/$id.jpg';
+
+        onProgress(
+          '[$processed/$total] $id: display '
+          '${(displayBytes.lengthInBytes / 1024).toStringAsFixed(0)} KB'
+          '${dryRun ? ' (dry run, not written)' : ''}',
+        );
+
+        if (!dryRun) {
+          await client.storage
+              .from('reference-images')
+              .uploadBinary(
+                displayStoragePath,
+                displayBytes,
+                fileOptions: const FileOptions(
+                  cacheControl: '86400',
+                  contentType: 'image/jpeg',
+                  upsert: true,
+                ),
+              );
+          await client
+              .from('image_assets')
+              .update({'display_storage_path': displayStoragePath})
+              .eq('id', id);
+        }
+        updated += 1;
+      } on Object catch (error) {
+        onProgress('[$processed/$total] $id: FAILED ($error)');
+        failed += 1;
+      }
+    }
+
+    return BackfillResult(
+      total: total,
+      updated: updated,
+      skipped: skipped,
+      failed: failed,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> _listImagesMissingDisplay() async {
+    final rows = <Map<String, dynamic>>[];
+    var from = 0;
+    while (true) {
+      final response = await client
+          .from('image_assets')
+          .select('id,user_id,storage_path')
+          .isFilter('display_storage_path', null)
+          .range(from, from + _pageSize - 1);
+      final batch = response
+          .map((row) => Map<String, dynamic>.from(row))
+          .toList();
+      rows.addAll(batch);
+      if (batch.length < _pageSize) break;
+      from += _pageSize;
+    }
+    return rows;
   }
 
   Future<List<Map<String, dynamic>>> _listImageRows(String dataUserId) async {

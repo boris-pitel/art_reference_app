@@ -38,8 +38,13 @@ Future<int> _run(
   if (arguments.first == 'feedback') {
     return _runFeedback(arguments, service, audit, console);
   }
+  if (arguments.first == 'images') {
+    return _runImages(arguments, service, audit, console);
+  }
   if (arguments.first != 'users') {
-    throw UsageException('Expected the resource "users" or "feedback".');
+    throw UsageException(
+      'Expected the resource "users", "feedback", or "images".',
+    );
   }
   if (arguments.length < 2) {
     throw UsageException('A users command is required.');
@@ -282,6 +287,110 @@ Future<int> _runFeedback(
   }
 }
 
+Future<int> _runImages(
+  List<String> arguments,
+  AdminService service,
+  AuditLog audit,
+  ConsoleIo console,
+) async {
+  if (arguments.length < 2) {
+    throw UsageException('An images command is required.');
+  }
+  switch (arguments[1]) {
+    case 'backfill-dimensions':
+      final dryRun = arguments.contains('--dry-run');
+      if (!dryRun && !arguments.contains('--yes')) {
+        console.out(
+          'This updates width/height (and, where still recoverable, '
+          'camera/lens/aperture/etc.) on every image_assets row missing '
+          'dimensions. Existing non-null fields are never overwritten.',
+        );
+        final confirmation = console.readLine(
+          'Type "BACKFILL DIMENSIONS" to continue: ',
+        );
+        if (confirmation != 'BACKFILL DIMENSIONS') {
+          console.out('Confirmation did not match. Nothing was changed.');
+          return 2;
+        }
+      }
+
+      final result = await service.backfillPhotoDimensions(
+        dryRun: dryRun,
+        onProgress: console.out,
+      );
+
+      console.out();
+      console.out(
+        'Done. ${result.updated} updated, ${result.skipped} skipped, '
+        '${result.failed} failed, out of ${result.total} total'
+        '${dryRun ? ' (dry run, nothing written)' : ''}.',
+      );
+
+      if (!dryRun) {
+        await audit.write(
+          action: 'images.backfill-dimensions',
+          targetEmail: '',
+          result: result.failed == 0 ? 'success' : 'partial',
+          details: {
+            'total': result.total,
+            'updated': result.updated,
+            'skipped': result.skipped,
+            'failed': result.failed,
+          },
+        );
+      }
+
+      return result.failed == 0 ? 0 : 1;
+
+    case 'backfill-display':
+      final dryRun = arguments.contains('--dry-run');
+      if (!dryRun && !arguments.contains('--yes')) {
+        console.out(
+          'This generates a ~3072px display derivative for every '
+          'image_assets row missing one, and uploads it to Storage.',
+        );
+        final confirmation = console.readLine(
+          'Type "BACKFILL DISPLAY" to continue: ',
+        );
+        if (confirmation != 'BACKFILL DISPLAY') {
+          console.out('Confirmation did not match. Nothing was changed.');
+          return 2;
+        }
+      }
+
+      final result = await service.backfillDisplayImages(
+        dryRun: dryRun,
+        onProgress: console.out,
+      );
+
+      console.out();
+      console.out(
+        'Done. ${result.updated} updated, ${result.skipped} skipped, '
+        '${result.failed} failed, out of ${result.total} total'
+        '${dryRun ? ' (dry run, nothing written)' : ''}.',
+      );
+
+      if (!dryRun) {
+        await audit.write(
+          action: 'images.backfill-display',
+          targetEmail: '',
+          result: result.failed == 0 ? 'success' : 'partial',
+          details: {
+            'total': result.total,
+            'updated': result.updated,
+            'skipped': result.skipped,
+            'failed': result.failed,
+          },
+        );
+      }
+
+      return result.failed == 0 ? 0 : 1;
+
+    default:
+      throw UsageException('Unknown images command: ${arguments[1]}');
+  }
+}
+
 String _requiredArgument(List<String> arguments, int index, String name) {
   if (arguments.length <= index || arguments[index].startsWith('-')) {
     throw UsageException('This command requires a $name.');
@@ -354,6 +463,12 @@ void _printHelp(ConsoleIo console) {
   console.out('  painter-admin feedback status ID STATUS');
   console.out('    STATUS: new, reviewed, planned, resolved, or closed');
   console.out('  painter-admin users set-password EMAIL');
+  console.out(
+    '  painter-admin images backfill-dimensions [--dry-run] [--yes]',
+  );
+  console.out(
+    '  painter-admin images backfill-display [--dry-run] [--yes]',
+  );
   console.out();
   console.out('Required environment variables:');
   console.out('  SUPABASE_URL');

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../services/app_status_service.dart';
 import '../services/impersonation_controller.dart';
 import '../services/maintenance_service.dart';
 import '../widgets/home_button.dart';
@@ -14,7 +15,9 @@ class MaintenanceScreen extends StatefulWidget {
 
 class _MaintenanceScreenState extends State<MaintenanceScreen> {
   late final MaintenanceService _service;
+  late final AppStatusService _statusService;
   MaintenanceSnapshot? _snapshot;
+  AppStatus _appStatus = AppStatus.available;
   String? _error;
   bool _loading = true;
 
@@ -22,6 +25,7 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
   void initState() {
     super.initState();
     _service = MaintenanceService(Supabase.instance.client);
+    _statusService = AppStatusService(Supabase.instance.client);
     _load();
   }
 
@@ -32,11 +36,110 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
     });
     try {
       final snapshot = await _service.load();
-      if (mounted) setState(() => _snapshot = snapshot);
+      final status = await _statusService.load();
+      if (mounted) {
+        setState(() {
+          _snapshot = snapshot;
+          _appStatus = status;
+        });
+      }
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _showServiceStatusDialog() async {
+    var enabled = _appStatus.maintenanceEnabled;
+    final messageController = TextEditingController(
+      text: _appStatus.message ?? '',
+    );
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Service status'),
+              content: SizedBox(
+                width: 420,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: enabled,
+                      title: const Text('Maintenance mode'),
+                      subtitle: const Text(
+                        'Blocks the app for everyone except administrators, '
+                        'on web, Windows, and phone.',
+                      ),
+                      onChanged: (value) =>
+                          setDialogState(() => enabled = value),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: messageController,
+                      maxLines: 3,
+                      maxLength: 300,
+                      decoration: const InputDecoration(
+                        labelText: 'Message shown to users (optional)',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(true),
+                  child: const Text('Apply'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    final message = messageController.text.trim();
+    messageController.dispose();
+
+    if (saved != true || !mounted) return;
+
+    try {
+      await _service.setAppStatus(
+        maintenanceEnabled: enabled,
+        message: message.isEmpty ? null : message,
+      );
+      if (!mounted) return;
+      setState(() {
+        _appStatus = AppStatus(
+          maintenanceEnabled: enabled,
+          message: message.isEmpty ? null : message,
+        );
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            enabled
+                ? 'Maintenance mode is ON. Other users are blocked.'
+                : 'Maintenance mode is OFF. The app is open to everyone.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to change service status: $error')),
+      );
     }
   }
 
@@ -48,6 +151,20 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
         appBar: AppBar(
           title: const Text('Maintenance'),
           actions: [
+            IconButton(
+              onPressed: _loading ? null : _showServiceStatusDialog,
+              tooltip: _appStatus.maintenanceEnabled
+                  ? 'Maintenance mode is ON'
+                  : 'Service status',
+              icon: Icon(
+                _appStatus.maintenanceEnabled
+                    ? Icons.build_circle
+                    : Icons.build_circle_outlined,
+                color: _appStatus.maintenanceEnabled
+                    ? Colors.orange.shade300
+                    : null,
+              ),
+            ),
             IconButton(
               onPressed: _loading ? null : _load,
               tooltip: 'Refresh maintenance data',

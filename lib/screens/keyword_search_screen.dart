@@ -101,8 +101,11 @@ class _KeywordSearchScreenState extends State<KeywordSearchScreen> {
   Future<void> _openImage(ImageSearchResult result) async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (context) =>
-            ImageDetailsScreen(imageId: result.id, imageUrl: result.imageUrl),
+        builder: (context) => ImageDetailsScreen(
+          imageId: result.id,
+          imageUrl: result.imageUrl,
+          displayUrl: result.displayUrl,
+        ),
       ),
     );
 

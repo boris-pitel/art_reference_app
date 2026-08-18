@@ -180,6 +180,8 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
+            const SizedBox(height: 12),
+            const _ResolutionNotice(),
             if (_error != null) ...[
               const SizedBox(height: 12),
               Text(
@@ -227,6 +229,49 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Sets expectations before credits are spent: the AI returns a newly generated
+/// image at the model's own resolution, so a large photo comes back smaller.
+/// Surfaced up front because the drop is otherwise only discovered afterwards,
+/// in the Technical panel.
+class _ResolutionNotice extends StatelessWidget {
+  const _ResolutionNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.info_outline,
+            size: 18,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'AI editing creates a new image rather than altering your file, '
+              'so large photos come back at a lower resolution — at most '
+              '3840×2160 (about 8 megapixels). Your original is kept '
+              'unchanged alongside the result.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

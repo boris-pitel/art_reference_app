@@ -97,13 +97,10 @@ Uint8List _applyAdjustment(
     source = img.copyRotate(
       source,
       angle: data.angle,
-      interpolation: img.Interpolation.cubic,
+      interpolation: img.Interpolation.linear,
     );
   }
 
-  // Leave at least one source pixel after the crop origin. A normalized
-  // position close to 1 can otherwise round to the image dimension, making
-  // the width/height clamp bounds invalid (for example, clamp(1, 0)).
   final x = math.min(
     (data.left.clamp(0.0, 1.0) * source.width).round(),
     source.width - 1,

@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
@@ -13,13 +12,14 @@ import '../models/reference_category.dart';
 import '../services/category_service.dart';
 import '../services/image_asset_service.dart';
 import '../services/image_adjustment_service.dart';
-import '../services/image_print_service.dart';
 import '../services/image_save_service.dart';
+import '../services/image_share_service.dart';
 import '../services/keyword_service.dart';
 import '../services/photo_metadata_service.dart';
 import '../services/user_activity_logger.dart';
 import '../widgets/image_keywords_section.dart';
 import '../widgets/home_button.dart';
+import '../widgets/image_delivery.dart';
 import 'ai_image_edit_screen.dart';
 import 'image_adjustment_screen.dart';
 import 'recipient_picker_screen.dart';
@@ -32,7 +32,13 @@ class _ExportImageData {
 }
 
 Future<_ExportImageData> _downloadExportImage(String imageUrl) async {
-  final response = await http.get(Uri.parse(imageUrl));
+  final response = await http.get(Uri.parse(imageUrl)).timeout(
+    const Duration(seconds: 30),
+    onTimeout: () => throw TimeoutException(
+      'Image download timed out after 30 seconds',
+      const Duration(seconds: 30),
+    ),
+  );
   if (response.statusCode < 200 || response.statusCode >= 300) {
     throw StateError(
       'Image download failed with status ${response.statusCode}.',
@@ -62,27 +68,35 @@ Future<void> _shareExportImage(
     origin = renderObject.localToGlobal(Offset.zero) & renderObject.size;
   }
   final image = await _downloadExportImage(imageUrl);
-  await SharePlus.instance.share(
-    ShareParams(
-      files: [
-        XFile.fromData(
-          image.bytes,
-          mimeType: image.mimeType,
-          name: 'associated_image_$imageId.${image.extension}',
-        ),
-      ],
-      subject: 'Associated Painter Reference Image',
-      sharePositionOrigin: origin,
-    ),
+  await ImageShareService.share(
+    image.bytes,
+    fileName: 'associated_image_$imageId.${image.extension}',
+    mimeType: image.mimeType,
+    subject: 'Associated Painter Reference Image',
+    sharePositionOrigin: origin,
   );
 }
 
-Future<void> _saveExportImage(String imageUrl, String imageId) async {
+Future<ImageSaveResult> _saveExportImage(
+  BuildContext context,
+  String imageUrl,
+  String imageId,
+) async {
   final image = await _downloadExportImage(imageUrl);
-  await ImageSaveService.save(
+  if (!context.mounted) return const ImageSaveResult.cancelled();
+  return ImageDelivery.save(
+    context,
     image.bytes,
     fileName: 'associated_image_$imageId.${image.extension}',
   );
+}
+
+/// Message for a finished save, naming the destination when we know it.
+String _saveResultMessage(ImageSaveResult result) {
+  if (result.path != null) {
+    return 'Image saved to ${result.path}';
+  }
+  return kIsWeb ? 'Image downloaded.' : 'Image saved to Photos.';
 }
 
 enum _AssociatedImageAction { open, editImage, share, save, print, delete }
@@ -160,12 +174,14 @@ class ImageDetailsNavigationItem {
   const ImageDetailsNavigationItem({
     required this.imageId,
     required this.imageUrl,
+    this.displayUrl,
     this.dateAdded,
     this.parentImageId,
   });
 
   final String imageId;
   final String imageUrl;
+  final String? displayUrl;
   final DateTime? dateAdded;
   final String? parentImageId;
 }
@@ -175,6 +191,7 @@ class ImageDetailsScreen extends StatefulWidget {
     super.key,
     required this.imageId,
     required this.imageUrl,
+    this.displayUrl,
     this.isAssociatedImage = false,
     this.parentImageId,
     this.dateAdded,
@@ -186,6 +203,10 @@ class ImageDetailsScreen extends StatefulWidget {
 
   final String imageId;
   final String imageUrl;
+  // A ~3072px derivative safe to decode/render on any device, used only for
+  // the on-screen viewer. Falls back to [imageUrl] when null. Never used for
+  // export/share/save/print/crop — those always use the full original.
+  final String? displayUrl;
   final bool isAssociatedImage;
   final String? parentImageId;
   final DateTime? dateAdded;
@@ -239,6 +260,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   String? _storagePath;
   String? _thumbnailStoragePath;
   String? _imageHash;
+  int? _imageWidth;
+  int? _imageHeight;
 
   late String _currentImageId;
   late String _currentImageUrl;
@@ -441,6 +464,12 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         _storagePath = data['storage_path'] as String?;
         _thumbnailStoragePath = data['thumbnail_storage_path'] as String?;
         _imageHash = data['image_hash'] as String?;
+        _imageWidth = (data['width'] as num?)?.toInt();
+        _imageHeight = (data['height'] as num?)?.toInt();
+        final loadedImageUrl = data['image_url'] as String?;
+        if (loadedImageUrl != null && loadedImageUrl.isNotEmpty) {
+          _currentImageUrl = loadedImageUrl;
+        }
 
         _lastSavedMetadata = _currentMetadata;
 
@@ -884,6 +913,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         builder: (context) => ImageDetailsScreen(
           imageId: image.id,
           imageUrl: image.imageUrl,
+          displayUrl: image.displayUrl,
           isAssociatedImage: true,
           parentImageId: _currentImageId,
           dateAdded: image.dateAdded,
@@ -917,11 +947,9 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     if (_isExportingAssociatedImage(image.id)) return;
     setState(() => _savingAssociatedImageIds.add(image.id));
     try {
-      await _saveExportImage(image.imageUrl, image.id);
-      if (mounted) {
-        _showAssociatedMessage(
-          kIsWeb ? 'Image downloaded.' : 'Image saved to Photos.',
-        );
+      final result = await _saveExportImage(context, image.imageUrl, image.id);
+      if (mounted && !result.wasCancelled) {
+        _showAssociatedMessage(_saveResultMessage(result));
       }
     } catch (error) {
       if (mounted) {
@@ -1037,6 +1065,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
           (item) => ImageDetailsNavigationItem(
             imageId: item.id,
             imageUrl: item.imageUrl,
+            displayUrl: item.displayUrl,
             dateAdded: item.dateAdded,
           ),
         )
@@ -1050,6 +1079,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         builder: (context) => ImageDetailsScreen(
           imageId: image.id,
           imageUrl: image.imageUrl,
+          displayUrl: image.displayUrl,
           isAssociatedImage: true,
           parentImageId: _currentImageId,
           dateAdded: image.dateAdded,
@@ -1122,6 +1152,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       _storagePath = null;
       _thumbnailStoragePath = null;
       _imageHash = null;
+      _imageWidth = null;
+      _imageHeight = null;
       _isNavigatingHorizontally = false;
     });
     await _loadMetadata();
@@ -1144,7 +1176,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     final result = await _openZoomableImage(
       imageUrl: _currentImageUrl,
       heroTag: 'main-image-$_currentImageId',
-      exportImageId: widget.isAssociatedImage ? _currentImageId : null,
+      exportImageId: _currentImageId,
       editableParentImageId: widget.isAssociatedImage
           ? _currentParentImageId
           : null,
@@ -1162,6 +1194,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       setState(() {
         _currentImageId = result.imageId;
         _currentImageUrl = result.imageUrl;
+        // The edited image's display derivative isn't known yet; the
+        // upcoming _loadMetadata() call fetches the fresh one.
         _metadataError = null;
         _lastSavedMetadata = null;
         _isLoadingMetadata = true;
@@ -1218,8 +1252,10 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     setState(() => _isPrintingImage = true);
     try {
       final image = await _downloadExportImage(_currentImageUrl);
-      await ImagePrintService.printImage(
-        imageBytes: image.bytes,
+      if (!mounted) return;
+      await ImageDelivery.printImage(
+        context,
+        image.bytes,
         documentName: 'Painter Reference $_currentImageId',
       );
     } catch (error) {
@@ -1264,8 +1300,10 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     setState(() => _printingAssociatedImageIds.add(image.id));
     try {
       final downloadedImage = await _downloadExportImage(image.imageUrl);
-      await ImagePrintService.printImage(
-        imageBytes: downloadedImage.bytes,
+      if (!mounted) return;
+      await ImageDelivery.printImage(
+        context,
+        downloadedImage.bytes,
         documentName: 'Painter Reference Sketch ${image.id}',
       );
     } catch (error) {
@@ -1608,7 +1646,6 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                   _buildTechnicalSection(context),
                   _buildMetadataSection(context),
                   const SizedBox(height: 24),
-                  _buildPhotoDetailsSection(context),
 
                   if (!widget.isAssociatedImage) ...[
                     ImageKeywordsSection(
@@ -1815,6 +1852,75 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
           label: 'Thumbnail path',
           value: _thumbnailStoragePath!,
         ),
+      if (_imageWidth != null && _imageHeight != null)
+        _buildTechnicalDetailRow(
+          context,
+          icon: Icons.aspect_ratio_outlined,
+          label: 'Dimensions',
+          value: '$_imageWidth × $_imageHeight px',
+        ),
+      if (_originalFilename != null)
+        _buildTechnicalDetailRow(
+          context,
+          icon: Icons.insert_drive_file_outlined,
+          label: 'Original filename',
+          value: _originalFilename!,
+        ),
+      if (_captureTimestamp != null)
+        _buildTechnicalDetailRow(
+          context,
+          icon: Icons.calendar_today_outlined,
+          label: 'Taken',
+          value: MaterialLocalizations.of(
+            context,
+          ).formatFullDate(_captureTimestamp!.toLocal()),
+        ),
+      if (_photoMetadata?.cameraMake != null ||
+          _photoMetadata?.cameraModel != null)
+        _buildTechnicalDetailRow(
+          context,
+          icon: Icons.camera_alt_outlined,
+          label: 'Camera',
+          value: [
+            _photoMetadata?.cameraMake,
+            _photoMetadata?.cameraModel,
+          ].whereType<String>().join(' '),
+        ),
+      if (_photoMetadata?.lensModel != null)
+        _buildTechnicalDetailRow(
+          context,
+          icon: Icons.camera_outlined,
+          label: 'Lens',
+          value: _photoMetadata!.lensModel!,
+        ),
+      if (_photoMetadata?.aperture != null)
+        _buildTechnicalDetailRow(
+          context,
+          icon: Icons.lens_outlined,
+          label: 'Aperture',
+          value: 'f/${_photoMetadata!.aperture!.toStringAsFixed(1)}',
+        ),
+      if (_photoMetadata?.shutterSpeed != null)
+        _buildTechnicalDetailRow(
+          context,
+          icon: Icons.shutter_speed_outlined,
+          label: 'Shutter speed',
+          value: _photoMetadata!.shutterSpeed!,
+        ),
+      if (_photoMetadata?.iso != null)
+        _buildTechnicalDetailRow(
+          context,
+          icon: Icons.iso_outlined,
+          label: 'ISO',
+          value: '${_photoMetadata!.iso}',
+        ),
+      if (_photoMetadata?.focalLengthMm != null)
+        _buildTechnicalDetailRow(
+          context,
+          icon: Icons.zoom_in_outlined,
+          label: 'Focal length',
+          value: '${_photoMetadata!.focalLengthMm!.toStringAsFixed(0)}mm',
+        ),
     ];
 
     return Column(
@@ -2008,108 +2114,6 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
           ],
         ],
       ],
-    );
-  }
-
-  Widget _buildPhotoDetailsSection(BuildContext context) {
-    if (_isLoadingMetadata) {
-      return const SizedBox.shrink();
-    }
-
-    final rows = <Widget>[
-      if (_originalFilename != null)
-        _buildPhotoDetailRow(
-          context,
-          icon: Icons.insert_drive_file_outlined,
-          label: 'Original filename',
-          value: _originalFilename!,
-        ),
-      if (_captureTimestamp != null)
-        _buildPhotoDetailRow(
-          context,
-          icon: Icons.calendar_today_outlined,
-          label: 'Taken',
-          value: MaterialLocalizations.of(
-            context,
-          ).formatFullDate(_captureTimestamp!.toLocal()),
-        ),
-      if (_photoMetadata?.cameraMake != null || _photoMetadata?.cameraModel != null)
-        _buildPhotoDetailRow(
-          context,
-          icon: Icons.camera_alt_outlined,
-          label: 'Camera',
-          value: [
-            _photoMetadata?.cameraMake,
-            _photoMetadata?.cameraModel,
-          ].whereType<String>().join(' '),
-        ),
-      if (_photoMetadata?.lensModel != null)
-        _buildPhotoDetailRow(
-          context,
-          icon: Icons.camera_outlined,
-          label: 'Lens',
-          value: _photoMetadata!.lensModel!,
-        ),
-      if (_photoMetadata?.aperture != null)
-        _buildPhotoDetailRow(
-          context,
-          icon: Icons.lens_outlined,
-          label: 'Aperture',
-          value: 'f/${_photoMetadata!.aperture!.toStringAsFixed(1)}',
-        ),
-      if (_photoMetadata?.shutterSpeed != null)
-        _buildPhotoDetailRow(
-          context,
-          icon: Icons.shutter_speed_outlined,
-          label: 'Shutter speed',
-          value: _photoMetadata!.shutterSpeed!,
-        ),
-      if (_photoMetadata?.iso != null)
-        _buildPhotoDetailRow(
-          context,
-          icon: Icons.iso_outlined,
-          label: 'ISO',
-          value: '${_photoMetadata!.iso}',
-        ),
-      if (_photoMetadata?.focalLengthMm != null)
-        _buildPhotoDetailRow(
-          context,
-          icon: Icons.zoom_in_outlined,
-          label: 'Focal length',
-          value: '${_photoMetadata!.focalLengthMm!.toStringAsFixed(0)}mm',
-        ),
-    ];
-
-    if (rows.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    return Column(
-      children: [
-        ExpansionTile(
-          key: ValueKey('photo-details-$_currentImageId'),
-          tilePadding: EdgeInsets.zero,
-          childrenPadding: const EdgeInsets.only(bottom: 8),
-          leading: const Icon(Icons.info_outline),
-          title: const Text('Photo details'),
-          children: rows,
-        ),
-        const SizedBox(height: 24),
-      ],
-    );
-  }
-
-  Widget _buildPhotoDetailRow(
-    BuildContext context, {
-    required IconData icon,
-    required String label,
-    required String value,
-  }) {
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: Icon(icon, size: 20),
-      title: Text(label),
-      subtitle: Text(value),
     );
   }
 
@@ -2623,8 +2627,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                     _handleAssociatedImageAction(action, image);
                   },
                   itemBuilder: (context) {
-                    return const [
-                      PopupMenuItem<_AssociatedImageAction>(
+                    return [
+                      const PopupMenuItem<_AssociatedImageAction>(
                         value: _AssociatedImageAction.open,
                         child: ListTile(
                           contentPadding: EdgeInsets.zero,
@@ -2632,7 +2636,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                           title: Text('Open'),
                         ),
                       ),
-                      PopupMenuItem<_AssociatedImageAction>(
+                      const PopupMenuItem<_AssociatedImageAction>(
                         value: _AssociatedImageAction.editImage,
                         child: ListTile(
                           contentPadding: EdgeInsets.zero,
@@ -2641,7 +2645,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                           subtitle: Text('Crop, rotate, or straighten'),
                         ),
                       ),
-                      PopupMenuItem<_AssociatedImageAction>(
+                      const PopupMenuItem<_AssociatedImageAction>(
                         value: _AssociatedImageAction.share,
                         child: ListTile(
                           contentPadding: EdgeInsets.zero,
@@ -2653,11 +2657,11 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                         value: _AssociatedImageAction.save,
                         child: ListTile(
                           contentPadding: EdgeInsets.zero,
-                          leading: Icon(Icons.download_outlined),
-                          title: Text('Save to Photos'),
+                          leading: const Icon(Icons.download_outlined),
+                          title: Text(ImageSaveService.actionLabel),
                         ),
                       ),
-                      PopupMenuItem<_AssociatedImageAction>(
+                      const PopupMenuItem<_AssociatedImageAction>(
                         value: _AssociatedImageAction.print,
                         child: ListTile(
                           contentPadding: EdgeInsets.zero,
@@ -2665,8 +2669,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                           title: Text('Print'),
                         ),
                       ),
-                      PopupMenuDivider(),
-                      PopupMenuItem<_AssociatedImageAction>(
+                      const PopupMenuDivider(),
+                      const PopupMenuItem<_AssociatedImageAction>(
                         value: _AssociatedImageAction.delete,
                         child: ListTile(
                           contentPadding: EdgeInsets.zero,
@@ -2729,6 +2733,7 @@ class _ZoomableImageScreen extends StatefulWidget {
     this.startEditing = false,
   });
 
+  // The full original — always used for editing/export/share/save/print.
   final String imageUrl;
   final String heroTag;
   final String? exportImageId;
@@ -2836,14 +2841,10 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
     }
     setState(() => _isSaving = true);
     try {
-      await _saveExportImage(_imageUrl, imageId);
-      if (mounted) {
+      final result = await _saveExportImage(context, _imageUrl, imageId);
+      if (mounted && !result.wasCancelled) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              kIsWeb ? 'Image downloaded.' : 'Image saved to Photos.',
-            ),
-          ),
+          SnackBar(content: Text(_saveResultMessage(result))),
         );
       }
     } catch (error) {
@@ -3182,7 +3183,7 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
                           ),
                         )
                       : const Icon(Icons.download_outlined),
-                  tooltip: kIsWeb ? 'Download image' : 'Save to Photos',
+                  tooltip: ImageSaveService.actionLabel,
                 ),
                 IconButton(
                   onPressed: _isSharing || _isSaving ? null : _shareImage,

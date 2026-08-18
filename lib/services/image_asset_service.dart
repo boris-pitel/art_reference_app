@@ -10,6 +10,7 @@ import '../utils/performance_profiler.dart';
 import 'heif_exif_reader.dart';
 import 'image_hash_service.dart';
 import 'image_import_service.dart';
+import 'image_derivatives.dart';
 import 'photo_metadata_service.dart';
 import 'thumbnail_service.dart';
 import 'user_activity_logger.dart';
@@ -20,14 +21,21 @@ class ImageAssetInfo {
     required this.dateAdded,
     required this.imageUrl,
     required this.thumbnailUrl,
+    this.displayUrl,
     this.parentImageId,
     this.parentImageUrl,
   });
 
   final String id;
   final DateTime dateAdded;
+  // The full, original-resolution image. Used for export/share/save/print
+  // and as the source for cropping — never swap this for [displayUrl].
   final String imageUrl;
   final String? thumbnailUrl;
+  // A ~3072px derivative safe to decode/render on any device. Used only for
+  // on-screen viewing (Image.network); falls back to [imageUrl] when null
+  // (older images uploaded before this derivative existed).
+  final String? displayUrl;
   final String? parentImageId;
   final String? parentImageUrl;
 }
@@ -313,7 +321,7 @@ class ImageAssetService {
         '${(imageBytes.lengthInBytes / 1024 / 1024).toStringAsFixed(2)} MB',
       );
 
-      // Thumbnail generation only depends on the normalized bytes, so it
+      // Derivative generation only depends on the normalized bytes, so it
       // starts now and overlaps with the hash calculation and the
       // prepare-image-upload network call below instead of running after
       // them. A listener is attached immediately (rather than only once we
@@ -321,12 +329,18 @@ class ImageAssetService {
       // error as unhandled while it's sitting unobserved during the
       // hash/network work below; a second, independent listener (the later
       // `await`) still collects the real result or error.
-      final thumbnailFuture = ThumbnailService.createThumbnail(
+      final derivativesFuture = ThumbnailService.createDerivatives(
         normalizedImageBytes,
-        maximumDimension: 500,
-        jpegQuality: 80,
       );
-      unawaited(thumbnailFuture.catchError((_) => Uint8List(0)));
+      unawaited(
+        derivativesFuture.catchError(
+          (_) => ImageDerivatives(
+            thumbnailBytes: Uint8List(0),
+            width: 0,
+            height: 0,
+          ),
+        ),
+      );
 
       final isHeif = ImageImportService.isHeif(imageBytes);
       profiler.checkpoint('EXIF source detected: ${isHeif ? 'HEIC' : 'non-HEIC'}');
@@ -355,9 +369,9 @@ class ImageAssetService {
         // metadata. Web's thumbnail path goes through an HTML canvas
         // instead, which strips EXIF on re-encode, so it still reads the
         // full image there.
-        photoMetadataFuture = thumbnailFuture.then(
-          (thumbnailBytes) => PhotoMetadataService.extract(
-            kIsWeb ? normalizedImageBytes : thumbnailBytes,
+        photoMetadataFuture = derivativesFuture.then(
+          (derivatives) => PhotoMetadataService.extract(
+            kIsWeb ? normalizedImageBytes : derivatives.thumbnailBytes,
           ),
           onError: (_) => const PhotoMetadataExtraction(),
         );
@@ -409,16 +423,17 @@ class ImageAssetService {
         return preparedImageId;
       }
 
-      late final Uint8List thumbnailBytes;
+      late final ImageDerivatives derivatives;
       try {
-        thumbnailBytes = await thumbnailFuture;
+        derivatives = await derivativesFuture;
       } catch (error) {
-        profiler.checkpoint('Thumbnail creation failed: $error');
+        profiler.checkpoint('Derivative creation failed: $error');
         throw const UnsupportedImageFormatException();
       }
+      final thumbnailBytes = derivatives.thumbnailBytes;
       profiler.checkpoint(
-        'Thumbnail created; thumbnail size: '
-        '${(thumbnailBytes.lengthInBytes / 1024).toStringAsFixed(1)} KB',
+        'Thumbnail created; size: '
+        '${(thumbnailBytes.lengthInBytes / 1024).toStringAsFixed(1)} KB'
       );
       if (thumbnailBytes.isEmpty) {
         throw const UnsupportedImageFormatException();
@@ -468,6 +483,9 @@ class ImageAssetService {
         'metadata=${photoMetadata.metadata != null}',
       );
 
+      final imageWidth = derivatives.width > 0 ? derivatives.width : null;
+      final imageHeight = derivatives.height > 0 ? derivatives.height : null;
+
       final finalizeResponse = await _supabase.functions.invoke(
         'finalize-image-upload',
         body: {
@@ -484,6 +502,8 @@ class ImageAssetService {
               .captureTimestamp
               ?.toIso8601String(),
           'photo_metadata': ?photoMetadata.metadata?.toJson(),
+          'width': ?imageWidth,
+          'height': ?imageHeight,
         },
       );
 
@@ -861,6 +881,7 @@ class ImageAssetService {
         dateAdded: parsedDateAdded,
         imageUrl: imageUrl,
         thumbnailUrl: thumbnailUrl as String?,
+        displayUrl: row['display_url'] as String?,
         parentImageId: row['parent_image_id'] as String?,
         parentImageUrl: row['parent_image_url'] as String?,
       );

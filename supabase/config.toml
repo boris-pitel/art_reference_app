@@ -34,6 +34,8 @@ verify_jwt = false
 verify_jwt = false
 [functions.ai-edit-image]
 verify_jwt = false
+[functions.get-app-status]
+verify_jwt = false
 [functions.delete-category]
 verify_jwt = false
 [functions.search-users]

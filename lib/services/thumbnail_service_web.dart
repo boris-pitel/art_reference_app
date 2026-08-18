@@ -3,32 +3,26 @@ import 'dart:convert';
 import 'dart:html' as html;
 import 'dart:typed_data';
 
+import 'image_derivatives.dart';
+
 class ThumbnailService {
   const ThumbnailService._();
 
-  static Future<Uint8List> createThumbnail(
+  static Future<ImageDerivatives> createDerivatives(
     Uint8List originalBytes, {
-    int maximumDimension = 500,
-    int jpegQuality = 80,
+    int thumbnailMaxDimension = 500,
+    int thumbnailJpegQuality = 80,
   }) async {
     if (originalBytes.isEmpty) {
       throw const FormatException('The selected image file is empty.');
     }
 
-    if (maximumDimension <= 0) {
-      throw ArgumentError.value(
-        maximumDimension,
-        'maximumDimension',
-        'The maximum dimension must be greater than zero.',
-      );
+    if (thumbnailMaxDimension <= 0) {
+      throw ArgumentError('Maximum dimensions must be greater than zero.');
     }
 
-    if (jpegQuality < 1 || jpegQuality > 100) {
-      throw ArgumentError.value(
-        jpegQuality,
-        'jpegQuality',
-        'JPEG quality must be between 1 and 100.',
-      );
+    if (thumbnailJpegQuality < 1 || thumbnailJpegQuality > 100) {
+      throw ArgumentError('JPEG quality must be between 1 and 100.');
     }
 
     final contentType = _detectContentType(originalBytes);
@@ -57,48 +51,64 @@ class ThumbnailService {
         );
       }
 
-      final dimensions = _calculateThumbnailDimensions(
-        originalWidth: originalWidth,
-        originalHeight: originalHeight,
-        maximumDimension: maximumDimension,
-      );
-
-      final canvas = html.CanvasElement(
-        width: dimensions.width,
-        height: dimensions.height,
-      );
-
-      final context = canvas.context2D;
-
-      context.drawImageScaled(
+      final thumbnailBytes = _renderJpeg(
         imageElement,
-        0,
-        0,
-        dimensions.width,
-        dimensions.height,
+        _calculateCappedDimensions(
+          originalWidth: originalWidth,
+          originalHeight: originalHeight,
+          maximumDimension: thumbnailMaxDimension,
+        ),
+        thumbnailJpegQuality,
       );
 
-      final dataUrl = canvas.toDataUrl('image/jpeg', jpegQuality / 100);
-
-      final commaIndex = dataUrl.indexOf(',');
-
-      if (commaIndex < 0 || commaIndex == dataUrl.length - 1) {
-        throw const FormatException(
-          'The browser produced an invalid thumbnail.',
-        );
-      }
-
-      final encodedData = dataUrl.substring(commaIndex + 1);
-      final decodedBytes = base64Decode(encodedData);
-
-      if (decodedBytes.isEmpty) {
-        throw const FormatException('The browser produced an empty thumbnail.');
-      }
-
-      return Uint8List.fromList(decodedBytes);
+      return ImageDerivatives(
+        thumbnailBytes: thumbnailBytes,
+        width: originalWidth,
+        height: originalHeight,
+      );
     } finally {
       html.Url.revokeObjectUrl(objectUrl);
     }
+  }
+
+  static Uint8List _renderJpeg(
+    html.ImageElement imageElement,
+    _ThumbnailDimensions dimensions,
+    int jpegQuality,
+  ) {
+    final canvas = html.CanvasElement(
+      width: dimensions.width,
+      height: dimensions.height,
+    );
+
+    final context = canvas.context2D;
+
+    context.drawImageScaled(
+      imageElement,
+      0,
+      0,
+      dimensions.width,
+      dimensions.height,
+    );
+
+    final dataUrl = canvas.toDataUrl('image/jpeg', jpegQuality / 100);
+
+    final commaIndex = dataUrl.indexOf(',');
+
+    if (commaIndex < 0 || commaIndex == dataUrl.length - 1) {
+      throw const FormatException(
+        'The browser produced an invalid image.',
+      );
+    }
+
+    final encodedData = dataUrl.substring(commaIndex + 1);
+    final decodedBytes = base64Decode(encodedData);
+
+    if (decodedBytes.isEmpty) {
+      throw const FormatException('The browser produced an empty image.');
+    }
+
+    return Uint8List.fromList(decodedBytes);
   }
 
   static Future<void> _loadImage(
@@ -141,7 +151,7 @@ class ThumbnailService {
     }
   }
 
-  static _ThumbnailDimensions _calculateThumbnailDimensions({
+  static _ThumbnailDimensions _calculateCappedDimensions({
     required int originalWidth,
     required int originalHeight,
     required int maximumDimension,

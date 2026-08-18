@@ -15,6 +15,57 @@ function jsonResponse(body: Record<string, unknown>, status = 200): Response {
   });
 }
 
+// gpt-image-2 accepts an arbitrary WIDTHxHEIGHT as long as both sides are
+// divisible by 16, the aspect ratio stays within 1:3..3:1, and the result fits
+// inside 3840x2160. Asking for a concrete size matters: size="auto" picks a
+// small output (a 8000x6000 source came back as 1427x1102), so an edit of a
+// large photo loses far more resolution than the model actually requires.
+const maxLongSide = 3840;
+const maxShortSide = 2160;
+
+// Below this the source is small enough that picking a size buys nothing, and
+// scaling to a /16 boundary risks upscaling. Let the model decide instead.
+const minLongSide = 512;
+
+function roundDownToMultipleOf16(value: number): number {
+  return Math.max(16, Math.floor(value / 16) * 16);
+}
+
+function computeEditSize(width: unknown, height: unknown): string {
+  if (
+    typeof width !== "number" ||
+    typeof height !== "number" ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    return "auto";
+  }
+
+  const isLandscape = width >= height;
+  const sourceLong = isLandscape ? width : height;
+  const sourceShort = isLandscape ? height : width;
+
+  if (sourceLong < minLongSide) return "auto";
+
+  // Outside the supported aspect range there is no faithful size to request,
+  // so defer rather than distorting the image.
+  if (sourceLong / sourceShort > 3) return "auto";
+
+  // Never scale up — that would invent detail the source does not have.
+  const scale = Math.min(
+    maxLongSide / sourceLong,
+    maxShortSide / sourceShort,
+    1,
+  );
+
+  const long = Math.min(roundDownToMultipleOf16(sourceLong * scale), maxLongSide);
+  const short = Math.min(roundDownToMultipleOf16(sourceShort * scale), maxShortSide);
+
+  return isLandscape ? `${long}x${short}` : `${short}x${long}`;
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (request.method !== "POST") {
@@ -66,7 +117,7 @@ Deno.serve(async (request) => {
 
     const { data: record, error: recordError } = await supabase
       .from("image_assets")
-      .select("id,storage_path")
+      .select("id,storage_path,width,height")
       .eq("id", imageId)
       .eq("user_id", expectedUserId)
       .maybeSingle();
@@ -82,29 +133,49 @@ Deno.serve(async (request) => {
       throw new Error(`Unable to download image: ${downloadError?.message ?? "no data"}`);
     }
 
-    const form = new FormData();
-    form.append("model", "gpt-image-2");
-    form.append("image", source, `source.${extensionForMime(source.type)}`);
-    form.append(
-      "prompt",
-      [
-        "Edit the supplied image according to the user's instruction.",
-        "Preserve the original composition, people, lighting, colors, and all details that the user did not ask to change.",
-        "Do not add text, borders, signatures, or watermarks.",
-        `User instruction: ${prompt}`,
-      ].join(" "),
-    );
-    form.append("quality", quality);
-    form.append("size", "auto");
-    form.append("output_format", "jpeg");
-    form.append("output_compression", "88");
+    const buildRequest = (size: string): FormData => {
+      const form = new FormData();
+      form.append("model", "gpt-image-2");
+      form.append("image", source, `source.${extensionForMime(source.type)}`);
+      form.append(
+        "prompt",
+        [
+          "Edit the supplied image according to the user's instruction.",
+          "Preserve the original composition, people, lighting, colors, and all details that the user did not ask to change.",
+          "Do not add text, borders, signatures, or watermarks.",
+          `User instruction: ${prompt}`,
+        ].join(" "),
+      );
+      form.append("quality", quality);
+      form.append("size", size);
+      form.append("output_format", "jpeg");
+      form.append("output_compression", "88");
+      return form;
+    };
 
-    const openAiResponse = await fetch("https://api.openai.com/v1/images/edits", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${openAiApiKey}` },
-      body: form,
-    });
-    const result = await openAiResponse.json();
+    const callOpenAi = (size: string) =>
+      fetch("https://api.openai.com/v1/images/edits", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${openAiApiKey}` },
+        body: buildRequest(size),
+      });
+
+    const requestedSize = computeEditSize(record.width, record.height);
+
+    let openAiResponse = await callOpenAi(requestedSize);
+    let result = await openAiResponse.json();
+
+    // Sizes above 2560x1440 are documented as experimental, so a rejected size
+    // falls back to letting the model choose rather than failing the edit.
+    if (!openAiResponse.ok && requestedSize !== "auto" && openAiResponse.status < 500) {
+      console.warn(
+        `OpenAI rejected size ${requestedSize}; retrying with auto.`,
+        result?.error?.message,
+      );
+      openAiResponse = await callOpenAi("auto");
+      result = await openAiResponse.json();
+    }
+
     if (!openAiResponse.ok) {
       console.error("OpenAI image edit failed", openAiResponse.status, result);
       return jsonResponse(

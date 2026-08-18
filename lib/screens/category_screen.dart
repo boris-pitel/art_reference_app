@@ -4,14 +4,15 @@ import 'package:flutter/services.dart';
 import 'package:gal/gal.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/reference_category.dart';
 import '../services/category_service.dart';
 import '../services/image_asset_service.dart';
-import '../services/image_print_service.dart';
+import '../services/image_save_service.dart';
+import '../services/image_share_service.dart';
 import '../widgets/home_button.dart';
+import '../widgets/image_delivery.dart';
 import 'help_screen.dart';
 import 'image_details_screen.dart';
 import 'recipient_picker_screen.dart';
@@ -21,6 +22,7 @@ class _LoadedImage {
     required this.id,
     required this.imageUrl,
     required this.thumbnailUrl,
+    this.displayUrl,
     this.parentImageId,
     this.parentImageUrl,
   });
@@ -28,6 +30,7 @@ class _LoadedImage {
   final String id;
   final String imageUrl;
   final String? thumbnailUrl;
+  final String? displayUrl;
   final String? parentImageId;
   final String? parentImageUrl;
 }
@@ -132,6 +135,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
             id: imageInfo.id,
             imageUrl: imageInfo.imageUrl,
             thumbnailUrl: imageInfo.thumbnailUrl,
+            displayUrl: imageInfo.displayUrl,
             parentImageId: imageInfo.parentImageId,
             parentImageUrl: imageInfo.parentImageUrl,
           ),
@@ -349,6 +353,11 @@ class _CategoryScreenState extends State<CategoryScreen> {
       final detailsImageUrl = widget.category.isMyArt
           ? image.parentImageUrl
           : image.imageUrl;
+      // list-finished-artworks doesn't yet return a display derivative for
+      // the parent reference, so that path falls back to the original.
+      final detailsDisplayUrl = widget.category.isMyArt
+          ? null
+          : image.displayUrl;
       if (detailsImageId == null || detailsImageUrl == null) {
         _showMessage('The parent photo reference could not be opened.');
         return;
@@ -358,6 +367,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
           builder: (context) => ImageDetailsScreen(
             imageId: detailsImageId,
             imageUrl: detailsImageUrl,
+            displayUrl: detailsDisplayUrl,
             navigationItems: _images
                 .map(
                   (item) => ImageDetailsNavigationItem(
@@ -367,6 +377,9 @@ class _CategoryScreenState extends State<CategoryScreen> {
                     imageUrl: widget.category.isMyArt
                         ? item.parentImageUrl ?? item.imageUrl
                         : item.imageUrl,
+                    displayUrl: widget.category.isMyArt
+                        ? null
+                        : item.displayUrl,
                   ),
                 )
                 .toList(growable: false),
@@ -434,18 +447,12 @@ class _CategoryScreenState extends State<CategoryScreen> {
         sharePositionOrigin = topLeft & renderObject.size;
       }
 
-      await SharePlus.instance.share(
-        ShareParams(
-          files: [
-            XFile.fromData(
-              downloadedImage.bytes,
-              mimeType: downloadedImage.mimeType,
-              name: 'art_reference_${image.id}.${downloadedImage.extension}',
-            ),
-          ],
-          subject: 'Painter Reference',
-          sharePositionOrigin: sharePositionOrigin,
-        ),
+      await ImageShareService.share(
+        downloadedImage.bytes,
+        fileName: 'art_reference_${image.id}.${downloadedImage.extension}',
+        mimeType: downloadedImage.mimeType,
+        subject: 'Painter Reference',
+        sharePositionOrigin: sharePositionOrigin,
       );
     } catch (error) {
       if (!mounted) {
@@ -469,11 +476,6 @@ class _CategoryScreenState extends State<CategoryScreen> {
       return;
     }
 
-    if (kIsWeb) {
-      _showMessage('Save to Photos is available in the phone app.');
-      return;
-    }
-
     setState(() {
       _savingImageId = image.id;
     });
@@ -481,23 +483,23 @@ class _CategoryScreenState extends State<CategoryScreen> {
     try {
       final downloadedImage = await _downloadImage(image);
 
-      var hasAccess = await Gal.hasAccess();
+      if (!mounted) return;
 
-      if (!hasAccess) {
-        hasAccess = await Gal.requestAccess();
-      }
+      final result = await ImageDelivery.save(
+        context,
+        downloadedImage.bytes,
+        fileName: 'art_reference_${image.id}.${downloadedImage.extension}',
+      );
 
-      if (!hasAccess) {
-        throw StateError('Permission to save images was not granted.');
-      }
-
-      await Gal.putImageBytes(downloadedImage.bytes);
-
-      if (!mounted) {
+      if (!mounted || result.wasCancelled) {
         return;
       }
 
-      _showMessage('Reference saved to Photos.');
+      _showMessage(
+        result.path != null
+            ? 'Reference saved to ${result.path}'
+            : (kIsWeb ? 'Reference downloaded.' : 'Reference saved to Photos.'),
+      );
     } on GalException catch (error) {
       if (!mounted) {
         return;
@@ -531,8 +533,11 @@ class _CategoryScreenState extends State<CategoryScreen> {
     try {
       final downloadedImage = await _downloadImage(image);
 
-      await ImagePrintService.printImage(
-        imageBytes: downloadedImage.bytes,
+      if (!mounted) return;
+
+      await ImageDelivery.printImage(
+        context,
+        downloadedImage.bytes,
         documentName: 'Painter Reference ${image.id}',
       );
     } catch (error) {
@@ -975,7 +980,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
                 ),
                 ListTile(
                   leading: const Icon(Icons.photo_library_outlined),
-                  title: const Text('Save to Photos'),
+                  title: Text(ImageSaveService.actionLabel),
                   onTap: () {
                     Navigator.of(sheetContext).pop(_ImageAction.save);
                   },
@@ -1084,12 +1089,12 @@ class _CategoryScreenState extends State<CategoryScreen> {
             title: Text('Share'),
           ),
         ),
-        const PopupMenuItem(
+        PopupMenuItem(
           value: _ImageAction.save,
           child: ListTile(
             contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.photo_library_outlined),
-            title: Text('Save to Photos'),
+            leading: const Icon(Icons.photo_library_outlined),
+            title: Text(ImageSaveService.actionLabel),
           ),
         ),
         const PopupMenuItem(

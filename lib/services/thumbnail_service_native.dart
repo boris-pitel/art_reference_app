@@ -1,14 +1,17 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:image/image.dart' as img;
 
+import 'image_derivatives.dart';
+
 class ThumbnailService {
   const ThumbnailService._();
 
-  static Future<Uint8List> createThumbnail(
+  static Future<ImageDerivatives> createDerivatives(
     Uint8List originalBytes, {
-    int maximumDimension = 500,
-    int jpegQuality = 80,
+    int thumbnailMaxDimension = 500,
+    int thumbnailJpegQuality = 80,
   }) async {
     final originalImage = img.decodeImage(originalBytes);
 
@@ -20,19 +23,30 @@ class ThumbnailService {
 
     final correctedImage = img.bakeOrientation(originalImage);
 
-    final thumbnail = img.copyResize(
-      correctedImage,
-      width: correctedImage.width >= correctedImage.height
-          ? maximumDimension
-          : null,
-      height: correctedImage.height > correctedImage.width
-          ? maximumDimension
-          : null,
-      interpolation: img.Interpolation.average,
+    final longestSide = math.max(correctedImage.width, correctedImage.height);
+
+    // An image already within the cap is used as-is. Resizing it anyway would
+    // upscale it, producing a blurrier thumbnail that is larger than the source.
+    final thumbnail = longestSide <= thumbnailMaxDimension
+        ? correctedImage
+        : img.copyResize(
+            correctedImage,
+            width: correctedImage.width >= correctedImage.height
+                ? thumbnailMaxDimension
+                : null,
+            height: correctedImage.height > correctedImage.width
+                ? thumbnailMaxDimension
+                : null,
+            interpolation: img.Interpolation.average,
+          );
+    final thumbnailBytes = Uint8List.fromList(
+      img.encodeJpg(thumbnail, quality: thumbnailJpegQuality),
     );
 
-    final encodedThumbnail = img.encodeJpg(thumbnail, quality: jpegQuality);
-
-    return Uint8List.fromList(encodedThumbnail);
+    return ImageDerivatives(
+      thumbnailBytes: thumbnailBytes,
+      width: correctedImage.width,
+      height: correctedImage.height,
+    );
   }
 }

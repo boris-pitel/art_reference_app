@@ -7,6 +7,7 @@ class ImageSearchResult {
     required this.dateAdded,
     required this.imageUrl,
     required this.thumbnailUrl,
+    this.displayUrl,
     required this.title,
     required this.notes,
     required this.originalOwnerName,
@@ -18,6 +19,7 @@ class ImageSearchResult {
   final DateTime dateAdded;
   final String imageUrl;
   final String? thumbnailUrl;
+  final String? displayUrl;
   final String? title;
   final String? notes;
   final String? originalOwnerName;
@@ -65,6 +67,9 @@ class ImageSearchResult {
       imageUrl: imageUrl.trim(),
       thumbnailUrl: thumbnailUrl is String && thumbnailUrl.trim().isNotEmpty
           ? thumbnailUrl.trim()
+          : null,
+      displayUrl: json['display_url'] is String
+          ? (json['display_url'] as String).trim()
           : null,
       title: title is String && title.trim().isNotEmpty ? title.trim() : null,
       notes: notes is String && notes.trim().isNotEmpty ? notes.trim() : null,

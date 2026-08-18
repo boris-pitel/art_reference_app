@@ -61,6 +61,29 @@ class MaintenanceService {
     return Map<String, dynamic>.from(data['user'] as Map);
   }
 
+  /// Turns the app-wide maintenance gate on or off. Admins keep access while
+  /// it is on, so this can always be called again to turn it back off.
+  Future<void> setAppStatus({
+    required bool maintenanceEnabled,
+    String? message,
+  }) async {
+    final response = await _client.functions.invoke(
+      'admin-maintenance',
+      method: HttpMethod.post,
+      body: {
+        'action': 'set_app_status',
+        'maintenance_enabled': maintenanceEnabled,
+        'message': message,
+      },
+    );
+    final data = response.data;
+    if (data is! Map || data['maintenance_enabled'] is! bool) {
+      throw StateError(
+        'The maintenance service returned an invalid status response.',
+      );
+    }
+  }
+
   Future<Map<String, dynamic>> impersonate(String userId) async {
     final response = await _client.functions.invoke(
       'admin-maintenance',

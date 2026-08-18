@@ -206,8 +206,11 @@ async function logAdminAction(
   adminId: string,
   adminEmail: string,
   operation: string,
-  targetId: string,
+  // Null for global actions such as a service-status change, which have no
+  // subject user.
+  targetId: string | null,
   details: Record<string, unknown>,
+  targetType = 'user',
 ) {
   const { error } = await adminClient.from('user_activity_logs').insert({
     user_id: adminId,
@@ -215,7 +218,7 @@ async function logAdminAction(
     session_id: crypto.randomUUID(),
     operation,
     status: 'succeeded',
-    target_type: 'user',
+    target_type: targetType,
     target_id: targetId,
     platform: 'admin-maintenance',
     app_version: 'server',
@@ -304,6 +307,45 @@ Deno.serve(async (request) => {
     if (request.method === 'POST') {
       const body = await request.json().catch(() => null);
       const action = body?.action;
+
+      // Handled before the user_id check below: service status is global and
+      // has no subject user.
+      if (action === 'set_app_status') {
+        const enabled = body?.maintenance_enabled === true;
+        const rawMessage = body?.message;
+        const message = typeof rawMessage === 'string' && rawMessage.trim().length > 0
+          ? rawMessage.trim()
+          : null;
+
+        const { error } = await adminClient
+          .from('app_status')
+          .update({
+            maintenance_enabled: enabled,
+            message,
+            updated_at: new Date().toISOString(),
+            updated_by: admin.email ?? admin.id,
+          })
+          .eq('id', true);
+
+        if (error) {
+          return jsonResponse(
+            { error: `Unable to update service status: ${error.message}` },
+            500,
+          );
+        }
+
+        await logAdminAction(
+          admin.id,
+          admin.email ?? '',
+          'admin_set_app_status',
+          null,
+          { maintenance_enabled: enabled, message },
+          'system',
+        );
+
+        return jsonResponse({ maintenance_enabled: enabled, message });
+      }
+
       const userId = body?.user_id;
       if (typeof userId !== 'string' || userId.trim().length === 0) {
         return jsonResponse({ error: 'User ID is required' }, 400);

@@ -52,10 +52,13 @@ type FinalizeRequest = {
   image_id?: unknown;
   storage_path?: unknown;
   thumbnail_storage_path?: unknown;
+  display_storage_path?: unknown;
   original_owner_name?: unknown;
   original_filename?: unknown;
   capture_timestamp?: unknown;
   photo_metadata?: unknown;
+  width?: unknown;
+  height?: unknown;
 };
 
 type UploadDestination =
@@ -141,6 +144,27 @@ function optionalTimestamp(
   }
 
   return parsed.toISOString();
+}
+
+function optionalPositiveInt(
+  value: unknown,
+  fieldName: string,
+): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (
+    typeof value !== 'number' ||
+    !Number.isInteger(value) ||
+    value <= 0
+  ) {
+    throw new Error(
+      `${fieldName} must be a positive integer`,
+    );
+  }
+
+  return value;
 }
 
 function optionalJsonObject(
@@ -306,10 +330,13 @@ Deno.serve(async (request) => {
   let imageId: string;
   let storagePath: string;
   let thumbnailStoragePath: string;
+  let displayStoragePath: string;
   let originalOwnerName: string | null;
   let originalFilename: string | null;
   let captureTimestamp: string | null;
   let photoMetadata: Record<string, unknown> | null;
+  let width: number | null;
+  let height: number | null;
   let destination: UploadDestination;
 
   try {
@@ -343,6 +370,10 @@ Deno.serve(async (request) => {
       'thumbnail_storage_path',
     );
 
+    displayStoragePath = optionalString(
+      body.display_storage_path,
+    );
+
     originalOwnerName = optionalString(
       body.original_owner_name,
       'original_owner_name',
@@ -362,6 +393,9 @@ Deno.serve(async (request) => {
       body.photo_metadata,
       'photo_metadata',
     );
+
+    width = optionalPositiveInt(body.width, 'width');
+    height = optionalPositiveInt(body.height, 'height');
 
     destination = readUploadDestination(body);
   } catch (error) {
@@ -411,6 +445,23 @@ Deno.serve(async (request) => {
     );
   }
 
+  // display_storage_path is now optional (display tier was disabled)
+  // Skip validation if not provided
+  if (displayStoragePath) {
+    const expectedDisplayStoragePath =
+      `${userId}/display/${imageId}.jpg`;
+
+    if (displayStoragePath !== expectedDisplayStoragePath) {
+      return jsonResponse(
+        {
+          error:
+            'display_storage_path does not match the user and image ID',
+        },
+        400,
+      );
+    }
+  }
+
   if (
     destination.type === 'associated' &&
     destination.parentImageId === imageId
@@ -426,12 +477,23 @@ Deno.serve(async (request) => {
 
   let originalExists: boolean;
   let thumbnailExists: boolean;
+  let displayExists: boolean;
 
   try {
-    [originalExists, thumbnailExists] = await Promise.all([
+    const checks = [
       storageFileExists(storagePath),
       storageFileExists(thumbnailStoragePath),
-    ]);
+    ];
+
+    // Only check display file if displayStoragePath is provided
+    if (displayStoragePath) {
+      checks.push(storageFileExists(displayStoragePath));
+    }
+
+    const results = await Promise.all(checks);
+    originalExists = results[0];
+    thumbnailExists = results[1];
+    displayExists = displayStoragePath ? results[2] : true;
   } catch (error) {
     console.error(error);
 
@@ -445,7 +507,7 @@ Deno.serve(async (request) => {
     );
   }
 
-  if (!originalExists || !thumbnailExists) {
+  if (!originalExists || !thumbnailExists || !displayExists) {
     return jsonResponse(
       {
         error:
@@ -475,7 +537,7 @@ Deno.serve(async (request) => {
       if (parentImage.rows.length === 0) {
         await connection.queryArray`rollback`;
 
-        await removeStorageFiles([storagePath, thumbnailStoragePath]);
+        await removeStorageFiles([storagePath, thumbnailStoragePath, displayStoragePath]);
 
         return jsonResponse(
           {
@@ -499,7 +561,7 @@ Deno.serve(async (request) => {
       if (parentCategory.rows.length === 0) {
         await connection.queryArray`rollback`;
 
-        await removeStorageFiles([storagePath, thumbnailStoragePath]);
+        await removeStorageFiles([storagePath, thumbnailStoragePath, displayStoragePath]);
 
         return jsonResponse(
           {
@@ -543,7 +605,7 @@ Deno.serve(async (request) => {
           await connection.queryArray`rollback`;
 
           if (existingImageId !== imageId) {
-            await removeStorageFiles([storagePath, thumbnailStoragePath]);
+            await removeStorageFiles([storagePath, thumbnailStoragePath, displayStoragePath]);
           }
 
           return jsonResponse(
@@ -588,7 +650,7 @@ Deno.serve(async (request) => {
         await connection.queryArray`commit`;
 
         if (existingImageId !== imageId) {
-          await removeStorageFiles([storagePath, thumbnailStoragePath]);
+          await removeStorageFiles([storagePath, thumbnailStoragePath, displayStoragePath]);
         }
 
         return jsonResponse(
@@ -614,7 +676,7 @@ Deno.serve(async (request) => {
         await connection.queryArray`rollback`;
 
         if (existingImageId !== imageId) {
-          await removeStorageFiles([storagePath, thumbnailStoragePath]);
+          await removeStorageFiles([storagePath, thumbnailStoragePath, displayStoragePath]);
         }
 
         return jsonResponse(
@@ -640,7 +702,7 @@ Deno.serve(async (request) => {
         await connection.queryArray`rollback`;
 
         if (existingImageId !== imageId) {
-          await removeStorageFiles([storagePath, thumbnailStoragePath]);
+          await removeStorageFiles([storagePath, thumbnailStoragePath, displayStoragePath]);
         }
 
         return jsonResponse(
@@ -675,7 +737,7 @@ Deno.serve(async (request) => {
         await connection.queryArray`rollback`;
 
         if (existingImageId !== imageId) {
-          await removeStorageFiles([storagePath, thumbnailStoragePath]);
+          await removeStorageFiles([storagePath, thumbnailStoragePath, displayStoragePath]);
         }
 
         if (
@@ -721,7 +783,7 @@ Deno.serve(async (request) => {
       await connection.queryArray`commit`;
 
       if (existingImageId !== imageId) {
-        await removeStorageFiles([storagePath, thumbnailStoragePath]);
+        await removeStorageFiles([storagePath, thumbnailStoragePath, displayStoragePath]);
       }
 
       return jsonResponse(
@@ -747,10 +809,13 @@ Deno.serve(async (request) => {
         image_hash,
         storage_path,
         thumbnail_storage_path,
+        display_storage_path,
         original_owner_name,
         original_filename,
         capture_timestamp,
-        photo_metadata
+        photo_metadata,
+        width,
+        height
       )
       values (
         ${imageId},
@@ -759,10 +824,13 @@ Deno.serve(async (request) => {
         ${imageHash},
         ${storagePath},
         ${thumbnailStoragePath},
+        ${displayStoragePath},
         ${originalOwnerName},
         ${originalFilename},
         ${captureTimestamp}::timestamptz,
-        ${photoMetadata === null ? null : JSON.stringify(photoMetadata)}::jsonb
+        ${photoMetadata === null ? null : JSON.stringify(photoMetadata)}::jsonb,
+        ${width},
+        ${height}
       )
     `;
 
@@ -835,7 +903,7 @@ Deno.serve(async (request) => {
       'code' in error &&
       error.code === '23505'
     ) {
-      await removeStorageFiles([storagePath, thumbnailStoragePath]);
+      await removeStorageFiles([storagePath, thumbnailStoragePath, displayStoragePath]);
 
       return jsonResponse(
         {

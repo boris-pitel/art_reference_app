@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/chat_message.dart';
@@ -12,8 +11,10 @@ import '../models/reference_category.dart';
 import '../services/category_service.dart';
 import '../services/image_asset_service.dart';
 import '../services/image_save_service.dart';
+import '../services/image_share_service.dart';
 import '../services/messaging_service.dart';
 import '../widgets/home_button.dart';
+import '../widgets/image_delivery.dart';
 
 Future<Uint8List> _downloadImageBytes(String url) async {
   final response = await http.get(Uri.parse(url));
@@ -205,7 +206,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
                 ),
                 ListTile(
                   leading: const Icon(Icons.photo_library_outlined),
-                  title: const Text('Save to Photos'),
+                  title: Text(ImageSaveService.actionLabel),
                   onTap: () => Navigator.of(sheetContext).pop('photos'),
                 ),
                 const SizedBox(height: 8),
@@ -310,17 +311,11 @@ class _ConversationScreenState extends State<ConversationScreen> {
       final bytes = await _downloadImageBytes(imageUrl);
       final mimeType = ImageAssetService.detectContentType(bytes);
       final extension = mimeType == 'image/png' ? 'png' : 'jpg';
-      await SharePlus.instance.share(
-        ShareParams(
-          files: [
-            XFile.fromData(
-              bytes,
-              mimeType: mimeType,
-              name: 'message_image_${message.id}.$extension',
-            ),
-          ],
-          subject: 'Painter Reference',
-        ),
+      await ImageShareService.share(
+        bytes,
+        fileName: 'message_image_${message.id}.$extension',
+        mimeType: mimeType,
+        subject: 'Painter Reference',
       );
     } catch (error) {
       if (mounted) _showSnack('Unable to share image: $error');
@@ -335,12 +330,18 @@ class _ConversationScreenState extends State<ConversationScreen> {
       final bytes = await _downloadImageBytes(imageUrl);
       final mimeType = ImageAssetService.detectContentType(bytes);
       final extension = mimeType == 'image/png' ? 'png' : 'jpg';
-      await ImageSaveService.save(
+      if (!mounted) return;
+      final result = await ImageDelivery.save(
+        context,
         bytes,
         fileName: 'message_image_${message.id}.$extension',
       );
-      if (!mounted) return;
-      _showSnack(kIsWeb ? 'Image downloaded.' : 'Image saved to Photos.');
+      if (!mounted || result.wasCancelled) return;
+      _showSnack(
+        result.path != null
+            ? 'Image saved to ${result.path}'
+            : (kIsWeb ? 'Image downloaded.' : 'Image saved to Photos.'),
+      );
     } catch (error) {
       if (mounted) _showSnack('Unable to save image: $error');
     } finally {

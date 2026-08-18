@@ -85,6 +85,7 @@ void main() {
           'date_added': '2026-08-12T10:30:00Z',
           'image_url': 'https://example.test/image',
           'thumbnail_url': 'https://example.test/thumb',
+          'display_url': 'https://example.test/display',
           'parent_image_id': 'parent-id',
           'parent_image_url': 'https://example.test/parent',
         },
@@ -94,6 +95,7 @@ void main() {
       expect(result.single.id, 'image-id');
       expect(result.single.dateAdded.isUtc, isTrue);
       expect(result.single.thumbnailUrl, contains('/thumb'));
+      expect(result.single.displayUrl, contains('/display'));
       expect(result.single.parentImageId, 'parent-id');
     });
 

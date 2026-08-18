@@ -19,6 +19,7 @@ import 'screens/keyword_search_screen.dart';
 import 'screens/messages_screen.dart';
 import 'screens/messaging_settings_screen.dart';
 import 'screens/shared_image_import_screen.dart';
+import 'services/app_status_service.dart';
 import 'services/category_service.dart';
 import 'services/impersonation_controller.dart';
 import 'services/library_home_cache.dart';
@@ -261,8 +262,177 @@ class _ArtReferenceAppState extends State<ArtReferenceApp> {
           : LoginScreen(key: ValueKey<String?>(_pendingSharedImagePath)),
       builder: (context, child) {
         if (child == null) return const SizedBox.shrink();
-        return _ImpersonationBanner(child: child);
+        return _MaintenanceGate(child: _ImpersonationBanner(child: child));
       },
+    );
+  }
+}
+
+/// Blocks the whole app while maintenance is on.
+///
+/// Sits outside the Navigator so no route stays reachable behind it.
+/// Administrators are deliberately exempt — the switch that turns maintenance
+/// off lives inside the app, so gating them would lock out the only people who
+/// can lift the gate.
+class _MaintenanceGate extends StatefulWidget {
+  const _MaintenanceGate({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_MaintenanceGate> createState() => _MaintenanceGateState();
+}
+
+class _MaintenanceGateState extends State<_MaintenanceGate>
+    with WidgetsBindingObserver {
+  AppStatus _status = AppStatus.available;
+  bool _isChecking = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _refresh();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Picks up a gate raised or lifted while the app sat in the background.
+    if (state == AppLifecycleState.resumed) _refresh();
+  }
+
+  bool get _isAdmin =>
+      Supabase.instance.client.auth.currentUser?.appMetadata['is_admin'] == true;
+
+  Future<void> _refresh() async {
+    if (_isChecking) return;
+    setState(() => _isChecking = true);
+    final status = await AppStatusService(Supabase.instance.client).load();
+    if (!mounted) return;
+    setState(() {
+      _status = status;
+      _isChecking = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_status.maintenanceEnabled) return widget.child;
+
+    if (_isAdmin) {
+      // Admins keep working, but must not be able to forget the app is closed
+      // to everyone else.
+      return _AdminMaintenanceBanner(child: widget.child);
+    }
+
+    return _MaintenanceBlockScreen(
+      message: _status.message,
+      isChecking: _isChecking,
+      onRetry: _refresh,
+    );
+  }
+}
+
+class _AdminMaintenanceBanner extends StatelessWidget {
+  const _AdminMaintenanceBanner({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Material(
+          color: Colors.orange.shade800,
+          child: SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: Row(
+                children: const [
+                  Icon(Icons.build_outlined, size: 16, color: Colors.white),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Maintenance mode is ON — other users cannot use the app.',
+                      style: TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        Expanded(child: child),
+      ],
+    );
+  }
+}
+
+class _MaintenanceBlockScreen extends StatelessWidget {
+  const _MaintenanceBlockScreen({
+    required this.message,
+    required this.isChecking,
+    required this.onRetry,
+  });
+
+  final String? message;
+  final bool isChecking;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.build_circle_outlined,
+                  size: 64,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'Painter Reference is under maintenance',
+                  style: theme.textTheme.headlineSmall,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  message ?? 'We are making some updates. Please check back shortly.',
+                  style: theme.textTheme.bodyMedium,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 28),
+                FilledButton.icon(
+                  onPressed: isChecking ? null : () => onRetry(),
+                  icon: isChecking
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh),
+                  label: Text(isChecking ? 'Checking…' : 'Try again'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
