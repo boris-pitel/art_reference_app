@@ -1,11 +1,11 @@
-import 'dart:typed_data';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../services/gesture_share.dart';
 import '../services/image_dimensions_reader.dart';
 import '../services/image_print_service.dart';
 import '../services/image_save_service.dart';
+import '../services/web_print.dart';
 
 /// Routes saving and printing to whichever mechanism the platform supports.
 ///
@@ -16,6 +16,11 @@ import '../services/image_save_service.dart';
 /// gesture, and the share happens synchronously inside it.
 class ImageDelivery {
   const ImageDelivery._();
+
+  /// iOS already reaches a printer through the share sheet, so only Android
+  /// browsers need the page-printing route.
+  static bool get _androidWebPrinting =>
+      kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
   static Future<ImageSaveResult> save(
     BuildContext context,
@@ -49,6 +54,33 @@ class ImageDelivery {
     Uint8List imageBytes, {
     required String documentName,
   }) async {
+    // Android browsers get the print dialog directly. The printing package
+    // will not attempt one for a mobile user agent — it downloads a PDF and
+    // offers an app chooser instead, which never reaches a printer.
+    if (_androidWebPrinting) {
+      final printed = await WebPrint.printImage(
+        imageBytes,
+        mimeType: imageBytes.length >= 8 &&
+                imageBytes[1] == 0x50 &&
+                imageBytes[2] == 0x4e
+            ? 'image/png'
+            : 'image/jpeg',
+      );
+
+      if (printed || !context.mounted) return;
+
+      // Most likely the browser refused to decode a very large photo.
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This image is too large for your browser to print. Save it and '
+            'print from another app.',
+          ),
+        ),
+      );
+      return;
+    }
+
     if (!GestureShare.isRequired) {
       return ImagePrintService.printImage(
         imageBytes: imageBytes,
