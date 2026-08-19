@@ -11,6 +11,7 @@ import '../services/category_service.dart';
 import '../services/image_asset_service.dart';
 import '../services/image_save_service.dart';
 import '../services/image_share_service.dart';
+import '../services/user_activity_logger.dart';
 import '../widgets/home_button.dart';
 import '../widgets/image_delivery.dart';
 import 'help_screen.dart';
@@ -278,6 +279,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
 
   Future<void> _uploadSelectedImages(List<XFile> files) async {
     final failures = <XFile>[];
+    String? firstFailure;
     var saved = 0;
     for (var index = 0; index < files.length; index++) {
       if (!mounted) return;
@@ -285,6 +287,21 @@ class _CategoryScreenState extends State<CategoryScreen> {
         _uploadProgress = index / files.length;
         _uploadStatus = 'Uploading ${index + 1} of ${files.length}…';
       });
+
+      // Recorded before the file is even read. Everything the service logs
+      // happens after the upload call, so a failure while reading the bytes —
+      // which is where a very large photo is most likely to die — left no
+      // trace at all, on any device.
+      UserActivityLogger.instance.record(
+        operation: 'image_upload',
+        status: 'started',
+        targetType: 'image',
+        details: {
+          'category': widget.category.databaseCode,
+          'file_name': files[index].name,
+        },
+      );
+
       try {
         final bytes = await files[index].readAsBytes();
         await _imageAssetService.uploadImage(
@@ -293,7 +310,22 @@ class _CategoryScreenState extends State<CategoryScreen> {
           originalFilename: files[index].name,
         );
         saved++;
-      } catch (_) {
+      } catch (error) {
+        // Previously discarded, which is why a failed upload could not be
+        // explained afterwards by the user or the logs.
+        UserActivityLogger.instance.record(
+          operation: 'image_upload',
+          status: 'failed',
+          targetType: 'image',
+          details: {
+            'category': widget.category.databaseCode,
+            'file_name': files[index].name,
+            'stage': 'read_or_upload',
+          },
+          error: error,
+        );
+
+        firstFailure ??= error.toString();
         failures.add(files[index]);
       }
     }
@@ -309,8 +341,14 @@ class _CategoryScreenState extends State<CategoryScreen> {
         content: Text(
           failures.isEmpty
               ? '$saved ${saved == 1 ? 'photo' : 'photos'} saved.'
-              : '$saved saved; ${failures.length} failed.',
+              // Naming the reason: "1 failed" alone gave the user nothing to
+              // act on and nothing to report.
+              : '$saved saved; ${failures.length} failed.'
+                    '${firstFailure == null ? '' : ' $firstFailure'}',
         ),
+        duration: failures.isEmpty
+            ? const Duration(seconds: 4)
+            : const Duration(seconds: 12),
         action: failures.isEmpty
             ? null
             : SnackBarAction(

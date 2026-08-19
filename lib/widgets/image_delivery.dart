@@ -36,11 +36,7 @@ class ImageDelivery {
       title: 'Save image',
       // The destination app differs by platform, and a browser download cannot
       // reach the photo library on either — the share sheet is the only route.
-      body: GestureShare.isIosBrowser
-          ? 'Your image is ready. Choose "Save Image" in the share sheet to '
-                'add it to Photos.'
-          : 'Your image is ready. Choose Photos or Gallery in the share sheet '
-                'to add it there.',
+      body: _shareInstructions(bytes),
       actionLabel: 'Continue',
       bytes: bytes,
       fileName: fileName,
@@ -122,29 +118,12 @@ class ImageDelivery {
     required String fileName,
     required String mimeType,
   }) async {
-    final tooLargeForPhotos = _exceedsPhotosLimit(bytes, mimeType);
-
     final shared = await showDialog<bool>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
           title: Text(title),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(body),
-              if (tooLargeForPhotos != null) ...[
-                const SizedBox(height: 14),
-                Text(
-                  tooLargeForPhotos,
-                  style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(dialogContext).colorScheme.error,
-                  ),
-                ),
-              ],
-            ],
-          ),
+          content: Text(body),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -169,38 +148,40 @@ class ImageDelivery {
     return shared ?? false;
   }
 
-  /// iOS decodes a JPEG only up to roughly 32 megapixels, and importing to
-  /// Photos requires a decode — so above that the share sheet accepts the file
-  /// and Photos silently discards it. Documented in Apple's Safari Web Content
-  /// Guide and confirmed here: a 6000x8000 (48MP) photo never reached Photos,
-  /// while the same file uploaded to a cloud app intact, because an upload
-  /// copies bytes without decoding them.
+  /// Above this, a photo library is liable to reject the image without saying
+  /// so, on either platform.
   ///
-  /// Whether newer hardware raises the ceiling is unconfirmed. Warning when a
-  /// save would have worked is a far smaller cost than staying silent when it
-  /// will not, so the documented figure stands until measured otherwise.
+  /// iOS decodes a JPEG only to about this size and importing to Photos
+  /// requires a decode, which is documented in Apple's Safari Web Content
+  /// Guide. Android has no published figure; all that is established is that a
+  /// 6000x8000 (48MP) photo reached Google Photos, showed an upload progress
+  /// bar, and never appeared — while the same file saved through Files intact.
+  /// The Apple number is therefore used for both as a conservative estimate,
+  /// not as a measured Android limit.
+  ///
+  /// Both failures are silent: once the share sheet accepts a file, neither
+  /// platform reports back what the destination did with it. So this steers
+  /// the user beforehand rather than reacting afterwards, and pointing someone
+  /// at Files when Photos would have coped costs far less than the reverse.
   static const _photosMegapixelLimit = 32;
 
-  /// The warning to show, or null when the image is safely within the limit.
-  ///
-  /// The failure itself cannot be detected: iOS reports nothing back once the
-  /// share sheet takes the file, so this predicts rather than reacts.
-  static String? _exceedsPhotosLimit(Uint8List bytes, String mimeType) {
-    if (!mimeType.startsWith('image/')) return null;
-
-    // The limit and the wording are both iOS-specific. Android's gallery has
-    // its own behaviour, unmeasured here, and claiming an iPhone limit on an
-    // Android phone would be worse than saying nothing.
-    if (!GestureShare.isIosBrowser) return null;
-
+  /// What to tell the user before the share sheet opens, given what the photo
+  /// libraries will and will not accept.
+  static String _shareInstructions(Uint8List bytes) {
     final dimensions = ImageDimensionsReader.read(bytes);
-    if (dimensions == null) return null;
+    final megapixels = dimensions?.megapixels;
 
-    final megapixels = dimensions.megapixels;
-    if (megapixels <= _photosMegapixelLimit) return null;
+    if (megapixels != null && megapixels > _photosMegapixelLimit) {
+      return 'This photo is $megapixels megapixels. Choose Files to save it to '
+          'your phone — photos this large often do not appear if you choose '
+          'Photos or Gallery.';
+    }
 
-    return 'This image is $megapixels megapixels. iPhone cannot add images '
-        'above about $_photosMegapixelLimit megapixels to Photos — use AirDrop, '
-        'Mail, or a cloud app instead.';
+    return GestureShare.isIosBrowser
+        ? 'Your image is ready. Choose "Save Image" in the share sheet to add '
+              'it to Photos.'
+        : 'Your image is ready. Choose Photos or Gallery to add it there, or '
+              'Files to save it to your phone.';
   }
+
 }
