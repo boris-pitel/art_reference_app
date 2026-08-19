@@ -133,10 +133,20 @@ Deno.serve(async (request) => {
       throw new Error(`Unable to download image: ${downloadError?.message ?? "no data"}`);
     }
 
+    const sourceBytes = new Uint8Array(await source.arrayBuffer());
+    const sourceMime = detectImageMime(sourceBytes);
+
     const buildRequest = (size: string): FormData => {
       const form = new FormData();
       form.append("model", "gpt-image-2");
-      form.append("image", source, `source.${extensionForMime(source.type)}`);
+      form.append(
+        "image",
+        // Rebuilt with an explicit type: the downloaded Blob reports
+        // application/octet-stream, which OpenAI rejects outright.
+        new File([sourceBytes], `source.${extensionForMime(sourceMime)}`, {
+          type: sourceMime,
+        }),
+      );
       form.append(
         "prompt",
         [
@@ -207,4 +217,38 @@ function extensionForMime(mime: string): string {
   if (mime.includes("png")) return "png";
   if (mime.includes("webp")) return "webp";
   return "jpg";
+}
+
+/// The image's real format, read from its leading bytes.
+///
+/// Storage records the correct type, but the download client hands back a Blob
+/// typed application/octet-stream, and FormData takes the part's Content-Type
+/// from the Blob — so OpenAI rejected the upload as an unsupported mimetype
+/// however correct the filename was. The bytes themselves cannot be mislabelled.
+function detectImageMime(bytes: Uint8Array): string {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 && bytes[1] === 0x50 &&
+    bytes[2] === 0x4e && bytes[3] === 0x47
+  ) {
+    return "image/png";
+  }
+
+  // RIFF....WEBP
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 && bytes[1] === 0x49 &&
+    bytes[2] === 0x46 && bytes[3] === 0x46 &&
+    bytes[8] === 0x57 && bytes[9] === 0x45 &&
+    bytes[10] === 0x42 && bytes[11] === 0x50
+  ) {
+    return "image/webp";
+  }
+
+  // Everything stored here is one of the three; JPEG is the overwhelming case.
+  return "image/jpeg";
 }

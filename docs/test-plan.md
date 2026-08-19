@@ -66,7 +66,7 @@ live regardless of builds.
 - [ ] **B4** Open **Edit with AI**. → A notice appears before any credits are
       spent, explaining the result is new and smaller and the original is kept.
 - [ ] **B5** Run an AI edit and accept it. → Slower than before; more pixels.
-- [ ] **B6** Check the result's Technical panel. **Key check.** → Around
+- [x] **B6** Check the result's Technical panel. **Key check.** → Confirmed 18 August:
       **2880 × 2160**, not the old 1427×1102.
 - [ ] **B7** Re-check the source image. → Still **6000 × 8000**; the result is
       stored alongside, never in place of it.
