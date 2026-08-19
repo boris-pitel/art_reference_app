@@ -33,14 +33,15 @@ class ImageSaveService {
     // Some browsers ignore clicks on elements outside the document.
     html.document.body?.append(anchor);
     anchor.click();
-    anchor.remove();
 
-    // Revoking in the same turn as the click can cancel the download before
-    // the browser has finished reading the blob, so it is deferred.
-    Future.delayed(
-      const Duration(minutes: 1),
-      () => html.Url.revokeObjectUrl(url),
-    );
+    // The anchor and its object URL both outlive the click. Removing either in
+    // the same turn can cancel a download that has not started transferring
+    // yet — which a small file survives, because it starts immediately, and a
+    // large one does not.
+    Future.delayed(const Duration(minutes: 1), () {
+      anchor.remove();
+      html.Url.revokeObjectUrl(url);
+    });
 
     return const ImageSaveResult.downloaded();
   }

@@ -22,10 +22,22 @@ extension type _JsFile._(JSObject _) implements JSObject {
 class GestureShare {
   const GestureShare._();
 
-  /// True only where the direct path cannot work: iOS browsers that can share
-  /// files. Elsewhere the normal download/print route is left alone.
+  /// True on mobile browsers that can share files.
+  ///
+  /// A browser download can only write to the downloads directory — no web API
+  /// reaches the photo library — so the share sheet is the only route into
+  /// Photos or the gallery. Desktop keeps the plain download, where a file on
+  /// disk is what is wanted anyway.
   static bool get isRequired =>
-      _isIos && _navigator.has('share') && _navigator.has('canShare');
+      (_isIos || _isAndroid) &&
+      _navigator.has('share') &&
+      _navigator.has('canShare');
+
+  /// Whether this is an iOS browser, whose Photos import has its own limits.
+  static bool get isIosBrowser => _isIos;
+
+  static bool get _isAndroid =>
+      html.window.navigator.userAgent.contains('Android');
 
   static void shareBytes(
     Uint8List bytes, {

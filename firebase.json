@@ -6,6 +6,28 @@
       "**/.*",
       "**/node_modules/**"
     ],
+    "headers": [
+      {
+        "comment": "Flutter emits these under fixed names, so a cached copy is indistinguishable from a current one and a deploy would not reach anyone for an hour. no-cache still allows a 304, so an unchanged bundle is not re-downloaded — only revalidated.",
+        "source": "**/*.@(html|js|json|wasm)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      },
+      {
+        "comment": "The root is served through the rewrite, so it never matches the extension pattern above and would otherwise stay cached for an hour.",
+        "source": "/",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      }
+    ],
     "rewrites": [
       {
         "source": "**",

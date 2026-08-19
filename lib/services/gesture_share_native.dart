@@ -6,6 +6,8 @@ class GestureShare {
 
   static bool get isRequired => false;
 
+  static bool get isIosBrowser => false;
+
   static void shareBytes(
     Uint8List bytes, {
     required String fileName,

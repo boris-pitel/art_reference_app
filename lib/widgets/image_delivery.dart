@@ -34,8 +34,13 @@ class ImageDelivery {
     final shared = await _confirmHandoff(
       context,
       title: 'Save image',
-      body: 'Your image is ready. Choose "Save Image" in the share sheet to '
-          'add it to Photos.',
+      // The destination app differs by platform, and a browser download cannot
+      // reach the photo library on either — the share sheet is the only route.
+      body: GestureShare.isIosBrowser
+          ? 'Your image is ready. Choose "Save Image" in the share sheet to '
+                'add it to Photos.'
+          : 'Your image is ready. Choose Photos or Gallery in the share sheet '
+                'to add it there.',
       actionLabel: 'Continue',
       bytes: bytes,
       fileName: fileName,
@@ -182,6 +187,11 @@ class ImageDelivery {
   /// share sheet takes the file, so this predicts rather than reacts.
   static String? _exceedsPhotosLimit(Uint8List bytes, String mimeType) {
     if (!mimeType.startsWith('image/')) return null;
+
+    // The limit and the wording are both iOS-specific. Android's gallery has
+    // its own behaviour, unmeasured here, and claiming an iPhone limit on an
+    // Android phone would be worse than saying nothing.
+    if (!GestureShare.isIosBrowser) return null;
 
     final dimensions = ImageDimensionsReader.read(bytes);
     if (dimensions == null) return null;
