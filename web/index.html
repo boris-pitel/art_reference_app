@@ -34,13 +34,47 @@
 </head>
 <body>
   <!--
-    You can customize the "flutter_bootstrap.js" script.
-    This is useful to provide a custom configuration to the Flutter loader
-    or to give the user feedback during the initialization process.
+    Bootstrap written out in full rather than using flutter_bootstrap.js, so
+    the loader can be started without service worker settings.
+
+    Every screen in this app needs the network, so caching it offline gains
+    nothing, while a stale cache repeatedly made deployed fixes look broken
+    during testing. Without serviceWorkerSettings the loader registers no
+    worker, and a deploy takes effect on the next ordinary refresh.
 
     For more details:
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
-  <script src="flutter_bootstrap.js" async></script>
+  <script>
+    // Visitors from earlier builds still have a worker installed, and it will
+    // keep serving the old app until it is removed — so clear it out before
+    // starting, along with the caches it filled.
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations()
+        .then(function (registrations) {
+          for (var i = 0; i < registrations.length; i++) {
+            registrations[i].unregister();
+          }
+        })
+        .catch(function () {});
+    }
+
+    if (window.caches && caches.keys) {
+      caches.keys()
+        .then(function (names) {
+          for (var i = 0; i < names.length; i++) {
+            caches.delete(names[i]);
+          }
+        })
+        .catch(function () {});
+    }
+  </script>
+
+  <script>
+    {{flutter_js}}
+    {{flutter_build_config}}
+
+    _flutter.loader.load();
+  </script>
 </body>
 </html>
