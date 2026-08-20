@@ -105,6 +105,19 @@ The gallery filename fix is the thing to confirm. Existing saves are named
 - [ ] **D4** Save a second image, then re-save the first. → Distinct names; a
       repeat gains a numeric suffix rather than overwriting.
 - [ ] **D5** Press Print. → The native Android print dialog opens.
+
+## D-web. Android browser
+
+Confirmed 19 August; listed so the behaviour is not mistaken for a defect.
+
+- [x] **DW1** Press Print on a small image, then on the 6000×8000 photo. → The
+      browser's print dialog opens for both. No download, no app chooser.
+- [x] **DW2** Save a large photo, choose Photos in the share sheet. → It does
+      not arrive. Google Photos accepts the file, shows progress, and drops it.
+- [x] **DW3** Save the same photo, choose Files. → Saves intact, proving the
+      file handed to the sheet is sound.
+- [ ] **DW4** Save an ordinary-sized photo and choose Photos. → Expected to
+      work; the size at which Android starts dropping them is unmeasured.
 - [ ] **D6** Share an image, and upload a camera photo. → Share sheet appears;
       upload completes.
 
@@ -129,6 +142,22 @@ message — every toggle so far sent none.
 
 ## Known — do not raise these
 
+- **Photo libraries drop large images silently, on both phones.** Confirmed 19
+  August: a 6000×8000 photo shared to Google Photos on Android showed an upload
+  progress bar and never appeared, while the same file saved through Files
+  intact — so what the app hands over is sound and the destination is not. iOS
+  behaves the same way (see below). Neither reports back once the share sheet
+  accepts a file, so this cannot be detected, only anticipated: above 32
+  megapixels the save dialog now recommends Files instead of Photos.
+- **Android web saves through the share sheet, not a download.** A browser
+  download can only write to the downloads folder — no web API reaches the
+  photo library — so Photos and Gallery are reachable only by sharing. Desktop
+  web still downloads, which is what is wanted there.
+- **Android web prints an HTML page, not a PDF.** Chrome has no PDF viewer
+  inside a frame, so the printing package's PDF route downloads a file and
+  offers an app chooser instead of printing, and for a large photo fails with
+  ERR_BLOB_OUT_OF_MEMORY. Printing a page works at any size; confirmed 19
+  August on both a small image and the 6000×8000 photo.
 - **iPhone Photos refuses images above ~32 megapixels.** iOS decodes a JPEG
   only to about that size and importing to Photos requires a decode, so a 48MP
   photo is accepted by the share sheet and silently dropped. Not an app defect
