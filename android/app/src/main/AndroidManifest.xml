@@ -30,6 +30,19 @@
             </intent-filter>
 
             <!--
+                 Returns to the app after Google sign-in. Supabase redirects the
+                 browser to this scheme once Google has authenticated, and
+                 without this filter the browser has nowhere to hand back to.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="com.painterreference.app"
+                      android:host="login-callback" />
+            </intent-filter>
+
+            <!--
                  Allows Painter Reference to appear in Android's Share menu
                  when one image is shared.
             -->

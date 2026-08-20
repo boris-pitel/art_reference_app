@@ -71,5 +71,24 @@
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Painter Reference uses your photo library to select reference and associated images.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Painter Reference saves selected reference and associated images to your photo library.</string></dict>
+	<string>Painter Reference saves selected reference and associated images to your photo library.</string>
+	<!--
+	     Returns to the app after Google sign-in. Supabase redirects the browser
+	     to this scheme once Google has authenticated; without it registered,
+	     the browser has nowhere to hand back to.
+	-->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.painterreference.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.painterreference.app</string>
+			</array>
+		</dict>
+	</array>
+</dict>
 </plist>

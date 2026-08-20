@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/app_user_profile.dart';
+import '../services/google_sign_in_service.dart';
 import '../services/user_activity_logger.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -35,6 +36,28 @@ class _LoginScreenState extends State<LoginScreen> {
     _loginNameController.dispose();
 
     super.dispose();
+  }
+
+  Future<void> _signInWithGoogle() async {
+    setState(() {
+      _isWorking = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await GoogleSignInService.signIn();
+
+      // On web the page has already navigated away by now. Elsewhere,
+      // main.dart's auth listener replaces this screen once the session lands.
+    } on AuthException catch (error) {
+      if (mounted) setState(() => _errorMessage = error.message);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _errorMessage = 'Google sign-in failed: $error');
+      }
+    } finally {
+      if (mounted) setState(() => _isWorking = false);
+    }
   }
 
   Future<void> _submit() async {
@@ -367,6 +390,31 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ? 'Already have an account? Sign in'
                                   : 'Need an account? Create one',
                             ),
+                          ),
+                          const SizedBox(height: 18),
+                          Row(
+                            children: [
+                              const Expanded(child: Divider()),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                ),
+                                child: Text(
+                                  'or',
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
+                              ),
+                              const Expanded(child: Divider()),
+                            ],
+                          ),
+                          const SizedBox(height: 18),
+                          OutlinedButton.icon(
+                            onPressed: _isWorking ? null : _signInWithGoogle,
+                            icon: const Icon(Icons.g_mobiledata, size: 28),
+                            // One label for both modes: with Google there is no
+                            // separate sign-up — a first sign-in creates the
+                            // account, and an existing address signs into it.
+                            label: const Text('Continue with Google'),
                           ),
                         ],
                       ),
