@@ -21,24 +21,52 @@ class GoogleSignInService {
   static const _mobileRedirect = 'com.painterreference.app://login-callback';
   static const _desktopRedirect = 'http://localhost:8765';
 
-  static const _pendingWebSignInKey = 'google_sign_in_pending';
+  static const _startedAtKey = 'google_sign_in_started_at';
 
-  /// Remembers that a web sign-in was started, so the redirect that follows can
-  /// be attributed to Google rather than looking like an ordinary session.
+  /// Superseded by [_startedAtKey], which records when rather than whether.
+  /// Cleared on sight so a marker left by the older build cannot be read as a
+  /// sign-in that never happened.
+  static const _legacyPendingKey = 'google_sign_in_pending';
+
+  /// How long a started sign-in stays claimable.
+  ///
+  /// The round trip through Google takes seconds. Anything older was abandoned
+  /// — the user closed the tab, or went back — and attaching it to whatever
+  /// session happens to exist later would put a login in the log that nobody
+  /// performed, which is worse than no entry at all when something is being
+  /// diagnosed.
+  static const _claimWindow = Duration(minutes: 5);
+
+  /// Records that a web sign-in started, so the redirect that follows can be
+  /// attributed to Google rather than looking like an ordinary session.
   static Future<void> markWebSignInPending() async {
     final preferences = await SharedPreferences.getInstance();
-    await preferences.setBool(_pendingWebSignInKey, true);
+
+    await preferences.setInt(
+      _startedAtKey,
+      DateTime.now().millisecondsSinceEpoch,
+    );
   }
 
-  /// True once, for the sign-in that has just come back from Google. Reading it
-  /// clears it, so a later session restore is not mistaken for a fresh login.
+  /// True once, for a sign-in that started recently enough to be this one.
+  ///
+  /// The marker is cleared whether or not it is claimed, so a stale one cannot
+  /// linger and attach itself to some later session.
   static Future<bool> consumeWebSignInPending() async {
     final preferences = await SharedPreferences.getInstance();
 
-    if (preferences.getBool(_pendingWebSignInKey) != true) return false;
+    await preferences.remove(_legacyPendingKey);
 
-    await preferences.remove(_pendingWebSignInKey);
-    return true;
+    final startedAt = preferences.getInt(_startedAtKey);
+    if (startedAt == null) return false;
+
+    await preferences.remove(_startedAtKey);
+
+    final age = DateTime.now().difference(
+      DateTime.fromMillisecondsSinceEpoch(startedAt),
+    );
+
+    return !age.isNegative && age <= _claimWindow;
   }
 
   static Future<void> signIn() async {

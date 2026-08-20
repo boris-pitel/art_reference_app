@@ -96,6 +96,11 @@ class _ArtReferenceAppState extends State<ArtReferenceApp> {
     _session = _supabase.auth.currentSession;
     _authStateIsReady = true;
 
+    // Checked here as well as on the sign-in transition, because on web there
+    // is no transition to catch: returning from Google reloads the page, and
+    // Supabase has already restored the session before this widget exists.
+    _logGoogleSignInIfPending();
+
     _initializeAuthListener();
 
     if (_sharingIsSupported) {
@@ -141,11 +146,17 @@ class _ArtReferenceAppState extends State<ArtReferenceApp> {
   Future<void> _logGoogleSignInIfPending() async {
     if (!await GoogleSignInService.consumeWebSignInPending()) return;
 
+    // A marker with no session behind it means the sign-in did not complete —
+    // the user cancelled at Google, or it failed. Recording a success there
+    // would be a login in the log that nobody performed.
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+
     UserActivityLogger.instance.record(
       operation: 'login',
       status: 'succeeded',
       targetType: 'account',
-      targetId: _supabase.auth.currentUser?.id,
+      targetId: user.id,
       details: const {'provider': 'google'},
     );
   }
