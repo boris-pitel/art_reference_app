@@ -64,6 +64,28 @@ enum _ImageAction {
   remove,
 }
 
+/// One entry in the image action list.
+///
+/// The same actions appear as a bottom sheet on mobile and a popup menu on
+/// desktop. They were previously spelled out twice, once per presentation, with
+/// nothing keeping them in step — so adding, removing or gating an action meant
+/// remembering to edit both, and missing one would not fail to compile.
+class _ImageActionEntry {
+  const _ImageActionEntry({
+    required this.action,
+    required this.icon,
+    required this.label,
+    this.subtitle,
+    this.isDestructive = false,
+  });
+
+  final _ImageAction action;
+  final IconData icon;
+  final String label;
+  final String? subtitle;
+  final bool isDestructive;
+}
+
 class CategoryScreen extends StatefulWidget {
   const CategoryScreen({super.key, required this.category});
 
@@ -109,6 +131,78 @@ class _CategoryScreenState extends State<CategoryScreen> {
         _sendingImageId != null ||
         _movingImageId != null ||
         _isBulkMoving;
+  }
+
+  /// The actions offered for one image, in order — the single definition
+  /// behind both the mobile sheet and the desktop menu.
+  List<_ImageActionEntry> _imageActions() {
+    return [
+      _ImageActionEntry(
+        action: _ImageAction.edit,
+        icon: Icons.edit_outlined,
+        label: widget.category.isMyArt
+            ? 'Edit parent details'
+            : 'Edit details',
+        subtitle: 'Open titles, notes, and image options',
+      ),
+      const _ImageActionEntry(
+        action: _ImageAction.selectMode,
+        icon: Icons.checklist_outlined,
+        label: 'Select images',
+        subtitle: 'Pick several images to move at once',
+      ),
+      const _ImageActionEntry(
+        action: _ImageAction.share,
+        icon: Icons.ios_share_outlined,
+        label: 'Share',
+      ),
+      _ImageActionEntry(
+        action: _ImageAction.save,
+        icon: Icons.photo_library_outlined,
+        label: ImageSaveService.actionLabel,
+      ),
+      const _ImageActionEntry(
+        action: _ImageAction.print,
+        icon: Icons.print_outlined,
+        label: 'Print',
+      ),
+      const _ImageActionEntry(
+        action: _ImageAction.sendToFriend,
+        icon: Icons.person_add_alt_outlined,
+        label: 'Send to friend',
+      ),
+      const _ImageActionEntry(
+        action: _ImageAction.move,
+        icon: Icons.drive_file_move_outline,
+        label: 'Move...',
+      ),
+      const _ImageActionEntry(
+        action: _ImageAction.remove,
+        icon: Icons.delete_outline,
+        label: 'Remove',
+        isDestructive: true,
+      ),
+    ];
+  }
+
+  /// Renders one entry, shared by both presentations so an action cannot look
+  /// different depending on which menu it appears in.
+  Widget _imageActionTile(
+    BuildContext tileContext,
+    _ImageActionEntry entry, {
+    required bool compact,
+  }) {
+    final errorColor = Theme.of(tileContext).colorScheme.error;
+
+    return ListTile(
+      contentPadding: compact ? EdgeInsets.zero : null,
+      leading: Icon(entry.icon, color: entry.isDestructive ? errorColor : null),
+      title: Text(
+        entry.label,
+        style: entry.isDestructive ? TextStyle(color: errorColor) : null,
+      ),
+      subtitle: entry.subtitle == null ? null : Text(entry.subtitle!),
+    );
   }
 
   /// True when another action is already running, having said so.
@@ -992,98 +1086,15 @@ class _CategoryScreenState extends State<CategoryScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                ListTile(
-                  leading: const Icon(Icons.edit_outlined),
-                  title: Text(
-                    widget.category.isMyArt
-                        ? 'Edit parent details'
-                        : 'Edit details',
-                  ),
-                  subtitle: const Text('Open titles, notes, and image options'),
-                  onTap: () {
-                    Navigator.of(sheetContext).pop(_ImageAction.edit);
-                  },
-                ),
-                if (!widget.category.isMyArt) ...[
-                  ListTile(
-                    leading: const Icon(Icons.checklist_outlined),
-                    title: const Text('Select images'),
-                    subtitle: const Text(
-                      'Pick several images to move at once',
-                    ),
-                    onTap: () {
-                      Navigator.of(sheetContext).pop(_ImageAction.selectMode);
-                    },
-                  ),
-                  const Divider(height: 1),
-                ],
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      'Reference',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                      ),
+                for (final entry in _imageActions())
+                  InkWell(
+                    onTap: () => Navigator.of(sheetContext).pop(entry.action),
+                    child: _imageActionTile(
+                      sheetContext,
+                      entry,
+                      compact: false,
                     ),
                   ),
-                ),
-                ListTile(
-                  leading: const Icon(Icons.ios_share_outlined),
-                  title: const Text('Share'),
-                  onTap: () {
-                    Navigator.of(sheetContext).pop(_ImageAction.share);
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.photo_library_outlined),
-                  title: Text(ImageSaveService.actionLabel),
-                  onTap: () {
-                    Navigator.of(sheetContext).pop(_ImageAction.save);
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.print_outlined),
-                  title: const Text('Print'),
-                  onTap: () {
-                    Navigator.of(sheetContext).pop(_ImageAction.print);
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.person_add_alt_outlined),
-                  title: const Text('Send to friend'),
-                  onTap: () {
-                    Navigator.of(sheetContext).pop(_ImageAction.sendToFriend);
-                  },
-                ),
-                if (!widget.category.isMyArt) ...[
-                  ListTile(
-                    leading: const Icon(Icons.drive_file_move_outline),
-                    title: const Text('Move...'),
-                    onTap: () {
-                      Navigator.of(sheetContext).pop(_ImageAction.move);
-                    },
-                  ),
-                  const Divider(height: 1),
-                  ListTile(
-                    leading: Icon(
-                      Icons.delete_outline,
-                      color: Theme.of(sheetContext).colorScheme.error,
-                    ),
-                    title: Text(
-                      'Remove',
-                      style: TextStyle(
-                        color: Theme.of(sheetContext).colorScheme.error,
-                      ),
-                    ),
-                    onTap: () {
-                      Navigator.of(sheetContext).pop(_ImageAction.remove);
-                    },
-                  ),
-                ],
-                const SizedBox(height: 8),
               ],
             ),
           ),
@@ -1115,86 +1126,11 @@ class _CategoryScreenState extends State<CategoryScreen> {
         Offset.zero & overlay.size,
       ),
       items: [
-        PopupMenuItem(
-          value: _ImageAction.edit,
-          child: ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.edit_outlined),
-            title: Text(
-              widget.category.isMyArt ? 'Edit parent details' : 'Edit details',
-            ),
-            subtitle: const Text('Open titles, notes, and image options'),
-          ),
-        ),
-        if (!widget.category.isMyArt) ...[
-          const PopupMenuItem(
-            value: _ImageAction.selectMode,
-            child: ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.checklist_outlined),
-              title: Text('Select images'),
-              subtitle: Text('Pick several images to move at once'),
-            ),
-          ),
-          const PopupMenuDivider(),
-        ],
-        const PopupMenuItem(
-          value: _ImageAction.share,
-          child: ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.ios_share_outlined),
-            title: Text('Share'),
-          ),
-        ),
-        PopupMenuItem(
-          value: _ImageAction.save,
-          child: ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.photo_library_outlined),
-            title: Text(ImageSaveService.actionLabel),
-          ),
-        ),
-        const PopupMenuItem(
-          value: _ImageAction.print,
-          child: ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.print_outlined),
-            title: Text('Print'),
-          ),
-        ),
-        const PopupMenuItem(
-          value: _ImageAction.sendToFriend,
-          child: ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.person_add_alt_outlined),
-            title: Text('Send to friend'),
-          ),
-        ),
-        if (!widget.category.isMyArt) ...[
-          const PopupMenuItem(
-            value: _ImageAction.move,
-            child: ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.drive_file_move_outline),
-              title: Text('Move...'),
-            ),
-          ),
-          const PopupMenuDivider(),
+        for (final entry in _imageActions())
           PopupMenuItem(
-            value: _ImageAction.remove,
-            child: ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(
-                Icons.delete_outline,
-                color: Theme.of(context).colorScheme.error,
-              ),
-              title: Text(
-                'Remove',
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ),
+            value: entry.action,
+            child: _imageActionTile(context, entry, compact: true),
           ),
-        ],
       ],
     );
 
