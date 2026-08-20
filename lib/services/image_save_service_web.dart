@@ -12,8 +12,11 @@ class ImageSaveService {
   /// Menu/tooltip wording for the save action. iOS goes through the system
   /// share sheet, where the user picks "Save Image"; elsewhere the browser
   /// downloads the file.
+  /// On mobile this opens the share sheet, which is the only route to the photo
+  /// library and also covers sharing — so the label names both, rather than
+  /// promising a save the destination may refuse.
   static String get actionLabel =>
-      GestureShare.isRequired ? 'Save image' : 'Download image';
+      GestureShare.isRequired ? 'Save or share image' : 'Download image';
 
   static Future<ImageSaveResult> save(
     Uint8List bytes, {

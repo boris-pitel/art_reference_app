@@ -151,11 +151,14 @@ class _CategoryScreenState extends State<CategoryScreen> {
         label: 'Select images',
         subtitle: 'Pick several images to move at once',
       ),
-      const _ImageActionEntry(
-        action: _ImageAction.share,
-        icon: Icons.ios_share_outlined,
-        label: 'Share',
-      ),
+      // Omitted where Save opens the same share sheet, which would offer two
+      // items here that do exactly the same thing.
+      if (!ImageDelivery.shareAndSaveAreIdentical)
+        const _ImageActionEntry(
+          action: _ImageAction.share,
+          icon: Icons.ios_share_outlined,
+          label: 'Share',
+        ),
       _ImageActionEntry(
         action: _ImageAction.save,
         icon: Icons.photo_library_outlined,

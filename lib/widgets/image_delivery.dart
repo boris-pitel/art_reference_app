@@ -22,6 +22,15 @@ class ImageDelivery {
   static bool get _androidWebPrinting =>
       kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
+  /// Whether Share and Save are the same action on this platform.
+  ///
+  /// A browser download cannot reach the photo library, so saving on mobile
+  /// web goes through the share sheet — which is exactly what sharing already
+  /// did. Offering both puts two menu items in front of the user that open the
+  /// identical sheet. Elsewhere they genuinely differ: desktop web downloads,
+  /// and the native apps write to Photos or a chosen folder.
+  static bool get shareAndSaveAreIdentical => GestureShare.isRequired;
+
   static Future<ImageSaveResult> save(
     BuildContext context,
     Uint8List bytes, {
@@ -172,9 +181,14 @@ class ImageDelivery {
     final megapixels = dimensions?.megapixels;
 
     if (megapixels != null && megapixels > _photosMegapixelLimit) {
-      return 'This photo is $megapixels megapixels. Choose Files to save it to '
-          'your phone — photos this large often do not appear if you choose '
-          'Photos or Gallery.';
+      // Photos and Files both fail silently at this size, while a cloud app
+      // succeeds — confirmed on both platforms. The difference is that an
+      // upload copies bytes, where saving to the phone decodes the image, and
+      // that decode is what a photo this large exceeds.
+      return 'This photo is $megapixels megapixels — too large for your phone '
+          'to save. Send it to a cloud app such as Drive, or email it to '
+          'yourself. Saving to Photos or Files will appear to work and will '
+          'not.';
     }
 
     return GestureShare.isIosBrowser

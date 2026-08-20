@@ -1830,14 +1830,17 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
           }
         },
         itemBuilder: (context) => [
-          const PopupMenuItem<_MainImageAction>(
-            value: _MainImageAction.share,
-            child: ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.ios_share_outlined),
-              title: Text('Share'),
+          // Omitted where Save opens the same share sheet, which would put two
+          // items in this menu that do exactly the same thing.
+          if (!ImageDelivery.shareAndSaveAreIdentical)
+            const PopupMenuItem<_MainImageAction>(
+              value: _MainImageAction.share,
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.ios_share_outlined),
+                title: Text('Share'),
+              ),
             ),
-          ),
           PopupMenuItem<_MainImageAction>(
             value: _MainImageAction.save,
             child: ListTile(
