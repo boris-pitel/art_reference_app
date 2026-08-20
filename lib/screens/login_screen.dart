@@ -47,8 +47,21 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       await GoogleSignInService.signIn();
 
-      // On web the page has already navigated away by now. Elsewhere,
-      // main.dart's auth listener replaces this screen once the session lands.
+      // On web the page has already navigated away by now, so this records
+      // only the platforms that return here. Web sign-ins are logged by the
+      // auth listener in main.dart instead, which runs after the redirect.
+      if (_supabase.auth.currentUser != null) {
+        UserActivityLogger.instance.record(
+          operation: 'login',
+          status: 'succeeded',
+          targetType: 'account',
+          targetId: _supabase.auth.currentUser?.id,
+          details: const {'provider': 'google'},
+        );
+      }
+
+      // main.dart listens to onAuthStateChange and replaces this screen once
+      // the session lands.
     } on AuthException catch (error) {
       if (mounted) setState(() => _errorMessage = error.message);
     } catch (error) {

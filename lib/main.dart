@@ -22,6 +22,7 @@ import 'screens/shared_image_import_screen.dart';
 import 'services/app_status_service.dart';
 import 'services/category_service.dart';
 import 'services/device_profile.dart';
+import 'services/google_sign_in_service.dart';
 import 'services/impersonation_controller.dart';
 import 'services/library_home_cache.dart';
 import 'services/image_asset_service.dart';
@@ -120,6 +121,7 @@ class _ArtReferenceAppState extends State<ArtReferenceApp> {
 
         if (!wasSignedIn && isNowSignedIn) {
           _openPendingShareWhenReady();
+          _logGoogleSignInIfPending();
         }
 
         if (wasSignedIn && !isNowSignedIn) {
@@ -129,6 +131,22 @@ class _ArtReferenceAppState extends State<ArtReferenceApp> {
       onError: (Object error, StackTrace stackTrace) {
         debugPrint('Supabase authentication stream error: $error');
       },
+    );
+  }
+
+  /// Records a web Google sign-in, which the login screen cannot log itself:
+  /// the page navigates away to Google mid-call and never comes back to that
+  /// code. Without this, Google users appear in the activity log logging out
+  /// without ever having logged in.
+  Future<void> _logGoogleSignInIfPending() async {
+    if (!await GoogleSignInService.consumeWebSignInPending()) return;
+
+    UserActivityLogger.instance.record(
+      operation: 'login',
+      status: 'succeeded',
+      targetType: 'account',
+      targetId: _supabase.auth.currentUser?.id,
+      details: const {'provider': 'google'},
     );
   }
 

@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'desktop_oauth_listener.dart';
@@ -20,11 +21,35 @@ class GoogleSignInService {
   static const _mobileRedirect = 'com.painterreference.app://login-callback';
   static const _desktopRedirect = 'http://localhost:8765';
 
+  static const _pendingWebSignInKey = 'google_sign_in_pending';
+
+  /// Remembers that a web sign-in was started, so the redirect that follows can
+  /// be attributed to Google rather than looking like an ordinary session.
+  static Future<void> markWebSignInPending() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool(_pendingWebSignInKey, true);
+  }
+
+  /// True once, for the sign-in that has just come back from Google. Reading it
+  /// clears it, so a later session restore is not mistaken for a fresh login.
+  static Future<bool> consumeWebSignInPending() async {
+    final preferences = await SharedPreferences.getInstance();
+
+    if (preferences.getBool(_pendingWebSignInKey) != true) return false;
+
+    await preferences.remove(_pendingWebSignInKey);
+    return true;
+  }
+
   static Future<void> signIn() async {
     final auth = Supabase.instance.client.auth;
 
     if (kIsWeb) {
-      // Navigates away and returns to the app; nothing after this runs.
+      // The page navigates away here and nothing after this line runs, so the
+      // sign-in cannot be logged from this side. A marker is left instead, and
+      // the auth listener records the login once the redirect lands.
+      await markWebSignInPending();
+
       await auth.signInWithOAuth(OAuthProvider.google);
       return;
     }
