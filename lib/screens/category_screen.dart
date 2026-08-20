@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -109,6 +111,24 @@ class _CategoryScreenState extends State<CategoryScreen> {
         _isBulkMoving;
   }
 
+  /// True when another action is already running, having said so.
+  ///
+  /// Every action on this screen shares one busy flag, and each used to return
+  /// silently when it was set. A screen that was merely working then looked
+  /// broken: the menu opened, the item looked live, and the tap did nothing.
+  bool _rejectWhileBusy() {
+    if (!_isBusy) return false;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Still finishing the previous action…'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+
+    return true;
+  }
+
   bool get _cameraIsAvailable {
     if (kIsWeb) {
       return true;
@@ -183,9 +203,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
   }
 
   Future<void> _addPhotoReference(ImageSource source) async {
-    if (_isBusy) {
-      return;
-    }
+    if (_rejectWhileBusy()) return;
 
     final sourceDescription = source == ImageSource.camera
         ? 'Opening camera...'
@@ -360,7 +378,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
   }
 
   Future<void> _retryFailedUploads(List<XFile> files) async {
-    if (_isBusy) return;
+    if (_rejectWhileBusy()) return;
     setState(() => _isUploading = true);
     try {
       await _uploadSelectedImages(files);
@@ -376,9 +394,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
   }
 
   Future<void> _openImageDetails(_LoadedImage image) async {
-    if (_isBusy) {
-      return;
-    }
+    if (_rejectWhileBusy()) return;
 
     setState(() {
       _openingImageId = image.id;
@@ -438,8 +454,27 @@ class _CategoryScreenState extends State<CategoryScreen> {
     }
   }
 
+  /// How long a single image download may take before it is abandoned.
+  ///
+  /// Generous, because these are full-resolution originals — a 48MP photo is
+  /// over 10MB and a slow connection can legitimately need a minute. The point
+  /// is to fail eventually rather than quickly.
+  static const _downloadTimeout = Duration(minutes: 2);
+
   Future<_DownloadedImage> _downloadImage(_LoadedImage image) async {
-    final response = await http.get(Uri.parse(image.imageUrl));
+    // Bounded because every action on this screen begins here, and the busy
+    // flag set before it can only be cleared once this returns. Unbounded, a
+    // stalled request left the whole screen silently inert until the user
+    // navigated away and came back.
+    final response = await http
+        .get(Uri.parse(image.imageUrl))
+        .timeout(
+          _downloadTimeout,
+          onTimeout: () => throw TimeoutException(
+            'The image took too long to download.',
+            _downloadTimeout,
+          ),
+        );
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError(
@@ -460,9 +495,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
   }
 
   Future<void> _shareImage(_LoadedImage image) async {
-    if (_isBusy) {
-      return;
-    }
+    if (_rejectWhileBusy()) return;
 
     setState(() {
       _sharingImageId = image.id;
@@ -510,9 +543,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
   }
 
   Future<void> _saveImageToPhotos(_LoadedImage image) async {
-    if (_isBusy) {
-      return;
-    }
+    if (_rejectWhileBusy()) return;
 
     setState(() {
       _savingImageId = image.id;
@@ -560,9 +591,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
   }
 
   Future<void> _printImage(_LoadedImage image) async {
-    if (_isBusy) {
-      return;
-    }
+    if (_rejectWhileBusy()) return;
 
     setState(() {
       _printingImageId = image.id;
@@ -594,9 +623,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
   }
 
   Future<void> _sendToFriend(_LoadedImage image) async {
-    if (_isBusy) {
-      return;
-    }
+    if (_rejectWhileBusy()) return;
 
     setState(() {
       _sendingImageId = image.id;
@@ -633,9 +660,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
   }
 
   Future<void> _moveImageToAnotherCategory(_LoadedImage image) async {
-    if (_isBusy) {
-      return;
-    }
+    if (_rejectWhileBusy()) return;
 
     setState(() {
       _movingImageId = image.id;
@@ -852,9 +877,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
   }
 
   Future<void> _removeFromCategory(_LoadedImage image) async {
-    if (_isBusy) {
-      return;
-    }
+    if (_rejectWhileBusy()) return;
 
     setState(() {
       _removingImageId = image.id;
@@ -935,7 +958,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
   }
 
   void _toggleSelecting() {
-    if (_isBusy) return;
+    if (_rejectWhileBusy()) return;
     setState(() {
       _isSelecting = !_isSelecting;
       if (!_isSelecting) _selectedImageIds.clear();
@@ -958,9 +981,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
   }
 
   Future<void> _showMobileActions(_LoadedImage image) async {
-    if (_isBusy) {
-      return;
-    }
+    if (_rejectWhileBusy()) return;
 
     final action = await showModalBottomSheet<_ImageAction>(
       context: context,
@@ -1079,9 +1100,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
     _LoadedImage image,
     Offset globalPosition,
   ) async {
-    if (_isBusy) {
-      return;
-    }
+    if (_rejectWhileBusy()) return;
 
     final overlay = Overlay.of(context).context.findRenderObject();
 

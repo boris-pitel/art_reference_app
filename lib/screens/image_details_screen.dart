@@ -101,7 +101,7 @@ String _saveResultMessage(ImageSaveResult result) {
 
 enum _AssociatedImageAction { open, editImage, share, save, print, delete }
 
-enum _ImageAction { print, move, sendToFriend }
+enum _MainImageAction { share, save, print, move, sendToFriend }
 
 class _AiAnalysis {
   const _AiAnalysis({
@@ -249,6 +249,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   bool _isAiAnalysisExpanded = false;
   bool _isMovingImage = false;
   bool _isPrintingImage = false;
+  bool _isSharingCurrentImage = false;
+  bool _isSavingCurrentImage = false;
   bool _isSendingToFriend = false;
   bool _isFavorite = false;
   bool _isFinishedArtwork = false;
@@ -1246,6 +1248,55 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     );
   }
 
+  /// Shares the main image.
+  ///
+  /// Previously reachable only from the full-screen viewer, which meant the
+  /// associated sketches on this screen offered Share while the photo they
+  /// belong to did not.
+  Future<void> _shareCurrentImage() async {
+    if (_isSharingCurrentImage || _isSavingCurrentImage) return;
+
+    setState(() => _isSharingCurrentImage = true);
+    try {
+      await _shareExportImage(context, _currentImageUrl, _currentImageId);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to share the reference: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSharingCurrentImage = false);
+    }
+  }
+
+  Future<void> _saveCurrentImage() async {
+    if (_isSharingCurrentImage || _isSavingCurrentImage) return;
+
+    setState(() => _isSavingCurrentImage = true);
+    try {
+      final result = await _saveExportImage(
+        context,
+        _currentImageUrl,
+        _currentImageId,
+      );
+
+      if (mounted && !result.wasCancelled) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_saveResultMessage(result))),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to save the reference: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSavingCurrentImage = false);
+    }
+  }
+
   Future<void> _printCurrentImage() async {
     if (_isMovingImage || _isPrintingImage) return;
 
@@ -1760,31 +1811,51 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     return Material(
       color: Colors.black54,
       borderRadius: BorderRadius.circular(24),
-      child: PopupMenuButton<_ImageAction>(
+      child: PopupMenuButton<_MainImageAction>(
         enabled: !_isMovingImage && !_isPrintingImage && !_isSendingToFriend,
         tooltip: 'Image actions',
         icon: const Icon(Icons.more_vert, color: Colors.white),
         onSelected: (action) async {
           switch (action) {
-            case _ImageAction.print:
+            case _MainImageAction.share:
+              await _shareCurrentImage();
+            case _MainImageAction.save:
+              await _saveCurrentImage();
+            case _MainImageAction.print:
               await _printCurrentImage();
-            case _ImageAction.move:
+            case _MainImageAction.move:
               await _moveImage();
-            case _ImageAction.sendToFriend:
+            case _MainImageAction.sendToFriend:
               await _sendCurrentImageToFriend();
           }
         },
         itemBuilder: (context) => [
-          const PopupMenuItem<_ImageAction>(
-            value: _ImageAction.print,
+          const PopupMenuItem<_MainImageAction>(
+            value: _MainImageAction.share,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.ios_share_outlined),
+              title: Text('Share'),
+            ),
+          ),
+          PopupMenuItem<_MainImageAction>(
+            value: _MainImageAction.save,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.photo_library_outlined),
+              title: Text(ImageSaveService.actionLabel),
+            ),
+          ),
+          const PopupMenuItem<_MainImageAction>(
+            value: _MainImageAction.print,
             child: ListTile(
               contentPadding: EdgeInsets.zero,
               leading: Icon(Icons.print_outlined),
               title: Text('Print'),
             ),
           ),
-          const PopupMenuItem<_ImageAction>(
-            value: _ImageAction.sendToFriend,
+          const PopupMenuItem<_MainImageAction>(
+            value: _MainImageAction.sendToFriend,
             child: ListTile(
               contentPadding: EdgeInsets.zero,
               leading: Icon(Icons.person_add_alt_outlined),
@@ -1794,8 +1865,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
           // A sketch isn't filed in a category, so moving it doesn't apply.
           if (!widget.isAssociatedImage) ...[
             const PopupMenuDivider(),
-            const PopupMenuItem<_ImageAction>(
-              value: _ImageAction.move,
+            const PopupMenuItem<_MainImageAction>(
+              value: _MainImageAction.move,
               child: ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: Icon(Icons.drive_file_move_outline),
