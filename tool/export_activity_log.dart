@@ -29,22 +29,20 @@ Future<void> main(List<String> arguments) async {
     return;
   }
 
-  final url = Platform.environment['SUPABASE_URL']?.trim() ?? '';
-  final key =
-      (Platform.environment['SUPABASE_SECRET_KEY'] ??
-              Platform.environment['SUPABASE_SERVICE_ROLE_KEY'])
-          ?.trim() ??
-      '';
+  final credentials = _loadCredentials();
 
-  if (url.isEmpty || key.isEmpty) {
+  if (credentials == null) {
     stderr.writeln(
-      'Administrative credentials are missing. Set SUPABASE_URL and '
-      'SUPABASE_SECRET_KEY, or run through the launcher that loads '
-      '.env.admin.',
+      'Administrative credentials are missing. Put SUPABASE_URL and '
+      'SUPABASE_SECRET_KEY in .env.admin at the project root, or set them in '
+      'the environment.',
     );
     exitCode = 1;
     return;
   }
+
+  final url = credentials.url;
+  final key = credentials.key;
 
   final query = <String, String>{
     'select': 'created_at,user_email,operation,status,target_type,target_id,'
@@ -113,6 +111,58 @@ Future<void> main(List<String> arguments) async {
   } finally {
     client.close();
   }
+}
+
+class _Credentials {
+  const _Credentials(this.url, this.key);
+
+  final String url;
+  final String key;
+}
+
+/// Credentials from the environment, falling back to .env.admin.
+///
+/// The administration console relies on a launcher script to load that file
+/// first, which is easy to forget when running this directly — so it is read
+/// here too. The file is untracked and holds the secret key; this only reads
+/// it, exactly as the launcher does.
+_Credentials? _loadCredentials() {
+  String? read(String name) {
+    final value = Platform.environment[name]?.trim();
+    return value == null || value.isEmpty ? null : value;
+  }
+
+  var url = read('SUPABASE_URL');
+  var key = read('SUPABASE_SECRET_KEY') ?? read('SUPABASE_SERVICE_ROLE_KEY');
+
+  if (url == null || key == null) {
+    final file = File('.env.admin');
+
+    if (file.existsSync()) {
+      final values = <String, String>{};
+
+      for (final line in file.readAsLinesSync()) {
+        final trimmed = line.trim();
+        if (trimmed.isEmpty || trimmed.startsWith('#')) continue;
+
+        final separator = trimmed.indexOf('=');
+        if (separator <= 0) continue;
+
+        values[trimmed.substring(0, separator).trim()] = trimmed
+            .substring(separator + 1)
+            .trim()
+            .replaceAll(RegExp(r'''^["']|["']$'''), '');
+      }
+
+      url ??= values['SUPABASE_URL'];
+      key ??= values['SUPABASE_SECRET_KEY'] ??
+          values['SUPABASE_SERVICE_ROLE_KEY'];
+    }
+  }
+
+  if (url == null || key == null || url.isEmpty || key.isEmpty) return null;
+
+  return _Credentials(url, key);
 }
 
 /// Columns in a fixed order, so exports stay comparable between runs.
@@ -244,6 +294,6 @@ Examples
   Every image view, to inspect the ones that never succeeded:
     dart run tool/export_activity_log.dart --operation image_full_view --json
 
-Requires SUPABASE_URL and SUPABASE_SECRET_KEY in the environment, as the
-administration console does.
+Reads SUPABASE_URL and SUPABASE_SECRET_KEY from .env.admin at the project
+root, or from the environment if they are already set.
 ''';

@@ -54,3 +54,7 @@ painter-admin.exe
 # Large throwaway images used for resolution testing
 /test_image_*.jpg
 /exported_image_test.jpg
+
+# Activity log exports
+/activity-log-*.csv
+/activity-log-*.json
