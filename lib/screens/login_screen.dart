@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/app_user_profile.dart';
 import '../services/google_sign_in_service.dart';
 import '../services/user_activity_logger.dart';
+import '../widgets/legal_agreement_notice.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -58,6 +59,8 @@ class _LoginScreenState extends State<LoginScreen> {
           targetId: _supabase.auth.currentUser?.id,
           details: const {'provider': 'google'},
         );
+
+        recordLegalAcceptance(method: 'google');
       }
 
       // main.dart listens to onAuthStateChange and replaces this screen once
@@ -146,6 +149,12 @@ class _LoginScreenState extends State<LoginScreen> {
             ? {'login_name': registeredProfile!.loginName}
             : const {},
       );
+
+      // Recorded on every sign-in, not only on creation. The notice says "by
+      // continuing you agree", and it is on screen each time — so each
+      // continue is an agreement. It also covers accounts that existed before
+      // the documents did, which would otherwise never have a record at all.
+      recordLegalAcceptance(method: creatingAccount ? 'email_signup' : 'email');
 
       // main.dart listens to onAuthStateChange.
       // It will automatically replace this screen after authentication.
@@ -429,6 +438,9 @@ class _LoginScreenState extends State<LoginScreen> {
                             // account, and an existing address signs into it.
                             label: const Text('Continue with Google'),
                           ),
+                          // Below both buttons, so it is present on every
+                          // sign-in and covers the Google path as well.
+                          const LegalAgreementNotice(),
                         ],
                       ),
                     ),

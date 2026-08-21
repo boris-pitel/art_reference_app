@@ -15,6 +15,7 @@ import 'screens/help_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/maintenance_screen.dart';
 import 'services/user_activity_logger.dart';
+import 'widgets/legal_agreement_notice.dart';
 import 'screens/keyword_search_screen.dart';
 import 'screens/messages_screen.dart';
 import 'screens/messaging_settings_screen.dart';
@@ -159,6 +160,10 @@ class _ArtReferenceAppState extends State<ArtReferenceApp> {
       targetId: user.id,
       details: const {'provider': 'google'},
     );
+
+    // The web sign-in leaves the page before the login screen can record this,
+    // so the acceptance is recorded here alongside the login it belongs to.
+    recordLegalAcceptance(method: 'google');
   }
 
   Future<void> _initializeSharingListener() async {
