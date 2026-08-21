@@ -32,9 +32,20 @@ Future<void> main(List<String> arguments) async {
   final port =
       int.tryParse(_valueFor(arguments, 'port') ?? '') ?? 8787;
 
-  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
-
   final address = 'http://localhost:$port';
+  final HttpServer server;
+
+  try {
+    server = await HttpServer.bind(InternetAddress.loopbackIPv4, port);
+  } on SocketException {
+    // Almost always a second double-click on the shortcut. Failing with a
+    // stack trace teaches nothing; the instance already running is the one
+    // wanted, so open that instead.
+    stdout.writeln('Already running at $address — opening it.');
+    await _openInBrowser(address);
+    return;
+  }
+
   stdout.writeln('Activity log explorer running at $address');
   stdout.writeln('Press Ctrl+C to stop.');
 
