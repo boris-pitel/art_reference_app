@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../services/gesture_share.dart';
 import '../services/image_dimensions_reader.dart';
+import '../services/ios_photo_save.dart';
 import '../services/image_print_service.dart';
 import '../services/image_save_service.dart';
 import '../services/web_print.dart';
@@ -24,18 +25,35 @@ class ImageDelivery {
 
   /// Whether Share and Save are the same action on this platform.
   ///
-  /// A browser download cannot reach the photo library, so saving on mobile
-  /// web goes through the share sheet — which is exactly what sharing already
-  /// did. Offering both puts two menu items in front of the user that open the
-  /// identical sheet. Elsewhere they genuinely differ: desktop web downloads,
-  /// and the native apps write to Photos or a chosen folder.
-  static bool get shareAndSaveAreIdentical => GestureShare.isRequired;
+  /// True only on Android browsers, where a download cannot reach the gallery
+  /// so saving goes through the share sheet — exactly what sharing already did,
+  /// leaving two menu items that open the identical sheet. iOS saves through
+  /// press-and-hold instead, so the two are distinct there again; desktop web
+  /// downloads; and the native apps write to Photos or a chosen folder.
+  static bool get shareAndSaveAreIdentical =>
+      GestureShare.isRequired && !GestureShare.isIosBrowser;
 
   static Future<ImageSaveResult> save(
     BuildContext context,
     Uint8List bytes, {
     required String fileName,
   }) async {
+    // iOS Photos refuses a file handed over by the share sheet while accepting
+    // the identical bytes shown as an image on a page, so saving there uses
+    // press-and-hold instead — the gesture that demonstrably works.
+    if (GestureShare.isIosBrowser) {
+      await IosPhotoSave.present(
+        bytes,
+        mimeType: fileName.toLowerCase().endsWith('.png')
+            ? 'image/png'
+            : 'image/jpeg',
+      );
+
+      // Whether the user completed the save is not observable, and the
+      // instructions are on screen throughout, so nothing further is claimed.
+      return const ImageSaveResult.downloaded();
+    }
+
     if (!GestureShare.isRequired) {
       return ImageSaveService.save(bytes, fileName: fileName);
     }
