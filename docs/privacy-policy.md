@@ -13,12 +13,14 @@ It is written to be read. If anything here is unclear, ask —
 > whose law governs it, and the region your Supabase project runs in (visible in
 > the Supabase dashboard under Project Settings). The last one matters for the
 > International transfers section below.
-
+1) sofar individual: Boris Pitel
+2) USA
+3) NORTH EAST COAST
 ---
 
 ## Who operates this service
 
-Painter Reference is operated by **[CONFIRM: name and country]**, contactable at
+Painter Reference is operated by Boris Pitel, USA, contactable at
 borispitel1@gmail.com. For data-protection purposes that party is the
 *controller* — the one who decides what is collected and why.
 
@@ -123,7 +125,7 @@ delete your account — at which point images, categories, messages and profile
 are removed.
 
 **Activity records and feedback** are kept while they remain useful for
-diagnosis. **[CONFIRM: propose 12 months, then automatic deletion.]** There is
+diagnosis. **[CONFIRM: 3 month.]** There is
 currently no automatic expiry; adding one is planned.
 
 **Backups** held by our hosting providers may retain deleted content for a short
@@ -137,9 +139,9 @@ Wherever you live, you can ask us to:
 - **correct** anything wrong,
 - **delete** your account and its contents,
 - **give you a copy** of your images and data in a usable form,
-- **stop** a particular use you object to.
+- **stop** a particular use you object to.   What is that?
 
-Email borispitel1@gmail.com and we will act within 30 days. Account deletion
+Email borispitel1@gmail.com and we will act within 3 days. Account deletion
 will also be available directly in the app.
 
 If you are in the UK or EU and think we have handled your data badly, you may
@@ -162,8 +164,8 @@ be created for them.
 
 Access is enforced at the database level rather than only in the app. Files are
 served through short-lived signed links rather than public URLs. Passwords are
-hashed by our authentication provider and are not visible to us. No system is
-perfectly secure, but your library is not casually reachable by anyone else.
+hashed by our authentication provider and are not visible to us. 
+Your library is not casually reachable by anyone else.
 
 If we discover a breach affecting your data, we will tell you and the relevant
 authority as the law requires.
@@ -176,5 +178,4 @@ of which version each account accepted.
 
 ## Contact
 
-**[CONFIRM: operator name]**
 borispitel1@gmail.com

@@ -7,7 +7,7 @@ These terms cover your use of Painter Reference. They are short on purpose.
 > **[CONFIRM BEFORE PUBLISHING]** Two things I cannot decide for you: the legal
 > entity or individual name that operates the service, and the country whose law
 > governs these terms and where disputes would be heard. Both are marked below.
-
+Boris Pitel, USA
 ---
 
 ## 1. The agreement
