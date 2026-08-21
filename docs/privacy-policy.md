@@ -6,14 +6,14 @@ Painter Reference is a reference-image library for artists. This policy explains
 what the service stores, why, who else is involved, and what you can do about it.
 
 It is written to be read. If anything here is unclear, ask —
-[admin@painterreference.com](mailto:admin@painterreference.com).
+[support@painterreference.com](mailto:support@painterreference.com).
 
 ---
 
 ## Who operates this service
 
 Painter Reference is operated by Boris Pitel, USA, contactable at
-admin@painterreference.com. For data-protection purposes that party is the
+support@painterreference.com. For data-protection purposes that party is the
 *controller* — the one who decides what is collected and why.
 
 ## What is stored, and why
@@ -148,7 +148,7 @@ Wherever you live, you can ask us to:
   are the one thing here kept on the basis of legitimate interest, so they are
   the one thing you can ask us to stop.
 
-Email admin@painterreference.com and we will act within 3 days. Account deletion
+Email support@painterreference.com and we will act within 3 days. Account deletion
 will also be available directly in the app.
 
 If you are in the UK or EU and think we have handled your data badly, you may
@@ -194,4 +194,4 @@ of which version each account accepted.
 
 ## Contact
 
-admin@painterreference.com
+support@painterreference.com

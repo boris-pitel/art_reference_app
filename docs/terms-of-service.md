@@ -20,7 +20,7 @@ You need an account to use Painter Reference. You must give a working email
 address, keep your sign-in details to yourself, and be at least 13 years old.
 
 You are responsible for what happens under your account. Tell us promptly at
-admin@painterreference.com if you think someone else has access to it.
+support@painterreference.com if you think someone else has access to it.
 
 ## 3. Your content stays yours
 
@@ -131,4 +131,4 @@ will be heard there.
 ## Contact
 
 **Boris Pitel**
-admin@painterreference.com
+support@painterreference.com
