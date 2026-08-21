@@ -61,3 +61,6 @@ painter-admin.exe
 
 # Compiled log explorer (rebuild with: dart compile exe tool/log_explorer.dart -o log-explorer.exe)
 /log-explorer.exe
+
+# Local storage backups
+/storage-backup/
