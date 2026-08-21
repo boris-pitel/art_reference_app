@@ -58,3 +58,6 @@ painter-admin.exe
 # Activity log exports
 /activity-log-*.csv
 /activity-log-*.json
+
+# Compiled log explorer (rebuild with: dart compile exe tool/log_explorer.dart -o log-explorer.exe)
+/log-explorer.exe

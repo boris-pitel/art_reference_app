@@ -216,20 +216,33 @@ class ImageAssetService {
       );
       return id;
     } catch (error) {
+      final duplicate = isDuplicateRejection(error);
+
       UserActivityLogger.instance.record(
         operation: 'image_upload',
-        status: 'failed',
+        status: duplicate ? 'cancelled' : 'failed',
         targetType: 'image',
         durationMs: stopwatch.elapsedMilliseconds,
         details: {
           'category': category.databaseCode,
           'bytes': imageBytes.lengthInBytes,
+          if (duplicate) 'reason': 'duplicate',
         },
         error: error,
       );
       rethrow;
     }
   }
+
+  /// Whether the upload was refused because the image is already stored.
+  ///
+  /// A duplicate is the check working, not an error — but it was recorded as a
+  /// failure, and at fifteen of forty-five recorded failures it made the
+  /// failure count describe something other than things going wrong. The
+  /// status column allows four values, so this is filed as a cancellation with
+  /// its reason rather than inventing a fifth.
+  static bool isDuplicateRejection(Object error) =>
+      error is FunctionException && error.status == 409;
 
   Future<String> uploadAssociatedImage(
     Uint8List imageBytes,
@@ -262,13 +275,18 @@ class ImageAssetService {
       );
       return id;
     } catch (error) {
+      final duplicate = isDuplicateRejection(error);
+
       UserActivityLogger.instance.record(
         operation: 'associated_image_upload',
-        status: 'failed',
+        status: duplicate ? 'cancelled' : 'failed',
         targetType: 'sketch',
         parentImageId: normalizedParentImageId,
         durationMs: stopwatch.elapsedMilliseconds,
-        details: {'bytes': imageBytes.lengthInBytes},
+        details: {
+          'bytes': imageBytes.lengthInBytes,
+          if (duplicate) 'reason': 'duplicate',
+        },
         error: error,
       );
       rethrow;

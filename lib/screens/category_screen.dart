@@ -428,14 +428,17 @@ class _CategoryScreenState extends State<CategoryScreen> {
       } catch (error) {
         // Previously discarded, which is why a failed upload could not be
         // explained afterwards by the user or the logs.
+        final duplicate = ImageAssetService.isDuplicateRejection(error);
+
         UserActivityLogger.instance.record(
           operation: 'image_upload',
-          status: 'failed',
+          status: duplicate ? 'cancelled' : 'failed',
           targetType: 'image',
           details: {
             'category': widget.category.databaseCode,
             'file_name': files[index].name,
             'stage': 'read_or_upload',
+            if (duplicate) 'reason': 'duplicate',
           },
           error: error,
         );

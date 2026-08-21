@@ -50,7 +50,7 @@ Future<void> main(List<String> arguments) async {
           // than a restart.
           request.response
             ..headers.contentType = ContentType.html
-            ..write(File('tool/log_explorer_page.html').readAsStringSync());
+            ..write(_resource('tool/log_explorer_page.html').readAsStringSync());
         case '/api/query':
           final rows = await _fetchRows(credentials, request.uri
               .queryParameters);
@@ -253,7 +253,7 @@ _Credentials? _loadCredentials() {
   var key = read('SUPABASE_SECRET_KEY') ?? read('SUPABASE_SERVICE_ROLE_KEY');
 
   if (url == null || key == null) {
-    final file = File('.env.admin');
+    final file = _resource('.env.admin');
 
     if (file.existsSync()) {
       final values = <String, String>{};
@@ -280,6 +280,24 @@ _Credentials? _loadCredentials() {
   if (url == null || key == null) return null;
 
   return _Credentials(url.replaceFirst(RegExp(r'/$'), ''), key);
+}
+
+/// Finds a file beside the executable first, then relative to the working
+/// directory.
+///
+/// The compiled exe should work wherever it is launched from, while
+/// `dart run` still resolves from the project root — under `dart run` the
+/// executable is the SDK binary, so nothing sits beside it and the fallback
+/// takes over.
+File _resource(String relativePath) {
+  final beside = File(
+    [
+      File(Platform.resolvedExecutable).parent.path,
+      relativePath,
+    ].join(Platform.pathSeparator),
+  );
+
+  return beside.existsSync() ? beside : File(relativePath);
 }
 
 String? _valueFor(List<String> arguments, String name) {
