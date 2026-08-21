@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'models/reference_category.dart';
 import 'navigation.dart';
+import 'screens/account_screen.dart';
 import 'screens/category_screen.dart';
 import 'screens/feedback_screen.dart';
 import 'screens/help_screen.dart';
@@ -548,7 +549,7 @@ class _AuthenticationLoadingScreen extends StatelessWidget {
   }
 }
 
-enum _AccountMenuAction { help, about, feedback, privacy, signOut }
+enum _AccountMenuAction { help, about, feedback, privacy, account, signOut }
 
 class CollectionsScreen extends StatefulWidget {
   const CollectionsScreen({super.key});
@@ -909,6 +910,11 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
           MaterialPageRoute<void>(
             builder: (_) => const MessagingSettingsScreen(),
           ),
+        );
+        return;
+      case _AccountMenuAction.account:
+        await Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => const AccountScreen()),
         );
         return;
       case _AccountMenuAction.signOut:
@@ -1304,6 +1310,15 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
                     leading: Icon(Icons.privacy_tip_outlined),
                     title: Text('Privacy and blocking'),
                     subtitle: Text('Manage who can find and message you'),
+                  ),
+                ),
+                const PopupMenuItem<_AccountMenuAction>(
+                  value: _AccountMenuAction.account,
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.manage_accounts_outlined),
+                    title: Text('Account'),
+                    subtitle: Text('Documents, and deleting your account'),
                   ),
                 ),
               ];
