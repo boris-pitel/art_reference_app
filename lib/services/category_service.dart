@@ -341,7 +341,19 @@ class CategoryService {
         await _supabase.storage.from(_coverBucket).remove([
           '$authId/${category.id}/cover.jpg',
         ]);
-      } catch (_) {}
+      } catch (error) {
+        // The category is already gone, so this must not fail the delete — but
+        // it used to vanish entirely, leaving an orphaned cover image that
+        // nothing will ever reference or clean up. That is storage being paid
+        // for indefinitely, and it was invisible.
+        UserActivityLogger.instance.record(
+          operation: 'category_cover_cleanup',
+          status: 'failed',
+          targetType: 'category',
+          targetId: category.id.toString(),
+          error: error,
+        );
+      }
     }
     UserActivityLogger.instance.record(
       operation: 'category_delete',

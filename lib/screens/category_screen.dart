@@ -615,12 +615,17 @@ class _CategoryScreenState extends State<CategoryScreen> {
         sharePositionOrigin = topLeft & renderObject.size;
       }
 
-      await ImageShareService.share(
-        downloadedImage.bytes,
-        fileName: 'art_reference_${image.id}.${downloadedImage.extension}',
-        mimeType: downloadedImage.mimeType,
-        subject: 'Painter Reference',
-        sharePositionOrigin: sharePositionOrigin,
+      await UserActivityLogger.instance.trace<void>(
+        operation: 'image_share',
+        targetType: 'image',
+        targetId: image.id,
+        action: () => ImageShareService.share(
+          downloadedImage.bytes,
+          fileName: 'art_reference_${image.id}.${downloadedImage.extension}',
+          mimeType: downloadedImage.mimeType,
+          subject: 'Painter Reference',
+          sharePositionOrigin: sharePositionOrigin,
+        ),
       );
     } catch (error) {
       if (!mounted) {
@@ -647,14 +652,25 @@ class _CategoryScreenState extends State<CategoryScreen> {
     });
 
     try {
-      final downloadedImage = await _downloadImage(image);
+      // Traced because this is where silent failure lives: the photo library
+      // can accept the file and discard it, reporting nothing back. A
+      // 'started' with no matching end is the only trace such a save leaves.
+      final result = await UserActivityLogger.instance.trace(
+        operation: 'image_save',
+        targetType: 'image',
+        targetId: image.id,
+        outcome: (result) => result.wasCancelled ? 'cancelled' : 'succeeded',
+        action: () async {
+          final downloadedImage = await _downloadImage(image);
 
-      if (!mounted) return;
+          if (!mounted) throw StateError('The screen closed before saving.');
 
-      final result = await ImageDelivery.save(
-        context,
-        downloadedImage.bytes,
-        fileName: 'art_reference_${image.id}.${downloadedImage.extension}',
+          return ImageDelivery.save(
+            context,
+            downloadedImage.bytes,
+            fileName: 'art_reference_${image.id}.${downloadedImage.extension}',
+          );
+        },
       );
 
       if (!mounted || result.wasCancelled) {
@@ -695,14 +711,21 @@ class _CategoryScreenState extends State<CategoryScreen> {
     });
 
     try {
-      final downloadedImage = await _downloadImage(image);
+      await UserActivityLogger.instance.trace<void>(
+        operation: 'image_print',
+        targetType: 'image',
+        targetId: image.id,
+        action: () async {
+          final downloadedImage = await _downloadImage(image);
 
-      if (!mounted) return;
+          if (!mounted) throw StateError('The screen closed before printing.');
 
-      await ImageDelivery.printImage(
-        context,
-        downloadedImage.bytes,
-        documentName: 'Painter Reference ${image.id}',
+          await ImageDelivery.printImage(
+            context,
+            downloadedImage.bytes,
+            documentName: 'Painter Reference ${image.id}',
+          );
+        },
       );
     } catch (error) {
       if (!mounted) {
@@ -922,8 +945,20 @@ class _CategoryScreenState extends State<CategoryScreen> {
             toCategory: toCategory,
           );
           movedIds.add(imageId);
-        } catch (_) {
+        } catch (error) {
           failed += 1;
+
+          // The loop continues so one bad image cannot strand the rest, but
+          // the reason used to be dropped here — leaving the user with a
+          // count of failures and no way to find out why any of them failed.
+          UserActivityLogger.instance.record(
+            operation: 'image_move',
+            status: 'failed',
+            targetType: 'image',
+            targetId: imageId,
+            details: {'to_category': toCategory.displayName},
+            error: error,
+          );
         }
       }
 

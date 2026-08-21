@@ -1258,7 +1258,13 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
 
     setState(() => _isSharingCurrentImage = true);
     try {
-      await _shareExportImage(context, _currentImageUrl, _currentImageId);
+      await UserActivityLogger.instance.trace<void>(
+        operation: 'image_share',
+        targetType: 'image',
+        targetId: _currentImageId,
+        action: () =>
+            _shareExportImage(context, _currentImageUrl, _currentImageId),
+      );
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1275,10 +1281,13 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
 
     setState(() => _isSavingCurrentImage = true);
     try {
-      final result = await _saveExportImage(
-        context,
-        _currentImageUrl,
-        _currentImageId,
+      final result = await UserActivityLogger.instance.trace(
+        operation: 'image_save',
+        targetType: 'image',
+        targetId: _currentImageId,
+        outcome: (result) => result.wasCancelled ? 'cancelled' : 'succeeded',
+        action: () =>
+            _saveExportImage(context, _currentImageUrl, _currentImageId),
       );
 
       if (mounted && !result.wasCancelled) {
@@ -1302,12 +1311,21 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
 
     setState(() => _isPrintingImage = true);
     try {
-      final image = await _downloadExportImage(_currentImageUrl);
-      if (!mounted) return;
-      await ImageDelivery.printImage(
-        context,
-        image.bytes,
-        documentName: 'Painter Reference $_currentImageId',
+      await UserActivityLogger.instance.trace<void>(
+        operation: 'image_print',
+        targetType: 'image',
+        targetId: _currentImageId,
+        action: () async {
+          final image = await _downloadExportImage(_currentImageUrl);
+
+          if (!mounted) throw StateError('The screen closed before printing.');
+
+          await ImageDelivery.printImage(
+            context,
+            image.bytes,
+            documentName: 'Painter Reference $_currentImageId',
+          );
+        },
       );
     } catch (error) {
       if (mounted) {
