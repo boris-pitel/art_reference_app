@@ -20,7 +20,7 @@ You need an account to use Painter Reference. You must give a working email
 address, keep your sign-in details to yourself, and be at least 13 years old.
 
 You are responsible for what happens under your account. Tell us promptly at
-borispitel1@gmail.com if you think someone else has access to it.
+admin@painterreference.com if you think someone else has access to it.
 
 ## 3. Your content stays yours
 
@@ -30,8 +30,8 @@ nothing about who owns them.
 You give us only the permission needed to run the service for you: to store your
 images, generate previews, show them back to you on your devices, deliver them
 to people you send them to, and — only when you ask — pass an image to our AI
-provider for analysis. That permission exists solely to operate the service, and
-it ends when you delete the content or your account.
+provider for analysis or editing. That permission exists solely to operate the
+service, and it ends when you delete the content or your account.
 
 We do not use your images to train AI models. We do not sell them, license them,
 publish them, or show them to anyone you have not sent them to. We claim no
@@ -131,4 +131,4 @@ will be heard there.
 ## Contact
 
 **Boris Pitel**
-borispitel1@gmail.com
+admin@painterreference.com
