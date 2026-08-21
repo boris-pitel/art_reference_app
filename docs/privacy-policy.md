@@ -148,8 +148,7 @@ Wherever you live, you can ask us to:
   are the one thing here kept on the basis of legitimate interest, so they are
   the one thing you can ask us to stop.
 
-Email borispitel1@gmail.com. We usually reply within a few days, and will
-act within 30 days at the latest. Account deletion
+Email borispitel1@gmail.com and we will act within 3 days. Account deletion
 will also be available directly in the app.
 
 If you are in the UK or EU and think we have handled your data badly, you may
