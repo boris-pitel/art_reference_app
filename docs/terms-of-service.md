@@ -4,10 +4,6 @@
 
 These terms cover your use of Painter Reference. They are short on purpose.
 
-> **[CONFIRM BEFORE PUBLISHING]** Two things I cannot decide for you: the legal
-> entity or individual name that operates the service, and the country whose law
-> governs these terms and where disputes would be heard. Both are marked below.
-Boris Pitel, USA
 ---
 
 ## 1. The agreement
@@ -16,7 +12,7 @@ By creating an account or continuing to use Painter Reference, you agree to
 these terms and to the [Privacy Policy](privacy-policy.md). If you do not agree,
 do not use the service.
 
-The service is operated by **[CONFIRM: name and country]** ("we", "us").
+The service is operated by **Boris Pitel**, United States ("we", "us").
 
 ## 2. Your account
 
@@ -61,13 +57,27 @@ If you send images or messages to another user, you are responsible for what you
 send. Recipients can block you, and you can block them. Do not use messaging to
 harass anyone.
 
-## 6. AI analysis
+## 6. AI analysis and AI editing
 
-AI analysis is optional and never automatic. When you ask for it, the image is
-sent to our AI provider, currently OpenAI, and the result is returned to you.
+Both AI features are optional and never automatic. Each runs only when you ask
+for it, on the image you ask about.
 
-**Treat AI output as a suggestion, not a fact.** It can be confidently wrong. Do
-not rely on it for anything that matters without checking.
+**AI analysis** sends the image to our AI provider, currently OpenAI, and
+returns a description of it. **Treat that description as a suggestion, not a
+fact** — it can be confidently wrong. Do not rely on it for anything that
+matters without checking.
+
+**AI editing** sends the image and your instruction to the same provider, which
+generates a new image. The generated image is saved into your library as an
+associated image alongside the original, and is yours on the same terms as
+anything else in your library — see clause 3.
+
+Two things to know about generated images. **They may not be what you expect**;
+generation is not precise, and an unsatisfactory result is not a fault in the
+service. And **the law on who owns AI-generated images is unsettled and varies
+by country** — in the United States, works lacking human authorship may not be
+copyrightable. We make no promise that you can claim copyright in an image the
+AI generated, and you should not rely on doing so.
 
 ## 7. Availability
 
@@ -115,10 +125,10 @@ the top identify which one you agreed to, and we keep a record of that.
 
 ## 12. Law
 
-These terms are governed by the law of **[CONFIRM: country/state]**, and disputes
+These terms are governed by the law of the **State of New York, United States**, and disputes
 will be heard there.
 
 ## Contact
 
-**[CONFIRM: operator name]**
+**Boris Pitel**
 borispitel1@gmail.com

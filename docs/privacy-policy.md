@@ -8,14 +8,6 @@ what the service stores, why, who else is involved, and what you can do about it
 It is written to be read. If anything here is unclear, ask —
 [borispitel1@gmail.com](mailto:borispitel1@gmail.com).
 
-> **[CONFIRM BEFORE PUBLISHING]** Three things I cannot fill in for you:
-> the legal entity or individual name that operates the service, the country
-> whose law governs it, and the region your Supabase project runs in (visible in
-> the Supabase dashboard under Project Settings). The last one matters for the
-> International transfers section below.
-1) sofar individual: Boris Pitel
-2) USA
-3) NORTH EAST COAST
 ---
 
 ## Who operates this service
@@ -94,13 +86,26 @@ permitted to use it for their own purposes.
 | **Supabase** | Database, file storage, authentication | Stores your account, images and all other records |
 | **Google Firebase Hosting** | Delivery of the web app | Serves painterreference.com to your browser |
 | **Google** | Optional Sign in with Google | Only if you choose that sign-in method |
-| **OpenAI** | Optional AI image analysis | Only when you ask for it — see below |
+| **OpenAI** | Optional AI image analysis and AI image editing | Only when you ask for it — see below |
 
-**About the AI feature.** When — and only when — you tap to analyse an image,
-that image is sent to OpenAI for analysis and the result is returned to you.
-Nothing is sent automatically, and no image leaves the service for AI analysis
-unless you request it for that image. The provider and model in use are named in
-the app's Help screen, and will be updated there if they change.
+**About the AI features.** There are two, both optional, and neither ever runs
+on its own — each happens only when you ask for it, for the specific image you
+ask about.
+
+**AI analysis** sends the image to OpenAI, which describes what it sees. The
+description comes back to you; nothing is stored at OpenAI on your behalf.
+Currently uses the `gpt-5-mini` model.
+
+**AI editing** sends the image to OpenAI along with your instruction, and
+OpenAI generates a new image from it. **The generated image is saved into your
+library** as an associated image alongside the original, so it is stored by us
+in the same way as anything else you upload. Currently uses the `gpt-image-2`
+model.
+
+In both cases the image leaves our service and is processed by OpenAI under
+their API terms, which at the time of writing do not use API data to train
+their models. The providers and models in use are also named in the app's Help
+screen and will be updated there if they change.
 
 ## Who can see your images
 
@@ -125,8 +130,8 @@ delete your account — at which point images, categories, messages and profile
 are removed.
 
 **Activity records and feedback** are kept while they remain useful for
-diagnosis. **[CONFIRM: 3 month.]** There is
-currently no automatic expiry; adding one is planned.
+diagnosis, and for no longer than **three months**. Automatic deletion after
+that period is being added; until it is in place, records are removed manually.
 
 **Backups** held by our hosting providers may retain deleted content for a short
 period before rotating out.
@@ -139,21 +144,33 @@ Wherever you live, you can ask us to:
 - **correct** anything wrong,
 - **delete** your account and its contents,
 - **give you a copy** of your images and data in a usable form,
-- **stop** a particular use you object to.   What is that?
+- **stop recording your activity** — the diagnostic records described above
+  are the one thing here kept on the basis of legitimate interest, so they are
+  the one thing you can ask us to stop.
 
-Email borispitel1@gmail.com and we will act within 3 days. Account deletion
+Email borispitel1@gmail.com. We usually reply within a few days, and will
+act within 30 days at the latest. Account deletion
 will also be available directly in the app.
 
 If you are in the UK or EU and think we have handled your data badly, you may
 complain to your national data-protection authority. We would rather you told us
 first.
 
-## International transfers
+## If you are in the UK or EU
 
-Our providers may process data outside your country **[CONFIRM: name the
-Supabase region — for example "in the United States"]**. Where data leaves the
-UK or EU, the transfer relies on the standard contractual clauses those
-providers publish.
+Painter Reference is operated from the United States, and your data is stored
+there — our database and files are hosted in the `us-east-1` region on the east
+coast of the United States. Using the service means your images and account
+details are transferred to and held in the US.
+
+That transfer is lawful under the **standard contractual clauses** published by
+our providers, which is the mechanism the UK and EU recognise for sending
+personal data to the United States.
+
+Your rights under UK and EU data-protection law apply in full regardless of
+where we are: everything in the section above is available to you, and you may
+complain to your national data-protection authority if you think we have handled
+your data badly. We would rather you told us first.
 
 ## Children
 
@@ -164,8 +181,8 @@ be created for them.
 
 Access is enforced at the database level rather than only in the app. Files are
 served through short-lived signed links rather than public URLs. Passwords are
-hashed by our authentication provider and are not visible to us. 
-Your library is not casually reachable by anyone else.
+hashed by our authentication provider and are not visible to us. No system is
+perfectly secure, but your library is not casually reachable by anyone else.
 
 If we discover a breach affecting your data, we will tell you and the relevant
 authority as the law requires.
