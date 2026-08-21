@@ -14,7 +14,10 @@ import { v5 as uuidv5 } from 'npm:uuid@11';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, content-type',
+  // The Supabase client sends apikey and x-client-info alongside the token, so
+  // all four must be allowed or the browser's preflight refuses the request
+  // before it is ever sent. Matches every other function here.
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
