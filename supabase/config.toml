@@ -57,4 +57,4 @@ verify_jwt = true
 [functions.list-blocked-users]
 verify_jwt = true
 [functions.delete-my-account]
-verify_jwt = true
+verify_jwt = false
