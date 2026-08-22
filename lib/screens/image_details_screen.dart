@@ -17,6 +17,7 @@ import '../services/image_share_service.dart';
 import '../services/keyword_service.dart';
 import '../services/photo_metadata_service.dart';
 import '../services/user_activity_logger.dart';
+import '../widgets/composition_overlay.dart';
 import '../widgets/image_keywords_section.dart';
 import '../widgets/home_button.dart';
 import '../widgets/image_delivery.dart';
@@ -2861,6 +2862,20 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
   late String _imageUrl;
   late String? _imageId;
 
+  // Guides over the picture while looking at it. Both are view-only here:
+  // nothing on this screen changes the stored image. Baking either one in is
+  // the edit screen's job.
+  CompositionGrid _grid = CompositionGrid.none;
+  bool _monochrome = false;
+
+  // The grid divides the picture, not the black around it, so the overlay needs
+  // the shape of the bitmap actually on screen. Read from the decoded image
+  // rather than the stored width and height, which describe the original and
+  // would be wrong for anything the app resized on the way here.
+  Size? _displayedImageSize;
+  ImageStream? _sizeStream;
+  ImageStreamListener? _sizeListener;
+
   @override
   void initState() {
     super.initState();
@@ -2876,8 +2891,44 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
 
   @override
   void dispose() {
+    _stopResolvingImageSize();
     _transformationController.dispose();
     super.dispose();
+  }
+
+  void _stopResolvingImageSize() {
+    final listener = _sizeListener;
+    if (listener != null) _sizeStream?.removeListener(listener);
+    _sizeListener = null;
+    _sizeStream = null;
+  }
+
+  /// Measures the bitmap on screen, so the grid can be drawn over it.
+  ///
+  /// Resolved on demand rather than at startup: most viewing never turns a grid
+  /// on, and the image is already in the cache by then, so this normally
+  /// completes without a second fetch.
+  void _resolveDisplayedImageSize() {
+    if (_displayedImageSize != null || _sizeListener != null) return;
+
+    final stream = NetworkImage(_imageUrl).resolve(const ImageConfiguration());
+    final listener = ImageStreamListener(
+      (info, _) {
+        final size = Size(
+          info.image.width.toDouble(),
+          info.image.height.toDouble(),
+        );
+        _stopResolvingImageSize();
+        if (mounted) setState(() => _displayedImageSize = size);
+      },
+      // A failure here costs the grid and nothing else; the image itself
+      // reports its own load errors.
+      onError: (_, _) => _stopResolvingImageSize(),
+    );
+
+    _sizeStream = stream;
+    _sizeListener = listener;
+    stream.addListener(listener);
   }
 
   void _handleDoubleTapDown(TapDownDetails details) {
@@ -3326,6 +3377,40 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
                 ),
               ],
               IconButton(
+                onPressed: () {
+                  setState(() => _monochrome = !_monochrome);
+                },
+                icon: Icon(
+                  _monochrome ? Icons.contrast : Icons.contrast_outlined,
+                ),
+                color: _monochrome ? Colors.amberAccent : null,
+                tooltip: _monochrome
+                    ? 'Show colour'
+                    : 'Monochrome (see values)',
+              ),
+              PopupMenuButton<CompositionGrid>(
+                icon: Icon(
+                  _grid == CompositionGrid.none
+                      ? Icons.grid_off_outlined
+                      : Icons.grid_on,
+                ),
+                iconColor: _grid == CompositionGrid.none
+                    ? null
+                    : Colors.amberAccent,
+                tooltip: 'Composition guides',
+                initialValue: _grid,
+                onSelected: (selection) {
+                  setState(() => _grid = selection);
+                  if (selection != CompositionGrid.none) {
+                    _resolveDisplayedImageSize();
+                  }
+                },
+                itemBuilder: (context) => [
+                  for (final option in CompositionGrid.values)
+                    PopupMenuItem(value: option, child: Text(option.label)),
+                ],
+              ),
+              IconButton(
                 onPressed: _resetZoom,
                 icon: const Icon(Icons.fit_screen_outlined),
                 tooltip: 'Reset zoom',
@@ -3402,7 +3487,11 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
                           boundaryMargin: const EdgeInsets.all(120),
                           clipBehavior: Clip.none,
                           child: SizedBox.expand(
-                            child: Center(
+                            child: Stack(
+                              children: [
+                                _MaybeMonochrome(
+                                  enabled: _monochrome,
+                                  child: Center(
                               child: Hero(
                                 tag: widget.heroTag,
                                 child: Image.network(
@@ -3479,6 +3568,28 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
                                 ),
                               ),
                             ),
+                                ),
+                                if (_grid != CompositionGrid.none &&
+                                    _displayedImageSize != null)
+                                  Positioned.fill(
+                                    child: IgnorePointer(
+                                      child: LayoutBuilder(
+                                        builder: (context, constraints) {
+                                          return CustomPaint(
+                                            painter: CompositionGridPainter(
+                                              grid: _grid,
+                                              area: containedImageRect(
+                                                constraints.biggest,
+                                                _displayedImageSize!,
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -3495,6 +3606,20 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     OutlinedButton.icon(
+                                      // This screen is black and the button
+                                      // sits over the picture itself, so it
+                                      // cannot take its colours from the light
+                                      // theme: it was drawing dark on dark and
+                                      // all but disappearing. The scrim keeps
+                                      // it readable over a bright image too.
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: Colors.white,
+                                        backgroundColor: Colors.black54,
+                                        disabledForegroundColor: Colors.white38,
+                                        side: const BorderSide(
+                                          color: Colors.white70,
+                                        ),
+                                      ),
                                       onPressed: _isLoadingEditor
                                           ? null
                                           : _startEditing,
@@ -3534,5 +3659,22 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
               ),
       ),
     );
+  }
+}
+
+/// Desaturates its child only while the value view is on.
+///
+/// A conditional wrapper rather than an always-present filter with a no-op
+/// mode, so looking at a reference normally costs no extra compositing layer.
+class _MaybeMonochrome extends StatelessWidget {
+  const _MaybeMonochrome({required this.enabled, required this.child});
+
+  final bool enabled;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!enabled) return child;
+    return ColorFiltered(colorFilter: monochromeFilter, child: child);
   }
 }

@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import '../models/saved_aspect_ratio.dart';
 import '../services/image_adjustment_service.dart';
 import '../services/saved_aspect_ratio_store.dart';
+import '../widgets/composition_overlay.dart';
 import '../widgets/home_button.dart';
 
 typedef ImageAdjustmentProcessor =
@@ -16,6 +17,7 @@ typedef ImageAdjustmentProcessor =
       required Uint8List bytes,
       required double angle,
       required Rect crop,
+      bool monochrome,
     });
 
 class _AspectRatioPreset {
@@ -140,6 +142,9 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
   bool _cropHasBeenAdjusted = false;
   double _straightenAngle = 0;
   int _quarterTurns = 0;
+  // Thirds by default, which is what this screen has always drawn.
+  CompositionGrid _grid = CompositionGrid.thirds;
+  bool _monochrome = false;
   String _ratio = 'Free';
   List<SavedAspectRatio> _savedRatios = const [];
   bool _isSavingRatio = false;
@@ -570,6 +575,7 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
             crop: _cropHasBeenAdjusted
                 ? _crop
                 : const Rect.fromLTWH(0, 0, 1, 1),
+            monochrome: _monochrome,
           );
       if (!mounted) return;
       final onDone = widget.onDone;
@@ -677,15 +683,25 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
                   ClipRect(
                     child: Transform.rotate(
                       angle: radians,
-                      child: Image.memory(
-                        widget.imageBytes,
-                        fit: BoxFit.contain,
-                        gaplessPlayback: true,
-                        cacheWidth: 1600,
-                      ),
+                      child: _monochrome
+                          ? ColorFiltered(
+                              colorFilter: monochromeFilter,
+                              child: Image.memory(
+                                widget.imageBytes,
+                                fit: BoxFit.contain,
+                                gaplessPlayback: true,
+                                cacheWidth: 1600,
+                              ),
+                            )
+                          : Image.memory(
+                              widget.imageBytes,
+                              fit: BoxFit.contain,
+                              gaplessPlayback: true,
+                              cacheWidth: 1600,
+                            ),
                     ),
                   ),
-                  CustomPaint(painter: _CropOverlayPainter(_crop)),
+                  CustomPaint(painter: _CropOverlayPainter(_crop, _grid)),
                   Positioned.fill(
                     child: MouseRegion(
                       cursor: _cropCursor,
@@ -756,6 +772,46 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
                     'Auto straighten',
                     _isDetecting ? null : _autoStraighten,
                   ),
+                ),
+                Expanded(
+                  child: _toolButton(
+                    Icons.contrast,
+                    'Monochrome',
+                    () {
+                      setState(() => _monochrome = !_monochrome);
+                      // Unlike the grid, this one changes the pixels that get
+                      // saved, so it counts as an edit.
+                      _markChanged();
+                    },
+                    selected: _monochrome,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(Icons.grid_on, size: 18),
+                const SizedBox(width: 8),
+                const Text('Guides'),
+                const Spacer(),
+                // A guide only: never applied to the saved image, so changing
+                // it deliberately does not mark the edit as changed.
+                SegmentedButton<CompositionGrid>(
+                  showSelectedIcon: false,
+                  style: const ButtonStyle(
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  segments: [
+                    for (final option in CompositionGrid.values)
+                      ButtonSegment(
+                        value: option,
+                        label: Text(option.label),
+                      ),
+                  ],
+                  selected: {_grid},
+                  onSelectionChanged: (selection) =>
+                      setState(() => _grid = selection.first),
                 ),
               ],
             ),
@@ -884,9 +940,21 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
     );
   }
 
-  Widget _toolButton(IconData icon, String label, VoidCallback? onPressed) {
+  Widget _toolButton(
+    IconData icon,
+    String label,
+    VoidCallback? onPressed, {
+    bool selected = false,
+  }) {
+    final theme = Theme.of(context);
     return TextButton(
       onPressed: onPressed,
+      style: selected
+          ? TextButton.styleFrom(
+              foregroundColor: theme.colorScheme.onSecondaryContainer,
+              backgroundColor: theme.colorScheme.secondaryContainer,
+            )
+          : null,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -918,8 +986,9 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
 }
 
 class _CropOverlayPainter extends CustomPainter {
-  const _CropOverlayPainter(this.crop);
+  const _CropOverlayPainter(this.crop, this.grid);
   final Rect crop;
+  final CompositionGrid grid;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -958,18 +1027,12 @@ class _CropOverlayPainter extends CustomPainter {
       canvas.drawCircle(point, 15, handleFill);
       canvas.drawCircle(point, 15, handleStroke);
     }
-    final grid = Paint()
-      ..color = Colors.white.withValues(alpha: 0.55)
-      ..strokeWidth = 1;
-    for (var i = 1; i < 3; i++) {
-      final x = rect.left + rect.width * i / 3;
-      final y = rect.top + rect.height * i / 3;
-      canvas.drawLine(Offset(x, rect.top), Offset(x, rect.bottom), grid);
-      canvas.drawLine(Offset(rect.left, y), Offset(rect.right, y), grid);
-    }
+    // Inside the crop, not over the whole image: the crop is the picture the
+    // artist is going to end up with, so a third has to be a third of that.
+    CompositionGridPainter(grid: grid, area: rect).paint(canvas, size);
   }
 
   @override
   bool shouldRepaint(_CropOverlayPainter oldDelegate) =>
-      oldDelegate.crop != crop;
+      oldDelegate.crop != crop || oldDelegate.grid != grid;
 }

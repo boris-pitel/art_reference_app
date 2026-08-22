@@ -1,8 +1,30 @@
 import 'dart:math' as math;
-import 'dart:ui' show Rect;
+import 'dart:ui' show ColorFilter, Rect;
 
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
+
+/// Rec. 709 luminance weights.
+///
+/// Deliberately not an average of the three channels. Averaging renders a
+/// saturated red and a mid green as the same grey, which is exactly the mistake
+/// an artist switches to monochrome to catch — a values check that lies is
+/// worse than no values check. These weights are what the eye actually does.
+const double luminanceRed = 0.2126;
+const double luminanceGreen = 0.7152;
+const double luminanceBlue = 0.0722;
+
+/// The on-screen preview of [ImageAdjustmentService.apply] with monochrome on.
+///
+/// Shares its weights with the baked conversion below, because a preview drawn
+/// with different constants would quietly disagree with the file that gets
+/// saved.
+const ColorFilter monochromeFilter = ColorFilter.matrix(<double>[
+  luminanceRed, luminanceGreen, luminanceBlue, 0, 0, //
+  luminanceRed, luminanceGreen, luminanceBlue, 0, 0, //
+  luminanceRed, luminanceGreen, luminanceBlue, 0, 0, //
+  0, 0, 0, 1, 0, //
+]);
 
 class ImageAdjustmentService {
   const ImageAdjustmentService._();
@@ -15,6 +37,7 @@ class ImageAdjustmentService {
     required Uint8List bytes,
     required double angle,
     required Rect crop,
+    bool monochrome = false,
   }) {
     return compute(_applyAdjustment, (
       bytes: bytes,
@@ -23,6 +46,7 @@ class ImageAdjustmentService {
       top: crop.top,
       width: crop.width,
       height: crop.height,
+      monochrome: monochrome,
     ));
   }
 }
@@ -85,6 +109,7 @@ Uint8List _applyAdjustment(
     double top,
     double width,
     double height,
+    bool monochrome,
   })
   data,
 ) {
@@ -123,5 +148,19 @@ Uint8List _applyAdjustment(
     width: cropWidth,
     height: cropHeight,
   );
+
+  // Written out rather than delegating to img.grayscale, whose weights are its
+  // own business and could drift from the preview filter. The preview and the
+  // saved file have to agree, so both read the same three constants.
+  if (data.monochrome) {
+    for (final pixel in cropped) {
+      final value =
+          pixel.r * luminanceRed +
+          pixel.g * luminanceGreen +
+          pixel.b * luminanceBlue;
+      pixel.setRgb(value, value, value);
+    }
+  }
+
   return Uint8List.fromList(img.encodeJpg(cropped, quality: 95));
 }

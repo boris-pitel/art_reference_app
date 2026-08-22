@@ -95,8 +95,13 @@ void main() {
             controller: controller,
             onProcessingChanged: processingStates.add,
             onDone: (_) {},
-            imageProcessor: ({required bytes, required angle, required crop}) =>
-                imageWork.future,
+            imageProcessor:
+                ({
+                  required bytes,
+                  required angle,
+                  required crop,
+                  monochrome = false,
+                }) => imageWork.future,
           ),
         ),
       ),
