@@ -18,6 +18,7 @@ typedef ImageAdjustmentProcessor =
       required double angle,
       required Rect crop,
       bool monochrome,
+      int gridDivisions,
     });
 
 class _AspectRatioPreset {
@@ -142,8 +143,10 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
   bool _cropHasBeenAdjusted = false;
   double _straightenAngle = 0;
   int _quarterTurns = 0;
-  // Thirds by default, which is what this screen has always drawn.
-  CompositionGrid _grid = CompositionGrid.thirds;
+  // Off by default. This screen used to draw thirds unconditionally, but the
+  // grid is now saved into the image, and defaulting to on would mark up every
+  // ordinary crop with lines nobody asked for.
+  CompositionGrid _grid = CompositionGrid.none;
   bool _monochrome = false;
   String _ratio = 'Free';
   List<SavedAspectRatio> _savedRatios = const [];
@@ -576,6 +579,7 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
                 ? _crop
                 : const Rect.fromLTWH(0, 0, 1, 1),
             monochrome: _monochrome,
+            gridDivisions: _grid.divisions,
           );
       if (!mounted) return;
       final onDone = widget.onDone;
@@ -793,10 +797,11 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
               children: [
                 const Icon(Icons.grid_on, size: 18),
                 const SizedBox(width: 8),
-                const Text('Guides'),
+                // Named for what it does rather than what it looks like: these
+                // lines are drawn into the saved image, not just shown while
+                // cropping.
+                const Text('Grid on image'),
                 const Spacer(),
-                // A guide only: never applied to the saved image, so changing
-                // it deliberately does not mark the edit as changed.
                 SegmentedButton<CompositionGrid>(
                   showSelectedIcon: false,
                   style: const ButtonStyle(
@@ -810,8 +815,12 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
                       ),
                   ],
                   selected: {_grid},
-                  onSelectionChanged: (selection) =>
-                      setState(() => _grid = selection.first),
+                  onSelectionChanged: (selection) {
+                    setState(() => _grid = selection.first);
+                    // Saved into the picture, so this is an edit like any
+                    // other.
+                    _markChanged();
+                  },
                 ),
               ],
             ),

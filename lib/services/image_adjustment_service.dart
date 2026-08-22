@@ -33,11 +33,15 @@ class ImageAdjustmentService {
     return compute(_detectStraightenAngle, bytes);
   }
 
+  /// [gridDivisions] draws division lines into the image itself — the grid
+  /// method for transferring a drawing, where the point is to keep the lines.
+  /// Zero or one leaves the picture unmarked.
   static Future<Uint8List> apply({
     required Uint8List bytes,
     required double angle,
     required Rect crop,
     bool monochrome = false,
+    int gridDivisions = 0,
   }) {
     return compute(_applyAdjustment, (
       bytes: bytes,
@@ -47,6 +51,7 @@ class ImageAdjustmentService {
       width: crop.width,
       height: crop.height,
       monochrome: monochrome,
+      gridDivisions: gridDivisions,
     ));
   }
 }
@@ -110,6 +115,7 @@ Uint8List _applyAdjustment(
     double width,
     double height,
     bool monochrome,
+    int gridDivisions,
   })
   data,
 ) {
@@ -162,5 +168,57 @@ Uint8List _applyAdjustment(
     }
   }
 
+  _drawGrid(cropped, data.gridDivisions);
+
   return Uint8List.fromList(img.encodeJpg(cropped, quality: 95));
+}
+
+/// Draws the division lines into the picture.
+///
+/// Applied after the crop, so the lines divide what the artist actually keeps,
+/// and after any monochrome pass, so the grid is the colour it was meant to be
+/// rather than a desaturated version of it.
+void _drawGrid(img.Image image, int divisions) {
+  if (divisions < 2) return;
+
+  // Scaled to the picture: a one-pixel line is invisible on a 6000px reference
+  // and overwhelming on a 400px one.
+  final shortest = math.min(image.width, image.height);
+  final core = math.max(2, (shortest / 700).round());
+
+  // A light line inside a dark one, so the grid survives a bright sky and a
+  // dark shadow alike — a single colour disappears into one or the other. The
+  // halo is exactly twice the core, leaving a dark edge half the core's width
+  // on each side: enough to separate the line from a pale background without
+  // the dark swallowing the light and leaving a line that vanishes in shadow.
+  final passes = [
+    (color: img.ColorRgb8(0, 0, 0), thickness: core * 2),
+    (color: img.ColorRgb8(255, 255, 255), thickness: core),
+  ];
+
+  for (final pass in passes) {
+    for (var i = 1; i < divisions; i++) {
+      final x = (image.width * i / divisions).round();
+      final y = (image.height * i / divisions).round();
+
+      img.drawLine(
+        image,
+        x1: x,
+        y1: 0,
+        x2: x,
+        y2: image.height - 1,
+        color: pass.color,
+        thickness: pass.thickness,
+      );
+      img.drawLine(
+        image,
+        x1: 0,
+        y1: y,
+        x2: image.width - 1,
+        y2: y,
+        color: pass.color,
+        thickness: pass.thickness,
+      );
+    }
+  }
 }

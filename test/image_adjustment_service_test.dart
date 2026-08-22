@@ -126,6 +126,93 @@ void main() {
     expect(green, greaterThan(red + 100));
   });
 
+  test('leaves the picture unmarked unless a grid is asked for', () async {
+    final source = img.Image(width: 60, height: 60);
+    img.fill(source, color: img.ColorRgb8(120, 120, 120));
+
+    final result = await ImageAdjustmentService.apply(
+      bytes: Uint8List.fromList(img.encodePng(source)),
+      angle: 0,
+      crop: const Rect.fromLTWH(0, 0, 1, 1),
+    );
+    final decoded = img.decodeImage(result)!;
+
+    for (var x = 0; x < decoded.width; x++) {
+      expect(decoded.getPixel(x, 30).r, closeTo(120, 12));
+    }
+  });
+
+  test('draws the grid into the saved image at the division lines', () async {
+    // The grid method for transferring a drawing: the lines are the point, so
+    // they have to survive the save rather than being a viewing aid.
+    final source = img.Image(width: 300, height: 300);
+    img.fill(source, color: img.ColorRgb8(120, 120, 120));
+
+    final result = await ImageAdjustmentService.apply(
+      bytes: Uint8List.fromList(img.encodePng(source)),
+      angle: 0,
+      crop: const Rect.fromLTWH(0, 0, 1, 1),
+      gridDivisions: 3,
+    );
+    final decoded = img.decodeImage(result)!;
+
+    // Thirds of 300 are at 100 and 200, and nowhere else.
+    for (final x in const [100, 200]) {
+      expect(decoded.getPixel(x, 150).r, isNot(closeTo(120, 20)));
+    }
+    for (final y in const [100, 200]) {
+      expect(decoded.getPixel(150, y).r, isNot(closeTo(120, 20)));
+    }
+
+    expect(decoded.getPixel(50, 50).r, closeTo(120, 12));
+    expect(decoded.getPixel(150, 150).r, closeTo(120, 12));
+  });
+
+  test('divides the crop, not the original', () async {
+    // The crop is what gets saved, so a third has to be a third of that. Using
+    // the original would put the lines at the wrong places in the output.
+    final source = img.Image(width: 400, height: 400);
+    img.fill(source, color: img.ColorRgb8(120, 120, 120));
+
+    final result = await ImageAdjustmentService.apply(
+      bytes: Uint8List.fromList(img.encodePng(source)),
+      angle: 0,
+      crop: const Rect.fromLTWH(0.5, 0.5, 0.5, 0.5),
+      gridDivisions: 2,
+    );
+    final decoded = img.decodeImage(result)!;
+
+    expect(decoded.width, 200);
+    expect(decoded.getPixel(100, 100).r, isNot(closeTo(120, 20)));
+    expect(decoded.getPixel(30, 30).r, closeTo(120, 12));
+  });
+
+  test('scales line weight to the size of the picture', () async {
+    Future<int> markedColumns(int size) async {
+      final source = img.Image(width: size, height: size);
+      img.fill(source, color: img.ColorRgb8(120, 120, 120));
+
+      final result = await ImageAdjustmentService.apply(
+        bytes: Uint8List.fromList(img.encodePng(source)),
+        angle: 0,
+        crop: const Rect.fromLTWH(0, 0, 1, 1),
+        gridDivisions: 2,
+      );
+      final decoded = img.decodeImage(result)!;
+      final middle = decoded.height ~/ 4;
+
+      var marked = 0;
+      for (var x = 0; x < decoded.width; x++) {
+        if ((decoded.getPixel(x, middle).r - 120).abs() > 20) marked++;
+      }
+      return marked;
+    }
+
+    // A line thin enough to be right on a small image is invisible on a large
+    // one, so the weight has to grow with the picture.
+    expect(await markedColumns(2400), greaterThan(await markedColumns(400)));
+  });
+
   test('monochrome applies to the cropped region, not the discarded one',
       () async {
     final source = img.Image(width: 20, height: 20);

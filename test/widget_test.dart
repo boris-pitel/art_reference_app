@@ -101,6 +101,7 @@ void main() {
                   required angle,
                   required crop,
                   monochrome = false,
+                  gridDivisions = 0,
                 }) => imageWork.future,
           ),
         ),
