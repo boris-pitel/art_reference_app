@@ -4,6 +4,8 @@ project_id = "bbcgcrbvxmertipdjczu"
 verify_jwt = false
 [functions.list-images]
 verify_jwt = false
+[functions.count-images-by-category]
+verify_jwt = false
 [functions.get-image]
 verify_jwt = false
 [functions.get-thumbnail]

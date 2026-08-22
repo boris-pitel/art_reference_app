@@ -40,6 +40,24 @@ class ImageAssetInfo {
   final String? parentImageUrl;
 }
 
+/// How many images sit in each category.
+///
+/// My Art is separate because it is not a stored category: it is derived from
+/// finished artworks, and counting it means a different query.
+class ImageCategoryCounts {
+  const ImageCategoryCounts({
+    required this.byCategoryCode,
+    required this.finishedArtwork,
+  });
+
+  final Map<String, int> byCategoryCode;
+  final int finishedArtwork;
+
+  int countFor(ReferenceCategory category) => category.isMyArt
+      ? finishedArtwork
+      : byCategoryCode[category.databaseCode] ?? 0;
+}
+
 class UnsupportedImageFormatException implements Exception {
   const UnsupportedImageFormatException();
 
@@ -746,6 +764,52 @@ class ImageAssetService {
       targetType: 'sketch',
       targetId: normalizedChildImageId,
       parentImageId: normalizedParentImageId,
+    );
+  }
+
+  /// How many images each category holds, in a single request.
+  ///
+  /// The home screen needs numbers, not pictures. Getting them by listing every
+  /// category in full meant one request per category, each signing two storage
+  /// URLs per image and returning the lot so the caller could take its length —
+  /// which made refreshing take minutes on a library of any size.
+  ///
+  /// Keyed by database code, with My Art under [ImageCategoryCounts.myArt]
+  /// because it is derived rather than a stored category.
+  Future<ImageCategoryCounts> countImagesByCategory() async {
+    final response = await _invokeListWithRetry(
+      () => _supabase.functions.invoke(
+        'count-images-by-category',
+        method: HttpMethod.get,
+        headers: {'x-user-id': _userId},
+      ),
+    );
+
+    final data = response.data;
+
+    if (data is! Map) {
+      throw StateError(
+        'count-images-by-category returned an unexpected response: $data',
+      );
+    }
+
+    final raw = data['counts'];
+    final counts = <String, int>{};
+
+    if (raw is Map) {
+      raw.forEach((key, value) {
+        final count = value is int ? value : int.tryParse('$value');
+        if (count != null) counts['$key'] = count;
+      });
+    }
+
+    final artwork = data['finished_artwork_count'];
+
+    return ImageCategoryCounts(
+      byCategoryCode: counts,
+      finishedArtwork: artwork is int
+          ? artwork
+          : int.tryParse('$artwork') ?? 0,
     );
   }
 

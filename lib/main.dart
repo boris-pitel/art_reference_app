@@ -695,22 +695,40 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       final categories = await _loadOrderedCategoriesWithRetry();
       profiler.checkpoint('Category records loaded');
 
-      final countEntries = await Future.wait(
-        categories.map((category) async {
-          try {
-            final images = await _imageAssetService.listImages(category);
-            return MapEntry<String, int>(category.databaseCode, images.length);
-          } catch (error) {
-            debugPrint(
-              'Unable to load the ${category.displayName} count: $error',
-            );
-            return MapEntry<String, int>(
+      // One request for every count. This used to list each category in full
+      // and take the length, which meant a request per category, each signing
+      // two storage URLs per image and sending back the lot — a refresh that
+      // grew with the library until it took minutes.
+      List<MapEntry<String, int>> countEntries;
+
+      try {
+        final counts = await _imageAssetService.countImagesByCategory();
+        countEntries = [
+          for (final category in categories)
+            MapEntry<String, int>(
+              category.databaseCode,
+              counts.countFor(category),
+            ),
+        ];
+      } catch (error) {
+        // Keeping the previous numbers is better than showing zeroes, but it
+        // must leave a trace: counts that quietly stop updating look like a
+        // library that stopped changing.
+        debugPrint('Unable to load category counts: $error');
+        UserActivityLogger.instance.record(
+          operation: 'category_counts',
+          status: 'failed',
+          error: error,
+        );
+        countEntries = [
+          for (final category in categories)
+            MapEntry<String, int>(
               category.databaseCode,
               _imageCountsByCategoryCode[category.databaseCode] ?? 0,
-            );
-          }
-        }),
-      );
+            ),
+        ];
+      }
+
       profiler.checkpoint('Category image counts loaded');
 
       if (!mounted) {
