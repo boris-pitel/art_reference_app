@@ -164,6 +164,12 @@ class R2Client {
 
     final request = await _client.openUrl(method, uri);
 
+    // Set explicitly, or Dart streams the body with chunked transfer encoding
+    // and R2 rejects the request with 411 MissingContentLength. Node's fetch
+    // sets this itself, which is why the same code signed and sent correctly
+    // there.
+    request.contentLength = payload.length;
+
     headers.forEach((name, value) {
       if (name != 'host') request.headers.set(name, value);
     });
