@@ -37,7 +37,15 @@ const adminClient = createClient(
   { auth: { persistSession: false } },
 );
 
-const SOURCE_BUCKET = 'reference-images';
+/// Only these may be replicated. A request naming anything else is refused,
+/// so a forged payload cannot make the function read from somewhere it should
+/// not — the caller chooses among known buckets rather than supplying one.
+const REPLICABLE_BUCKETS = new Set([
+  'reference-images',
+  'message-images',
+  'category-covers',
+  'feedback-attachments',
+]);
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -54,16 +62,17 @@ function backupKey(bucket: string, path: string): string {
 
 async function copyToBackup(
   config: NonNullable<ReturnType<typeof r2ConfigFromEnv>>,
+  bucket: string,
   path: string,
 ): Promise<'copied' | 'already-held' | 'missing'> {
   const { data, error } = await adminClient.storage
-    .from(SOURCE_BUCKET)
+    .from(bucket)
     .download(path);
 
   if (error || !data) return 'missing';
 
   const bytes = new Uint8Array(await data.arrayBuffer());
-  const key = backupKey(SOURCE_BUCKET, path);
+  const key = backupKey(bucket, path);
 
   // Skipping an object already held at the same size keeps a retried webhook
   // cheap, and makes this safe to call repeatedly.
@@ -77,14 +86,15 @@ async function copyToBackup(
 
 async function softDelete(
   config: NonNullable<ReturnType<typeof r2ConfigFromEnv>>,
+  bucket: string,
   path: string,
 ): Promise<'retired' | 'not-held'> {
-  const key = backupKey(SOURCE_BUCKET, path);
+  const key = backupKey(bucket, path);
   const existing = await r2Head(config, key);
 
   if (!existing) return 'not-held';
 
-  const body = await adminClient.storage.from(SOURCE_BUCKET).download(path);
+  const body = await adminClient.storage.from(bucket).download(path);
 
   // The source file is usually gone by now, so the copy already in the backup
   // is what gets moved. Read it back rather than the source.
@@ -128,50 +138,72 @@ Deno.serve(async (request) => {
   }
 
   const type = String(payload.type ?? '');
+  const table = String(payload.table ?? '');
+  const bucket = String(payload.bucket ?? '');
   const record = (payload.record ?? {}) as Record<string, unknown>;
   const oldRecord = (payload.old_record ?? {}) as Record<string, unknown>;
 
+  // Which columns of that table hold storage paths. Sent by the trigger, so
+  // one function serves every table that stores files.
+  const columns = Array.isArray(payload.columns)
+    ? (payload.columns as unknown[]).map(String)
+    : ['storage_path'];
+
+  if (!REPLICABLE_BUCKETS.has(bucket)) {
+    return jsonResponse({ error: `Not a replicable bucket: ${bucket}` }, 400);
+  }
+
+  // Category covers are stored as storage://<bucket>/<path> rather than a bare
+  // path, so the prefix comes off before the object can be found.
+  const normalise = (value: string) => {
+    const prefix = `storage://${bucket}/`;
+    return value.startsWith(prefix) ? value.substring(prefix.length) : value;
+  };
+
   const paths = (source: Record<string, unknown>) =>
-    ['storage_path', 'thumbnail_storage_path']
+    columns
       .map((field) => source[field])
       .filter((value): value is string =>
         typeof value === 'string' && value.length > 0
-      );
+      )
+      .map(normalise);
 
   try {
     const results: Record<string, string> = {};
 
     if (type === 'INSERT' || type === 'UPDATE') {
-      // A forged insert can only cause an image that already belongs in the
+      // A forged insert can only cause a file that already belongs in the
       // backup to be copied there, so this path needs no authentication.
       for (const path of paths(record)) {
-        results[path] = await copyToBackup(config, path);
+        results[path] = await copyToBackup(config, bucket, path);
       }
     } else if (type === 'DELETE') {
       // Retiring a backup object is the one destructive thing here, so it is
       // checked against the database rather than trusted: the row must
-      // actually be gone. A forged delete for a live image is refused, which
+      // actually be gone. A forged delete for a live file is refused, which
       // makes a shared secret unnecessary — the check is against the truth
       // rather than against a token that could leak.
-      for (const path of paths(oldRecord)) {
+      for (const original of paths(oldRecord)) {
+        const filter = columns
+          .map((column) => `${column}.eq.${original}`)
+          .join(',');
+
         const { data: stillPresent } = await adminClient
-          .from('image_assets')
-          .select('id')
-          .or(
-            `storage_path.eq.${path},thumbnail_storage_path.eq.${path}`,
-          )
+          .from(table)
+          .select('*', { head: false, count: 'exact' })
+          .or(filter)
           .limit(1)
           .maybeSingle();
 
-        results[path] = stillPresent
+        results[original] = stillPresent
           ? 'refused-row-still-exists'
-          : await softDelete(config, path);
+          : await softDelete(config, bucket, original);
       }
     } else {
       return jsonResponse({ error: `Unsupported event type: ${type}` }, 400);
     }
 
-    return jsonResponse({ ok: true, results });
+    return jsonResponse({ ok: true, bucket, results });
   } catch (error) {
     console.error('replicate-to-backup failed:', error);
 
