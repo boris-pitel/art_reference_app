@@ -142,12 +142,30 @@ Deno.serve(async (request) => {
     const results: Record<string, string> = {};
 
     if (type === 'INSERT' || type === 'UPDATE') {
+      // A forged insert can only cause an image that already belongs in the
+      // backup to be copied there, so this path needs no authentication.
       for (const path of paths(record)) {
         results[path] = await copyToBackup(config, path);
       }
     } else if (type === 'DELETE') {
+      // Retiring a backup object is the one destructive thing here, so it is
+      // checked against the database rather than trusted: the row must
+      // actually be gone. A forged delete for a live image is refused, which
+      // makes a shared secret unnecessary — the check is against the truth
+      // rather than against a token that could leak.
       for (const path of paths(oldRecord)) {
-        results[path] = await softDelete(config, path);
+        const { data: stillPresent } = await adminClient
+          .from('image_assets')
+          .select('id')
+          .or(
+            `storage_path.eq.${path},thumbnail_storage_path.eq.${path}`,
+          )
+          .limit(1)
+          .maybeSingle();
+
+        results[path] = stillPresent
+          ? 'refused-row-still-exists'
+          : await softDelete(config, path);
       }
     } else {
       return jsonResponse({ error: `Unsupported event type: ${type}` }, 400);

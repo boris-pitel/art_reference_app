@@ -58,3 +58,5 @@ verify_jwt = true
 verify_jwt = true
 [functions.delete-my-account]
 verify_jwt = false
+[functions.replicate-to-backup]
+verify_jwt = false
