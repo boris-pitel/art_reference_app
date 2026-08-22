@@ -184,7 +184,7 @@ void _drawGrid(img.Image image, int divisions) {
   // Scaled to the picture: a one-pixel line is invisible on a 6000px reference
   // and overwhelming on a 400px one.
   final shortest = math.min(image.width, image.height);
-  final core = math.max(2, (shortest / 700).round());
+  final core = math.max(3, (shortest / 150).round());
 
   // A light line inside a dark one, so the grid survives a bright sky and a
   // dark shadow alike — a single colour disappears into one or the other. The
