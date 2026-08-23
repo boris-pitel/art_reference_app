@@ -54,7 +54,7 @@ async function listAllUsers() {
   }
   const { data: profiles, error: profilesError } = await adminClient
     .from('user_profiles')
-    .select('auth_user_id,login_name');
+    .select('auth_user_id,login_name,ai_level');
   if (profilesError) throw profilesError;
   const profilesByUserId = new Map(
     (profiles ?? []).map((profile) => [profile.auth_user_id, profile]),
@@ -66,6 +66,10 @@ async function listAllUsers() {
       email: user.email,
       login_name: profilesByUserId.get(user.id)?.login_name ?? null,
       is_admin: user.app_metadata?.is_admin === true,
+      // Null means the account has never been assigned one and falls back to
+      // the service default, which is not the same as being on that level
+      // deliberately — the console shows the difference.
+      ai_level: profilesByUserId.get(user.id)?.ai_level ?? null,
       created_at: user.created_at,
       last_sign_in_at: user.last_sign_in_at,
     }));
@@ -308,6 +312,72 @@ Deno.serve(async (request) => {
       const body = await request.json().catch(() => null);
       const action = body?.action;
 
+      // Reading and editing the levels themselves: global, no subject user.
+      if (action === 'list_ai_levels') {
+        const { data, error } = await adminClient
+          .from('ai_quota_overview')
+          .select('*');
+        if (error) throw error;
+
+        return jsonResponse({ levels: data ?? [] });
+      }
+
+      if (action === 'set_ai_level_limits') {
+        const tier = typeof body?.tier === 'string' ? body.tier.trim() : '';
+        const daily = Number(body?.per_user_daily);
+        const monthly = Number(body?.per_user_monthly);
+
+        if (!tier) return jsonResponse({ error: 'tier is required' }, 400);
+        if (!Number.isInteger(daily) || daily < 0 ||
+            !Number.isInteger(monthly) || monthly < 0) {
+          return jsonResponse(
+            { error: 'Limits must be whole numbers of zero or more' },
+            400,
+          );
+        }
+        // A daily allowance above the monthly one can never be reached, so it
+        // would silently mean something other than what was typed.
+        if (daily > monthly) {
+          return jsonResponse(
+            { error: 'The daily limit cannot exceed the monthly limit' },
+            400,
+          );
+        }
+
+        const { error } = await adminClient
+          .from('ai_quota_tiers')
+          .update({
+            per_user_daily: daily,
+            per_user_monthly: monthly,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('tier', tier);
+        if (error) throw error;
+
+        return jsonResponse({ updated: true, tier });
+      }
+
+      if (action === 'set_global_ai_limit') {
+        const globalDaily = Number(body?.global_daily);
+        if (!Number.isInteger(globalDaily) || globalDaily < 0) {
+          return jsonResponse(
+            { error: 'The service limit must be a whole number' },
+            400,
+          );
+        }
+
+        const { error } = await adminClient
+          .from('ai_quota_settings')
+          .update({
+            global_daily: globalDaily,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', true);
+        if (error) throw error;
+
+        return jsonResponse({ updated: true, global_daily: globalDaily });
+      }
+
       // Handled before the user_id check below: service status is global and
       // has no subject user.
       if (action === 'set_app_status') {
@@ -350,6 +420,45 @@ Deno.serve(async (request) => {
       if (typeof userId !== 'string' || userId.trim().length === 0) {
         return jsonResponse({ error: 'User ID is required' }, 400);
       }
+      if (action === 'set_user_ai_level') {
+        const rawLevel = body?.ai_level;
+        // Null is meaningful and different from a level: it returns the account
+        // to whatever the service default happens to be, now and in future,
+        // rather than pinning it to today's default.
+        const level = typeof rawLevel === 'string' && rawLevel.trim().length > 0
+          ? rawLevel.trim()
+          : null;
+
+        if (level !== null) {
+          const { data: known, error: lookupError } = await adminClient
+            .from('ai_quota_tiers')
+            .select('tier')
+            .eq('tier', level)
+            .maybeSingle();
+          if (lookupError) throw lookupError;
+          if (!known) {
+            return jsonResponse({ error: `No such level: ${level}` }, 400);
+          }
+        }
+
+        const { error } = await adminClient
+          .from('user_profiles')
+          .update({ ai_level: level })
+          .eq('auth_user_id', userId);
+        if (error) throw error;
+
+        await logAdminAction(
+          admin.id,
+          admin.email ?? '',
+          'admin_set_user_ai_level',
+          userId,
+          { ai_level: level },
+          'user',
+        );
+
+        return jsonResponse({ updated: true, ai_level: level });
+      }
+
       if (action === 'impersonate') {
         const result = await impersonateUser(userId, admin.id);
         await logAdminAction(

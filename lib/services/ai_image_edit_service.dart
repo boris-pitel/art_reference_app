@@ -39,15 +39,34 @@ class AiImageEditService {
     if (normalizedPrompt.length > 1000) {
       throw ArgumentError('The AI edit prompt cannot exceed 1,000 characters.');
     }
-    final response = await _supabase.functions.invoke(
-      'ai-edit-image',
-      body: {
-        'imageId': imageId,
-        'prompt': normalizedPrompt,
-        'quality': quality.name,
-      },
-      headers: {'x-user-id': _userId},
-    );
+    final FunctionResponse response;
+
+    try {
+      response = await _supabase.functions.invoke(
+        'ai-edit-image',
+        body: {
+          'imageId': imageId,
+          'prompt': normalizedPrompt,
+          'quality': quality.name,
+        },
+        headers: {'x-user-id': _userId},
+      );
+    } on FunctionException catch (error) {
+      // Anything other than a 2xx throws here rather than returning a body, so
+      // the readable message the function took care to write is inside the
+      // exception. Without this the user is shown
+      // "FunctionException(status: 429, details: {...})" — which is how a
+      // deliberate, plain-English refusal reaches someone looking like a crash.
+      final details = error.details;
+      final message = details is Map ? details['error']?.toString() : null;
+
+      throw StateError(
+        message?.isNotEmpty == true
+            ? message!
+            : 'AI editing failed (${error.status}).',
+      );
+    }
+
     final data = response.data;
     if (data is! Map) {
       throw StateError('AI editing returned an unexpected response.');
