@@ -6,6 +6,8 @@ verify_jwt = false
 verify_jwt = false
 [functions.count-images-by-category]
 verify_jwt = false
+[functions.notify-feedback]
+verify_jwt = false
 [functions.get-image]
 verify_jwt = false
 [functions.get-thumbnail]
