@@ -684,6 +684,14 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
 
   Future<void> _loadCategories({bool showLoading = true}) async {
     final profiler = PerformanceProfiler('CATEGORY RETURN/REFRESH');
+
+    // Timed into the activity log, not just the profiler. The profiler prints
+    // with debugPrint, which reaches nobody in a release build — so how long a
+    // refresh took on a real phone, on a real network, was never recorded, and
+    // "it hangs for minutes" could only ever be reported by hand.
+    final refreshWatch = Stopwatch()..start();
+    final categoryWatch = Stopwatch()..start();
+
     if (showLoading) {
       setState(() {
         _isLoading = true;
@@ -693,6 +701,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
 
     try {
       final categories = await _loadOrderedCategoriesWithRetry();
+      categoryWatch.stop();
       profiler.checkpoint('Category records loaded');
 
       // One request for every count. This used to list each category in full
@@ -700,6 +709,8 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       // two storage URLs per image and sending back the lot — a refresh that
       // grew with the library until it took minutes.
       List<MapEntry<String, int>> countEntries;
+      var countsFailed = false;
+      final countWatch = Stopwatch()..start();
 
       try {
         final counts = await _imageAssetService.countImagesByCategory();
@@ -715,9 +726,11 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         // must leave a trace: counts that quietly stop updating look like a
         // library that stopped changing.
         debugPrint('Unable to load category counts: $error');
+        countsFailed = true;
         UserActivityLogger.instance.record(
           operation: 'category_counts',
           status: 'failed',
+          durationMs: countWatch.elapsedMilliseconds,
           error: error,
         );
         countEntries = [
@@ -729,7 +742,25 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         ];
       }
 
+      countWatch.stop();
       profiler.checkpoint('Category image counts loaded');
+
+      // Recorded before the early return below, so a refresh that finishes
+      // while the screen is being left still reports how long it took. The two
+      // phases are split because they fail differently: one is the category
+      // records, the other the counts, and a total alone cannot say which was
+      // slow.
+      UserActivityLogger.instance.record(
+        operation: 'home_refresh',
+        status: countsFailed ? 'partial' : 'succeeded',
+        durationMs: refreshWatch.elapsedMilliseconds,
+        details: {
+          'categories': categories.length,
+          'category_ms': categoryWatch.elapsedMilliseconds,
+          'counts_ms': countWatch.elapsedMilliseconds,
+          'counts_failed': countsFailed,
+        },
+      );
 
       if (!mounted) {
         return;
@@ -766,6 +797,14 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       profiler.finish();
     } catch (error) {
       profiler.fail(error);
+      UserActivityLogger.instance.record(
+        operation: 'home_refresh',
+        status: 'failed',
+        durationMs: refreshWatch.elapsedMilliseconds,
+        details: {'category_ms': categoryWatch.elapsedMilliseconds},
+        error: error,
+      );
+
       if (!mounted) {
         return;
       }
