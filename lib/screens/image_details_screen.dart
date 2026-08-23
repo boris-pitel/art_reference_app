@@ -3376,26 +3376,25 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
                   tooltip: 'Share image',
                 ),
               ],
+              // One glyph each, state shown by colour. Both colours are stated
+              // outright: a null here means "whatever the theme decides", and
+              // on this black screen the theme decides dark — which is how
+              // these two arrived invisible while every neighbouring icon was
+              // white.
               IconButton(
                 onPressed: () {
                   setState(() => _monochrome = !_monochrome);
                 },
-                icon: Icon(
-                  _monochrome ? Icons.contrast : Icons.contrast_outlined,
-                ),
-                color: _monochrome ? Colors.amberAccent : null,
+                icon: const Icon(Icons.tonality),
+                color: _monochrome ? Colors.amberAccent : Colors.white,
                 tooltip: _monochrome
                     ? 'Show colour'
                     : 'Monochrome (see values)',
               ),
               PopupMenuButton<CompositionGrid>(
-                icon: Icon(
-                  _grid == CompositionGrid.none
-                      ? Icons.grid_off_outlined
-                      : Icons.grid_on,
-                ),
+                icon: const Icon(Icons.grid_on),
                 iconColor: _grid == CompositionGrid.none
-                    ? null
+                    ? Colors.white
                     : Colors.amberAccent,
                 tooltip: 'Composition guides',
                 initialValue: _grid,

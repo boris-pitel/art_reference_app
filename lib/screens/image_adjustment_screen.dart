@@ -779,7 +779,7 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
                 ),
                 Expanded(
                   child: _toolButton(
-                    Icons.contrast,
+                    Icons.tonality,
                     'Monochrome',
                     () {
                       setState(() => _monochrome = !_monochrome);
