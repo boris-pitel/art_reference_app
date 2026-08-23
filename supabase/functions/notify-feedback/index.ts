@@ -8,6 +8,13 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 ///
 /// Reply-to is set to the person who wrote it, so answering them is a reply
 /// rather than a copy-paste into a new message.
+///
+/// Until painterreference.com is verified with Resend, this runs in test mode:
+/// mail may only be sent FROM onboarding@resend.dev and only TO the address the
+/// Resend account was registered with. Sending anywhere else is refused with a
+/// 403, so SUPPORT_EMAIL cannot be pointed at support@painterreference.com yet
+/// even though that address forwards correctly. Verifying the domain lifts
+/// both restrictions and needs no change here beyond the two variables.
 
 const supportAddress = Deno.env.get('SUPPORT_EMAIL') ??
   'support@painterreference.com';
