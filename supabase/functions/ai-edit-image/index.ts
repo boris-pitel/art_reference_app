@@ -172,8 +172,63 @@ Deno.serve(async (request) => {
 
     const requestedSize = computeEditSize(record.width, record.height);
 
-    let openAiResponse = await callOpenAi(requestedSize);
-    let result = await openAiResponse.json();
+    // Taken immediately before the model is called, and not before: a request
+    // that fails validation or names a missing image has cost nothing and must
+    // not cost the user an edit either.
+    const { data: quota, error: quotaError } = await supabase.rpc(
+      "consume_ai_quota",
+      {
+        p_user_id: expectedUserId,
+        p_operation: "ai_image_edit",
+        // The verified email, so the tier and the admin exemption are resolved
+        // in the database rather than asserted by the caller.
+        p_email: email,
+      },
+    );
+    if (quotaError) {
+      // Refusing is the safe direction. A quota system that fails open is not
+      // a quota system, and this is the one call that spends real money.
+      console.error("Quota check failed", quotaError);
+      return jsonResponse(
+        { success: false, error: "AI editing is unavailable right now." },
+        503,
+      );
+    }
+    if (quota?.allowed !== true) {
+      const message = quota?.reason === "service"
+        // Never phrased as the user's fault: this ceiling is the service
+        // protecting itself, and blaming them for it would be a lie.
+        ? "AI editing has reached its limit for today across all users. Please try again tomorrow."
+        : quota?.reason === "monthly"
+        ? `You have used all ${quota?.limit} AI edits for this month.`
+        : `You have used all ${quota?.limit} AI edits for today. They reset tomorrow.`;
+
+      return jsonResponse(
+        { success: false, error: message, quota_reason: quota?.reason },
+        429,
+      );
+    }
+
+    const refundQuota = async () => {
+      await supabase.rpc("refund_ai_quota", {
+        p_user_id: expectedUserId,
+        p_operation: "ai_image_edit",
+      });
+    };
+
+    let openAiResponse: Response;
+    let result: Record<string, unknown>;
+
+    try {
+      openAiResponse = await callOpenAi(requestedSize);
+      result = await openAiResponse.json();
+    } catch (error) {
+      // The request never reached OpenAI, so nothing was charged and the
+      // allowance goes back. Once a response exists the money is spent
+      // whatever it says, and the unit stays consumed.
+      await refundQuota();
+      throw error;
+    }
 
     // Sizes above 2560x1440 are documented as experimental, so a rejected size
     // falls back to letting the model choose rather than failing the edit.
@@ -182,8 +237,13 @@ Deno.serve(async (request) => {
         `OpenAI rejected size ${requestedSize}; retrying with auto.`,
         result?.error?.message,
       );
-      openAiResponse = await callOpenAi("auto");
-      result = await openAiResponse.json();
+      try {
+        openAiResponse = await callOpenAi("auto");
+        result = await openAiResponse.json();
+      } catch (error) {
+        await refundQuota();
+        throw error;
+      }
     }
 
     if (!openAiResponse.ok) {
