@@ -17,6 +17,7 @@ import '../services/image_share_service.dart';
 import '../services/keyword_service.dart';
 import '../services/photo_metadata_service.dart';
 import '../services/user_activity_logger.dart';
+import '../utils/aspect_ratio_label.dart';
 import '../widgets/composition_overlay.dart';
 import '../widgets/image_keywords_section.dart';
 import '../widgets/home_button.dart';
@@ -1945,13 +1946,20 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
           label: 'Thumbnail path',
           value: _thumbnailStoragePath!,
         ),
-      if (_imageWidth != null && _imageHeight != null)
+      if (_imageWidth != null && _imageHeight != null) ...[
         _buildTechnicalDetailRow(
           context,
           icon: Icons.aspect_ratio_outlined,
           label: 'Dimensions',
           value: '$_imageWidth × $_imageHeight px',
         ),
+        _buildTechnicalDetailRow(
+          context,
+          icon: Icons.crop_outlined,
+          label: 'Aspect ratio',
+          value: describeAspectRatio(_imageWidth!, _imageHeight!),
+        ),
+      ],
       if (_originalFilename != null)
         _buildTechnicalDetailRow(
           context,
