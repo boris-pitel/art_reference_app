@@ -354,6 +354,21 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
                   'Stored files',
                   '${user['storage_file_count'] ?? 0}',
                 ),
+                _DetailRow(
+                  'AI edits today',
+                  '${user['ai_edits_today'] ?? 0}',
+                ),
+                _DetailRow(
+                  'AI edits this month',
+                  '${user['ai_edits_this_month'] ?? 0}',
+                ),
+                _DetailRow(
+                  'AI edits ever',
+                  // The failure count matters: a person whose edits keep
+                  // failing looks like a heavy user from the total alone.
+                  '${user['ai_edits_all_time'] ?? 0}'
+                  '${(user['ai_edits_failed'] ?? 0) == 0 ? '' : ' (${user['ai_edits_failed']} failed)'}',
+                ),
               ],
             ),
           ),

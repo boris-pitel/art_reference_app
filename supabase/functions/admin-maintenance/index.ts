@@ -103,6 +103,38 @@ async function listStorageTree(bucket: string, root: string) {
   return paths;
 }
 
+/// What this person has spent on AI.
+///
+/// Today and this month come from the counters, because those are the numbers
+/// the quota actually enforces and anything else would disagree with what the
+/// user is being told. The all-time figures come from the activity log, which
+/// is the only record of the period before quotas existed — reading it for
+/// today as well would double-count.
+function aiUsage(
+  counters: Array<{ period_start: string; used: number }> | null,
+  history: Array<{ status: string }> | null,
+) {
+  const today = new Date().toISOString().slice(0, 10);
+  const monthStart = today.slice(0, 8) + '01';
+
+  let usedToday = 0;
+  let usedThisMonth = 0;
+
+  for (const row of counters ?? []) {
+    if (row.period_start === today) usedToday += row.used;
+    if (row.period_start >= monthStart) usedThisMonth += row.used;
+  }
+
+  const attempts = history ?? [];
+
+  return {
+    ai_edits_today: usedToday,
+    ai_edits_this_month: usedThisMonth,
+    ai_edits_all_time: attempts.length,
+    ai_edits_failed: attempts.filter((row) => row.status === 'failed').length,
+  };
+}
+
 async function userInventory(userId: string, currentAdminId: string) {
   const { data: userResult, error: userError } =
     await adminClient.auth.admin.getUserById(userId);
@@ -112,7 +144,13 @@ async function userInventory(userId: string, currentAdminId: string) {
   const user = userResult.user;
   const email = user.email ?? '';
   const dataUserId = dataUserIdForEmail(email);
-  const [imagesResult, categoriesResult, profileResult] = await Promise.all([
+  const [
+    imagesResult,
+    categoriesResult,
+    profileResult,
+    aiCountersResult,
+    aiHistoryResult,
+  ] = await Promise.all([
     adminClient
       .from('image_assets')
       .select('storage_path,thumbnail_storage_path')
@@ -127,6 +165,19 @@ async function userInventory(userId: string, currentAdminId: string) {
       .select('login_name,ai_level')
       .eq('auth_user_id', user.id)
       .maybeSingle(),
+    // Counters are keyed by the derived id, the activity log by email. Both
+    // are read: the counters are what the quota enforces, the log is the only
+    // record of everything that happened before quotas existed.
+    adminClient
+      .from('ai_usage_counters')
+      .select('period_start,used')
+      .eq('user_id', dataUserId)
+      .eq('operation', 'ai_image_edit'),
+    adminClient
+      .from('user_activity_logs')
+      .select('status')
+      .eq('user_email', email)
+      .eq('operation', 'ai_image_edit_generate'),
   ]);
   if (imagesResult.error) throw imagesResult.error;
   if (categoriesResult.error) throw categoriesResult.error;
@@ -176,9 +227,8 @@ async function userInventory(userId: string, currentAdminId: string) {
       id: user.id,
       email,
       login_name: profileResult.data?.login_name ?? null,
-      // Null means no level was ever assigned, which is not the same as being
-      // placed on the default deliberately — the screen shows the difference.
       ai_level: profileResult.data?.ai_level ?? null,
+      ...aiUsage(aiCountersResult.data, aiHistoryResult.data),
       phone: user.phone,
       is_admin: user.app_metadata?.is_admin === true,
       is_current_user: user.id === currentAdminId,
