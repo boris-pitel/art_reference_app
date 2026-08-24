@@ -124,7 +124,7 @@ async function userInventory(userId: string, currentAdminId: string) {
       .eq('is_builtin', false),
     adminClient
       .from('user_profiles')
-      .select('login_name')
+      .select('login_name,ai_level')
       .eq('auth_user_id', user.id)
       .maybeSingle(),
   ]);
@@ -176,6 +176,9 @@ async function userInventory(userId: string, currentAdminId: string) {
       id: user.id,
       email,
       login_name: profileResult.data?.login_name ?? null,
+      // Null means no level was ever assigned, which is not the same as being
+      // placed on the default deliberately — the screen shows the difference.
+      ai_level: profileResult.data?.ai_level ?? null,
       phone: user.phone,
       is_admin: user.app_metadata?.is_admin === true,
       is_current_user: user.id === currentAdminId,
@@ -421,24 +424,22 @@ Deno.serve(async (request) => {
         return jsonResponse({ error: 'User ID is required' }, 400);
       }
       if (action === 'set_user_ai_level') {
-        const rawLevel = body?.ai_level;
-        // Null is meaningful and different from a level: it returns the account
-        // to whatever the service default happens to be, now and in future,
-        // rather than pinning it to today's default.
-        const level = typeof rawLevel === 'string' && rawLevel.trim().length > 0
-          ? rawLevel.trim()
-          : null;
+        const level = Number(body?.ai_level);
+        if (!Number.isInteger(level)) {
+          return jsonResponse({ error: 'ai_level must be a number' }, 400);
+        }
 
-        if (level !== null) {
-          const { data: known, error: lookupError } = await adminClient
-            .from('ai_quota_tiers')
-            .select('tier')
-            .eq('tier', level)
-            .maybeSingle();
-          if (lookupError) throw lookupError;
-          if (!known) {
-            return jsonResponse({ error: `No such level: ${level}` }, 400);
-          }
+        // Checked against the levels that exist rather than a range, so a
+        // number that looks plausible but names nothing is refused here
+        // instead of becoming a foreign key error.
+        const { data: known, error: lookupError } = await adminClient
+          .from('ai_quota_tiers')
+          .select('level')
+          .eq('level', level)
+          .maybeSingle();
+        if (lookupError) throw lookupError;
+        if (!known) {
+          return jsonResponse({ error: `No such level: ${level}` }, 400);
         }
 
         const { error } = await adminClient

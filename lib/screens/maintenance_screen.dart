@@ -18,6 +18,7 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
   late final AppStatusService _statusService;
   MaintenanceSnapshot? _snapshot;
   AppStatus _appStatus = AppStatus.available;
+  List<Map<String, dynamic>> _aiLevels = const [];
   String? _error;
   bool _loading = true;
 
@@ -146,7 +147,7 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 3,
+      length: 4,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Maintenance'),
@@ -177,6 +178,7 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
               Tab(icon: Icon(Icons.people_outline), text: 'Users'),
               Tab(icon: Icon(Icons.feedback_outlined), text: 'Feedback'),
               Tab(icon: Icon(Icons.monitor_heart_outlined), text: 'Activity'),
+              Tab(icon: Icon(Icons.tune), text: 'Levels'),
             ],
           ),
         ),
@@ -250,6 +252,7 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
                   : Icons.check_circle_outline,
               selectable: true,
             ),
+            _buildLevelsTab(),
           ],
         ),
         if (_loading) const LinearProgressIndicator(),
@@ -310,6 +313,30 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
                     ],
                   ),
                 ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 5),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const SizedBox(
+                        width: 150,
+                        child: Text(
+                          'AI level',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      Expanded(child: Text(_describeLevel(user))),
+                      IconButton(
+                        tooltip: 'Set AI level',
+                        onPressed: () => Navigator.pop(dialogContext, 'level'),
+                        icon: const Icon(Icons.edit_outlined, size: 18),
+                        visualDensity: VisualDensity.compact,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                    ],
+                  ),
+                ),
                 _DetailRow('Auth user ID', user['id']?.toString() ?? '-'),
                 _DetailRow(
                   'Administrator',
@@ -356,7 +383,311 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
     );
     if (action == 'remove' && mounted) await _confirmRemoveUser(user);
     if (action == 'edit' && mounted) await _editLoginName(user);
+    if (action == 'level' && mounted) await _editAiLevel(user);
     if (action == 'impersonate' && mounted) await _impersonateUser(user);
+  }
+
+  /// Says what the person actually gets, not just what is stored.
+  ///
+  /// A null level is the common case and means "whatever the default is", which
+  /// reads as an empty field unless it is spelled out. An administrator with no
+  /// level set is unlimited, and showing a blank there would be actively
+  /// misleading.
+  String _describeLevel(Map<String, dynamic> user) {
+    final stored = user['ai_level'];
+    final label = stored is int ? _levelLabel(stored) : 'Unknown';
+
+    // Stated rather than left implied: an administrator is unlimited whatever
+    // level they hold, so showing only the stored level would be wrong.
+    return user['is_admin'] == true ? '$label — unlimited (admin)' : label;
+  }
+
+  String _levelLabel(int level) {
+    for (final entry in _aiLevels) {
+      if (entry['level'] == level) {
+        return '$level · ${entry['display_name'] ?? ''}';
+      }
+    }
+    return '$level';
+  }
+
+  Future<void> _editAiLevel(Map<String, dynamic> user) async {
+    final userId = user['id']?.toString();
+    if (userId == null || userId.isEmpty) return;
+
+    if (_aiLevels.isEmpty) await _loadAiLevels();
+    if (!mounted) return;
+
+    final current = user['ai_level'];
+    final chosen = await showDialog<int>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        title: Text('AI level for ${user['email'] ?? 'this user'}'),
+        children: [
+          for (final entry in _aiLevels)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(dialogContext, entry['level'] as int),
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  entry['level'] == current
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                ),
+                title: Text(
+                  '${entry['level']} · ${entry['display_name'] ?? ''}',
+                ),
+                subtitle: Text(
+                  entry['tier'] == 'unlimited'
+                      ? 'No limit'
+                      : '${entry['per_user_daily']} a day · '
+                            '${entry['per_user_monthly']} a month',
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+
+    if (chosen == null || !mounted) return;
+
+    _showProgress('Updating level...');
+    try {
+      await _service.setUserAiLevel(userId: userId, level: chosen);
+      if (mounted) Navigator.pop(context);
+      if (mounted) _message('AI level updated.');
+      await _load();
+    } catch (error) {
+      if (mounted) Navigator.pop(context);
+      if (mounted) _message(error.toString(), error: true);
+    }
+  }
+
+  Widget _buildLevelsTab() {
+    if (_aiLevels.isEmpty) {
+      // Loaded on first view rather than with the rest of the screen: most
+      // visits to Maintenance are not about levels.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _aiLevels.isEmpty && !_loading) _loadAiLevels();
+      });
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final globalDaily = _aiLevels.first['global_daily'];
+    final defaultLevel = _aiLevels.first['default_level'];
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Card(
+          child: ListTile(
+            leading: const Icon(Icons.shield_outlined),
+            title: const Text('Limit across all users'),
+            subtitle: Text(
+              '$globalDaily AI edits a day for everyone combined.\n'
+              'This is the ceiling that caps what a bad day can cost, '
+              'whatever any individual level allows.',
+            ),
+            isThreeLine: true,
+            trailing: IconButton(
+              tooltip: 'Change the service limit',
+              icon: const Icon(Icons.edit_outlined),
+              onPressed: () => _editGlobalLimit(
+                globalDaily is int ? globalDaily : 0,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        for (final level in _aiLevels)
+          Card(
+            child: ListTile(
+              leading: Icon(
+                level['tier'] == 'unlimited'
+                    ? Icons.all_inclusive
+                    : Icons.workspace_premium_outlined,
+              ),
+              title: Row(
+                children: [
+                  Text('${level['level']} · ${level['display_name'] ?? ''}'),
+                  if (level['level'] == defaultLevel) ...[
+                    const SizedBox(width: 8),
+                    const Chip(
+                      label: Text('Default'),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ],
+                ],
+              ),
+              subtitle: Text(
+                level['tier'] == 'unlimited'
+                    ? 'No limit · ${level['members']} on this level'
+                    : '${level['per_user_daily']} a day · '
+                          '${level['per_user_monthly']} a month · '
+                          '${level['members']} on this level',
+              ),
+              trailing: level['tier'] == 'unlimited'
+                  // Nothing to edit: unlimited is the absence of a limit, and
+                  // offering numbers here would imply it has some.
+                  ? null
+                  : IconButton(
+                      tooltip: 'Change limits',
+                      icon: const Icon(Icons.edit_outlined),
+                      onPressed: () => _editLevelLimits(level),
+                    ),
+            ),
+          ),
+        const SizedBox(height: 8),
+        Text(
+          'Anyone without a level set follows the default. '
+          'Administrators are never refused.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ],
+    );
+  }
+
+  Future<void> _editLevelLimits(Map<String, dynamic> level) async {
+    final daily = TextEditingController(
+      text: '${level['per_user_daily'] ?? 0}',
+    );
+    final monthly = TextEditingController(
+      text: '${level['per_user_monthly'] ?? 0}',
+    );
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('${level['display_name']} limits'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: daily,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'AI edits a day',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: monthly,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'AI edits a month',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (saved != true || !mounted) return;
+
+    final perDay = int.tryParse(daily.text.trim());
+    final perMonth = int.tryParse(monthly.text.trim());
+    if (perDay == null || perMonth == null || perDay < 0 || perMonth < 0) {
+      _message('Limits must be whole numbers.', error: true);
+      return;
+    }
+    // Checked here as well as on the server, so the reason arrives before the
+    // round trip rather than after it.
+    if (perDay > perMonth) {
+      _message(
+        'The daily limit cannot be higher than the monthly one.',
+        error: true,
+      );
+      return;
+    }
+
+    try {
+      await _service.setAiLevelLimits(
+        tier: level['tier']?.toString() ?? '',
+        perUserDaily: perDay,
+        perUserMonthly: perMonth,
+      );
+      await _loadAiLevels();
+      if (mounted) _message('Limits updated.');
+    } catch (error) {
+      if (mounted) _message(error.toString(), error: true);
+    }
+  }
+
+  Future<void> _editGlobalLimit(int current) async {
+    final controller = TextEditingController(text: '$current');
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Limit across all users'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'The most AI edits the whole service will perform in one day. '
+              'Reaching it stops everyone, so it is the number that decides '
+              'what the worst possible day costs.',
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'AI edits a day, all users',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (saved != true || !mounted) return;
+
+    final value = int.tryParse(controller.text.trim());
+    if (value == null || value < 0) {
+      _message('The service limit must be a whole number.', error: true);
+      return;
+    }
+
+    try {
+      await _service.setGlobalAiLimit(value);
+      await _loadAiLevels();
+      if (mounted) _message('Service limit updated.');
+    } catch (error) {
+      if (mounted) _message(error.toString(), error: true);
+    }
+  }
+
+  Future<void> _loadAiLevels() async {
+    try {
+      final levels = await _service.loadAiLevels();
+      if (mounted) setState(() => _aiLevels = levels);
+    } catch (error) {
+      if (mounted) _message(error.toString(), error: true);
+    }
   }
 
   Future<void> _impersonateUser(Map<String, dynamic> user) async {

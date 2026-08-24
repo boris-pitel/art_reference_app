@@ -61,6 +61,60 @@ class MaintenanceService {
     return Map<String, dynamic>.from(data['user'] as Map);
   }
 
+  /// Every membership level, what it allows, and how many people are on it.
+  Future<List<Map<String, dynamic>>> loadAiLevels() async {
+    final response = await _client.functions.invoke(
+      'admin-maintenance',
+      body: {'action': 'list_ai_levels'},
+    );
+    final data = response.data;
+    if (data is! Map) {
+      throw StateError('The maintenance service returned invalid levels.');
+    }
+    return _rows(data['levels']);
+  }
+
+  /// Moves one person to a level, named by its number: 0 Free, 1 Studio,
+  /// 2 Studio Plus, 9 Unlimited.
+  Future<void> setUserAiLevel({
+    required String userId,
+    required int level,
+  }) async {
+    await _client.functions.invoke(
+      'admin-maintenance',
+      body: {
+        'action': 'set_user_ai_level',
+        'user_id': userId,
+        'ai_level': level,
+      },
+    );
+  }
+
+  Future<void> setAiLevelLimits({
+    required String tier,
+    required int perUserDaily,
+    required int perUserMonthly,
+  }) async {
+    await _client.functions.invoke(
+      'admin-maintenance',
+      body: {
+        'action': 'set_ai_level_limits',
+        'tier': tier,
+        'per_user_daily': perUserDaily,
+        'per_user_monthly': perUserMonthly,
+      },
+    );
+  }
+
+  /// The ceiling across everyone, which is what makes the worst case
+  /// survivable rather than merely unlikely.
+  Future<void> setGlobalAiLimit(int globalDaily) async {
+    await _client.functions.invoke(
+      'admin-maintenance',
+      body: {'action': 'set_global_ai_limit', 'global_daily': globalDaily},
+    );
+  }
+
   /// Turns the app-wide maintenance gate on or off. Admins keep access while
   /// it is on, so this can always be called again to turn it back off.
   Future<void> setAppStatus({
