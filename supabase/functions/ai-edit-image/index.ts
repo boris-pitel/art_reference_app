@@ -195,18 +195,39 @@ Deno.serve(async (request) => {
       );
     }
     if (quota?.allowed !== true) {
+      // The next level up, so the message can name something specific rather
+      // than telling somebody to go and find out what their options are.
+      const { data: upgrade } = quota?.reason === "service"
+        ? { data: null }
+        : await supabase
+          .from("ai_quota_tiers")
+          .select("level,display_name,per_user_daily,per_user_monthly")
+          .gt("level", quota?.level ?? 0)
+          .lt("level", 9)
+          .order("level", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+
       const message = quota?.reason === "service"
         // Never phrased as the user's fault: this ceiling is the service
         // protecting itself, and blaming them for it would be a lie.
-        ? "AI editing has reached its limit for today across all users. Please try again tomorrow."
+        ? "AI editing is unavailable for the rest of today. This is a limit on the service as a whole, not on your account."
         : quota?.reason === "monthly"
-        ? `You have used all ${quota?.limit} AI edits for this month.`
-        : `You have used all ${quota?.limit} AI edits for today. They reset tomorrow.`;
+        ? `You have used all ${quota?.limit} AI edits included this month. They start again on the first of next month.`
+        : `You have used your ${quota?.limit} AI edit${
+          quota?.limit === 1 ? "" : "s"
+        } for today. More become available tomorrow.`;
 
-      return jsonResponse(
-        { success: false, error: message, quota_reason: quota?.reason },
-        429,
-      );
+      return jsonResponse({
+        success: false,
+        error: message,
+        quota_reason: quota?.reason,
+        current_level: quota?.level ?? null,
+        upgrade_level: upgrade?.level ?? null,
+        upgrade_name: upgrade?.display_name ?? null,
+        upgrade_daily: upgrade?.per_user_daily ?? null,
+        upgrade_monthly: upgrade?.per_user_monthly ?? null,
+      }, 429);
     }
 
     const refundQuota = async () => {

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/ai_image_edit_service.dart';
+import '../services/feedback_service.dart';
 import '../services/image_asset_service.dart';
 import '../services/user_activity_logger.dart';
 
@@ -73,6 +74,22 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
         details: {'quality': _quality.name, 'output_bytes': bytes.length},
       );
       if (mounted) setState(() => _previewBytes = bytes);
+    } on AiQuotaExceeded catch (limit) {
+      // Recorded as its own status rather than as a failure: nothing broke,
+      // and counting these as failures would make the reliability figures lie.
+      UserActivityLogger.instance.record(
+        operation: 'ai_image_edit_generate',
+        status: 'refused',
+        targetType: 'image',
+        targetId: widget.sourceImageId,
+        parentImageId: widget.parentImageId,
+        durationMs: stopwatch.elapsedMilliseconds,
+        details: {'quality': _quality.name, 'reason': limit.reason},
+      );
+      if (mounted) {
+        setState(() => _isGenerating = false);
+        await _showLimitReached(limit);
+      }
     } catch (error) {
       UserActivityLogger.instance.record(
         operation: 'ai_image_edit_generate',
@@ -87,6 +104,91 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
       if (mounted) setState(() => _error = error.toString());
     } finally {
       if (mounted) setState(() => _isGenerating = false);
+    }
+  }
+
+  /// Explains that the allowance ran out, and offers the way forward.
+  ///
+  /// A dialog rather than the red error line the other failures use, because
+  /// this is not a failure: nothing went wrong and there is something the
+  /// person can actually do about it.
+  Future<void> _showLimitReached(AiQuotaExceeded limit) async {
+    final wantsUpgrade = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        icon: const Icon(Icons.hourglass_bottom),
+        title: Text(
+          limit.reason == 'service'
+              ? 'AI editing is resting'
+              : 'That is all the AI editing for now',
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(limit.message),
+            if (limit.canUpgrade) ...[
+              const SizedBox(height: 16),
+              Text(
+                '${limit.upgradeName} includes ${limit.upgradeDaily} AI edits '
+                'a day and ${limit.upgradeMonthly} a month.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                // Honest about what the button does. There is no checkout yet,
+                // and a button labelled Buy that quietly sends a message would
+                // be a small lie the first user would catch.
+                'Ask to move up a level and we will get back to you.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Close'),
+          ),
+          if (limit.canUpgrade)
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              icon: const Icon(Icons.upgrade),
+              label: Text('Ask about ${limit.upgradeName}'),
+            ),
+        ],
+      ),
+    );
+
+    if (wantsUpgrade != true || !mounted) return;
+    await _requestUpgrade(limit);
+  }
+
+  Future<void> _requestUpgrade(AiQuotaExceeded limit) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      // Sent through the feedback path, which already emails support and
+      // carries the platform and version with it, rather than inventing a
+      // second channel that nobody watches.
+      await FeedbackService(Supabase.instance.client).submit(
+        type: FeedbackType.other,
+        comment:
+            'Upgrade request: would like to move to ${limit.upgradeName} '
+            '(${limit.upgradeDaily} AI edits a day). '
+            'Reached the ${limit.reason} limit on the current level.',
+        currentScreen: 'AI image editing',
+      );
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Thank you — we have your request and will be in touch.',
+          ),
+        ),
+      );
+    } catch (error) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Could not send the request: $error')),
+      );
     }
   }
 
