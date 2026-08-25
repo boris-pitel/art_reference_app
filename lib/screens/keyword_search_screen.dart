@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/reference_category.dart';
+import '../services/app_image_cache.dart';
 import '../services/image_search_service.dart';
+import '../widgets/cached_image.dart';
 import '../widgets/home_button.dart';
 import 'image_details_screen.dart';
 
@@ -308,14 +310,16 @@ class _KeywordSearchScreenState extends State<KeywordSearchScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Expanded(
-              child: Image.network(
-                displayUrl,
+              child: CachedImage(
+                url: displayUrl,
+                // The same thumbnail the category grid shows, so the two share
+                // one cached copy rather than each keeping their own.
+                cacheKey: result.thumbnailUrl != null
+                    ? AppImageCache.thumbnailKey(result.id)
+                    : AppImageCache.fullKey(result.id),
                 fit: BoxFit.cover,
-                gaplessPlayback: true,
-                loadingBuilder: (context, child, progress) => progress == null
-                    ? child
-                    : const Center(child: CircularProgressIndicator()),
-                errorBuilder: (context, error, stackTrace) => const Center(
+                placeholder: const Center(child: CircularProgressIndicator()),
+                errorWidget: (context, error) => const Center(
                   child: Icon(Icons.broken_image_outlined, size: 42),
                 ),
               ),

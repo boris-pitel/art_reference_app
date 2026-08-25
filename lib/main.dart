@@ -21,6 +21,7 @@ import 'screens/keyword_search_screen.dart';
 import 'screens/messages_screen.dart';
 import 'screens/messaging_settings_screen.dart';
 import 'screens/shared_image_import_screen.dart';
+import 'services/app_image_cache.dart';
 import 'services/app_status_service.dart';
 import 'services/category_service.dart';
 import 'services/device_profile.dart';
@@ -721,6 +722,12 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
               counts.countFor(category),
             ),
         ];
+
+        // Drops cached copies of anything deleted on another device. Not
+        // awaited: housekeeping must not hold up the screen, least of all for
+        // the users furthest from the server. Does nothing when the id list is
+        // absent, so a partial answer can never delete good entries.
+        unawaited(AppImageCache.evictMissing(counts.ownedImageIds));
       } catch (error) {
         // Keeping the previous numbers is better than showing zeroes, but it
         // must leave a trace: counts that quietly stop updating look like a
@@ -918,6 +925,9 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       targetType: 'account',
       targetId: auth.currentUser?.id,
     );
+    // Before signing out rather than after: whoever signs in next must not
+    // find the previous person's photographs still on the device.
+    await AppImageCache.clear();
     try {
       await auth.signOut(scope: SignOutScope.local);
     } on AuthException catch (error) {

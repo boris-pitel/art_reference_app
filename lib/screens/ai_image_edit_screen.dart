@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/ai_image_edit_service.dart';
+import '../services/app_image_cache.dart';
 import '../services/feedback_service.dart';
 import '../services/image_asset_service.dart';
 import '../services/user_activity_logger.dart';
+import '../widgets/cached_image.dart';
 
 class AiImageEditScreen extends StatefulWidget {
   const AiImageEditScreen({
@@ -231,8 +233,9 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(12),
                   child: _previewBytes == null
-                      ? Image.network(
-                          widget.sourceImageUrl,
+                      ? CachedImage(
+                          url: widget.sourceImageUrl,
+                          cacheKey: AppImageCache.fullKey(widget.sourceImageId),
                           fit: BoxFit.contain,
                         )
                       : Image.memory(_previewBytes!, fit: BoxFit.contain),

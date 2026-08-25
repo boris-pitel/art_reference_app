@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../services/app_image_cache.dart';
 import '../services/user_activity_logger.dart';
 import '../widgets/home_button.dart';
 
@@ -204,6 +205,11 @@ class _AccountScreenState extends State<AccountScreen> {
           );
         },
       );
+
+      // Deletion has to mean deletion here too. Leaving cached copies on the
+      // device after the account is gone would quietly contradict what the
+      // privacy policy promises.
+      await AppImageCache.clear();
 
       // The account is gone, so the session is meaningless; signing out is what
       // returns the app to the login screen.

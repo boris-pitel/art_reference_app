@@ -108,6 +108,19 @@ Deno.serve(async (request) => {
       ) as solo_parented
     `;
 
+    // Every image this person owns, so the device can drop cached copies of
+    // anything deleted elsewhere. Deliberately not derived from the category
+    // counts: a third of all images are sketches, which belong to no category
+    // at all and would be invisible to anything built on those.
+    //
+    // Ids only — about 48 bytes each, so a few hundred images cost less than a
+    // tenth of one photograph, on a call that already happens every refresh.
+    const owned = await connection.queryObject<{ id: string }>`
+      select id
+      from public.image_assets
+      where user_id = ${userId}::uuid
+    `;
+
     const counts: Record<string, number> = {};
 
     for (const row of grouped.rows) {
@@ -118,6 +131,7 @@ Deno.serve(async (request) => {
       {
         counts,
         finished_artwork_count: Number(artwork.rows[0]?.total ?? 0),
+        image_ids: owned.rows.map((row) => row.id),
       },
       200,
     );

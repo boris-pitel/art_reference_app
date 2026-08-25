@@ -17,7 +17,9 @@ import '../services/image_share_service.dart';
 import '../services/keyword_service.dart';
 import '../services/photo_metadata_service.dart';
 import '../services/user_activity_logger.dart';
+import '../services/app_image_cache.dart';
 import '../utils/aspect_ratio_label.dart';
+import '../widgets/cached_image.dart';
 import '../widgets/composition_overlay.dart';
 import '../widgets/image_keywords_section.dart';
 import '../widgets/home_button.dart';
@@ -1766,35 +1768,23 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
             children: [
               Hero(
                 tag: heroTag,
-                child: Image.network(
-                  _currentImageUrl,
+                child: CachedImage(
+                  url: _currentImageUrl,
+                  cacheKey: AppImageCache.fullKey(_currentImageId),
                   width: double.infinity,
                   height: imageHeight,
                   fit: BoxFit.contain,
-                  gaplessPlayback: true,
-                  loadingBuilder: (context, child, loadingProgress) {
-                    if (loadingProgress == null) {
-                      return child;
-                    }
-
-                    final expectedBytes = loadingProgress.expectedTotalBytes;
-
-                    final value = expectedBytes == null
-                        ? null
-                        : loadingProgress.cumulativeBytesLoaded / expectedBytes;
-
-                    return Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          CircularProgressIndicator(value: value),
-                          const SizedBox(height: 16),
-                          const Text('Loading full image...'),
-                        ],
-                      ),
-                    );
-                  },
-                  errorBuilder: (context, error, stackTrace) {
+                  placeholder: const Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 16),
+                        Text('Loading full image...'),
+                      ],
+                    ),
+                  ),
+                  errorWidget: (context, error) {
                     return const Center(
                       child: Padding(
                         padding: EdgeInsets.all(24),
@@ -2693,22 +2683,16 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         child: Stack(
           fit: StackFit.expand,
           children: [
-            Image.network(
-              displayUrl,
+            CachedImage(
+              url: displayUrl,
+              cacheKey: image.thumbnailUrl != null
+                  ? AppImageCache.thumbnailKey(image.id)
+                  : AppImageCache.fullKey(image.id),
               fit: BoxFit.cover,
-              gaplessPlayback: true,
-              loadingBuilder: (context, child, loadingProgress) {
-                if (loadingProgress == null) {
-                  return child;
-                }
-
-                return const Center(child: CircularProgressIndicator());
-              },
-              errorBuilder: (context, error, stackTrace) {
-                return const Center(
-                  child: Icon(Icons.broken_image_outlined, size: 40),
-                );
-              },
+              placeholder: const Center(child: CircularProgressIndicator()),
+              errorWidget: (context, error) => const Center(
+                child: Icon(Icons.broken_image_outlined, size: 40),
+              ),
             ),
             Positioned(
               top: 6,
@@ -3501,57 +3485,34 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
                                   child: Center(
                               child: Hero(
                                 tag: widget.heroTag,
-                                child: Image.network(
-                                  _imageUrl,
+                                child: CachedImage(
+                                  url: _imageUrl,
+                                  // Null only for images opened without an id,
+                                  // which cannot be cached by id — those fall
+                                  // back to the URL and behave as before.
+                                  cacheKey: _imageId == null
+                                      ? _imageUrl
+                                      : AppImageCache.fullKey(_imageId!),
                                   width: double.infinity,
                                   height: double.infinity,
                                   fit: BoxFit.contain,
-                                  gaplessPlayback: true,
-                                  frameBuilder:
-                                      (
-                                        context,
-                                        child,
-                                        frame,
-                                        wasSynchronouslyLoaded,
-                                      ) {
-                                        // A frame means the decode succeeded
-                                        // and a texture was produced. Recorded
-                                        // so a device that never gets here is
-                                        // identifiable from its logs alone.
-                                        if (frame != null) {
-                                          _reportFullViewRender(
-                                            'succeeded',
-                                          );
-                                        }
-                                        return child;
-                                      },
-                                  loadingBuilder:
-                                      (context, child, loadingProgress) {
-                                        if (loadingProgress == null) {
-                                          return child;
-                                        }
-
-                                        final expectedBytes =
-                                            loadingProgress.expectedTotalBytes;
-
-                                        final value = expectedBytes == null
-                                            ? null
-                                            : loadingProgress
-                                                      .cumulativeBytesLoaded /
-                                                  expectedBytes;
-
-                                        return Center(
-                                          child: CircularProgressIndicator(
-                                            value: value,
-                                            color: Colors.white,
-                                          ),
-                                        );
-                                      },
-                                  errorBuilder: (context, error, stackTrace) {
-                                    _reportFullViewRender(
-                                      'failed',
-                                      error: error,
-                                    );
+                                  // The reporting Image.network did through
+                                  // frameBuilder and errorBuilder. Carried
+                                  // across deliberately: it is the only thing
+                                  // that has ever identified a device where
+                                  // the image never arrives.
+                                  onRendered: () =>
+                                      _reportFullViewRender('succeeded'),
+                                  onFailed: (error) => _reportFullViewRender(
+                                    'failed',
+                                    error: error,
+                                  ),
+                                  placeholder: const Center(
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  errorWidget: (context, error) {
                                     return const Center(
                                       child: Column(
                                         mainAxisSize: MainAxisSize.min,

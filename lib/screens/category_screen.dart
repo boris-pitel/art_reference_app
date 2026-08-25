@@ -15,6 +15,8 @@ import '../services/image_save_service.dart';
 import '../services/image_share_service.dart';
 import '../services/user_activity_logger.dart';
 import '../widgets/home_button.dart';
+import '../services/app_image_cache.dart';
+import '../widgets/cached_image.dart';
 import '../widgets/image_delivery.dart';
 import 'help_screen.dart';
 import 'image_details_screen.dart';
@@ -1530,18 +1532,14 @@ class _CategoryScreenState extends State<CategoryScreen> {
       return _buildThumbnailPlaceholder();
     }
 
-    return Image.network(
-      thumbnailUrl,
+    return CachedImage(
+      url: thumbnailUrl,
+      cacheKey: AppImageCache.thumbnailKey(image.id),
       fit: BoxFit.cover,
-      gaplessPlayback: true,
-      loadingBuilder: (context, child, loadingProgress) {
-        if (loadingProgress == null) {
-          return child;
-        }
-
-        return const Center(child: CircularProgressIndicator(strokeWidth: 2));
-      },
-      errorBuilder: (context, error, stackTrace) {
+      placeholder: const Center(
+        child: CircularProgressIndicator(strokeWidth: 2),
+      ),
+      errorWidget: (context, error) {
         return _buildThumbnailPlaceholder();
       },
     );

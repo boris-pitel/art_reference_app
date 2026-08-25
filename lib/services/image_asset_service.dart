@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 
 import '../models/reference_category.dart';
 import '../utils/performance_profiler.dart';
+import 'app_image_cache.dart';
 import 'heif_exif_reader.dart';
 import 'image_hash_service.dart';
 import 'image_import_service.dart';
@@ -48,10 +49,24 @@ class ImageCategoryCounts {
   const ImageCategoryCounts({
     required this.byCategoryCode,
     required this.finishedArtwork,
+    this.ownedImageIds,
   });
+
+  const ImageCategoryCounts.empty()
+    : byCategoryCode = const {},
+      finishedArtwork = 0,
+      ownedImageIds = null;
 
   final Map<String, int> byCategoryCode;
   final int finishedArtwork;
+
+  /// Every image the user owns, for evicting cached copies of anything deleted
+  /// on another device.
+  ///
+  /// Null when the server did not send it, which is different from empty: an
+  /// empty set would mean "this person owns nothing" and would clear the whole
+  /// cache. Callers must treat null as "do not evict".
+  final Set<String>? ownedImageIds;
 
   int countFor(ReferenceCategory category) => category.isMyArt
       ? finishedArtwork
@@ -585,6 +600,21 @@ class ImageAssetService {
         return finalizedImageId;
       }
 
+      // The bytes are already here, so the one download guaranteed to be
+      // unnecessary is the one that fetches back what was just sent. On a slow
+      // connection that fetch is also the likeliest to stall, leaving somebody
+      // who has just uploaded a photograph looking at nothing.
+      //
+      // Deliberately not awaited: a cache that fails to write must not fail an
+      // upload that succeeded.
+      unawaited(
+        AppImageCache.seed(
+          key: AppImageCache.fullKey(finalizedImageId),
+          url: storagePath,
+          bytes: normalizedImageBytes,
+        ),
+      );
+
       profiler.finish();
 
       return finalizedImageId;
@@ -804,12 +834,18 @@ class ImageAssetService {
     }
 
     final artwork = data['finished_artwork_count'];
+    final ids = data['image_ids'];
 
     return ImageCategoryCounts(
       byCategoryCode: counts,
       finishedArtwork: artwork is int
           ? artwork
           : int.tryParse('$artwork') ?? 0,
+      // Left null unless the server actually sent a list. An absent field must
+      // not read as "you own nothing", which would empty the cache.
+      ownedImageIds: ids is List
+          ? ids.map((id) => '$id').where((id) => id.isNotEmpty).toSet()
+          : null,
     );
   }
 
