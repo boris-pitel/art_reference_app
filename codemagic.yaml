@@ -1,0 +1,70 @@
+# Builds the iPhone app on Codemagic's Macs and sends it to TestFlight.
+#
+# Exists because no Mac here can do it. The 2019 Intel MacBook cannot run an
+# Xcode new enough to target iOS 26, and the M1 Air that can has a broken screen.
+# Codemagic's runners are Apple Silicon, so the constraint disappears.
+#
+# Flutter is pinned to the same version the Windows machine builds with, so a
+# build here and a build there differ only in platform.
+
+workflows:
+  ios-testflight:
+    name: iOS — TestFlight
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+
+    integrations:
+      # The name given to the App Store Connect API key inside Codemagic's
+      # team settings, not the key itself. Nothing secret belongs in this file.
+      app_store_connect: painter-reference-asc
+
+    environment:
+      flutter: 3.44.7
+      xcode: latest
+      cocoapods: default
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.painterreference.app
+
+    scripts:
+      - name: Fetch packages
+        script: flutter pub get
+
+      - name: Install pods
+        script: |
+          find . -name "Podfile" -execdir pod install \;
+
+      - name: Set the build number from Codemagic's counter
+        script: |
+          # App Store Connect refuses a build number it has already seen, and
+          # the number in pubspec.yaml is managed by hand for the other
+          # platforms. Using the build counter keeps uploads unique without
+          # touching that.
+          agvtool new-version -all $(($BUILD_NUMBER + 100))
+        working_directory: ios
+
+      - name: Build the ipa
+        script: |
+          flutter build ipa --release \
+            --export-options-plist=/Users/builder/export_options.plist
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - flutter_drive.log
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        # Uploaded to TestFlight, never submitted for App Store review from
+        # here. Releasing to the public should be a decision someone makes
+        # deliberately, not something a push to main causes.
+        submit_to_testflight: true
+        submit_to_app_store: false
+
+      email:
+        recipients:
+          - misterpitel@gmail.com
+        notify:
+          success: true
+          failure: true
