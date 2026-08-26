@@ -41,6 +41,20 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
   bool _isAccepting = false;
   String? _error;
 
+  /// The most recent sketch saved from this screen.
+  ///
+  /// Accepting used to close the screen and hand this back. It no longer does,
+  /// so the id is held until the user actually leaves — otherwise the screen
+  /// behind would never learn that sketches had been added and would show a
+  /// stale list.
+  String? _lastSavedImageId;
+
+  /// How many sketches this visit has saved, so the screen can say so.
+  ///
+  /// The preview is cleared on accept, so without this the image simply
+  /// disappears and the only confirmation is a snackbar that fades.
+  int _savedCount = 0;
+
   @override
   void dispose() {
     _promptController.dispose();
@@ -206,7 +220,25 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
         bytes,
         widget.parentImageId,
       );
-      if (mounted) Navigator.of(context).pop(imageId);
+      if (!mounted) return;
+
+      setState(() {
+        // Remembered so leaving still tells the screen behind that something
+        // was added, even though accepting no longer leaves by itself.
+        _lastSavedImageId = imageId;
+        _savedCount += 1;
+        // Cleared so the same result cannot be saved twice. Without this,
+        // tapping Accept again would file a second identical sketch.
+        _previewBytes = null;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Saved to sketches. Describe another change to '
+              'keep editing, or go back to see it.'),
+          duration: Duration(seconds: 4),
+        ),
+      );
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     } finally {
@@ -217,6 +249,21 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
   @override
   Widget build(BuildContext context) {
     final busy = _isGenerating || _isAccepting;
+    return PopScope(
+      // Intercepted so leaving carries back whatever was saved, whichever way
+      // the user leaves — the back arrow, the system gesture, or the hardware
+      // button. Accepting no longer closes the screen, so this is the only
+      // moment the result can be handed over.
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop || !mounted) return;
+        Navigator.of(context).pop(_lastSavedImageId);
+      },
+      child: _buildScaffold(context, busy),
+    );
+  }
+
+  Widget _buildScaffold(BuildContext context, bool busy) {
     return Scaffold(
       appBar: AppBar(title: const Text('Edit with AI')),
       body: SafeArea(
@@ -302,6 +349,28 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
                 _isGenerating
                     ? 'AI is editing the image…'
                     : 'Saving as an associated image…',
+              ),
+            ],
+            if (_savedCount > 0) ...[
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Icon(
+                    Icons.check_circle_outline,
+                    size: 18,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _savedCount == 1
+                          ? 'One AI image saved to this reference’s sketches.'
+                          : '$_savedCount AI images saved to this '
+                                'reference’s sketches.',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  ),
+                ],
               ),
             ],
             const SizedBox(height: 16),
