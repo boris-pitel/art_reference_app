@@ -2860,6 +2860,7 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
   CompositionGrid _grid = CompositionGrid.none;
   bool _monochrome = false;
 
+
   // The grid divides the picture, not the black around it, so the overlay needs
   // the shape of the bitmap actually on screen. Read from the decoded image
   // rather than the stored width and height, which describe the original and
@@ -3103,8 +3104,8 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
     if (sourceImageId == null || parentImageId == null || _isApplyingEdit) {
       return;
     }
-    final newImageId = await Navigator.of(context).push<String>(
-      MaterialPageRoute<String>(
+    final saved = await Navigator.of(context).push<AiEditResult>(
+      MaterialPageRoute<AiEditResult>(
         builder: (_) => AiImageEditScreen(
           sourceImageId: sourceImageId,
           sourceImageUrl: _imageUrl,
@@ -3112,34 +3113,20 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
         ),
       ),
     );
-    if (newImageId == null || !mounted) return;
-    try {
-      final associated = await ImageAssetService(
-        Supabase.instance.client,
-      ).listAssociatedImages(parentImageId);
-      final saved = associated
-          .where((item) => item.id == newImageId)
-          .firstOrNull;
-      if (saved == null) {
-        throw StateError('The accepted AI image could not be reloaded.');
-      }
-      if (!mounted) return;
-      Navigator.of(context).pop(
-        _EditedSketch(
-          imageId: saved.id,
-          imageUrl: saved.imageUrl,
-          replacesCurrentImage: false,
-        ),
-      );
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('AI image was saved, but refresh failed: $error'),
-          ),
-        );
-      }
-    }
+    if (saved == null || !mounted) return;
+
+    // Closed immediately, with nothing awaited in between. The editor used to
+    // stay on screen for a network round trip here while it looked the saved
+    // image up, which is what made it appear briefly on the way out. The
+    // lookup now happens before the AI editor closes, so these two screens
+    // dismiss together.
+    Navigator.of(context).pop(
+      _EditedSketch(
+        imageId: saved.id,
+        imageUrl: saved.url,
+        replacesCurrentImage: false,
+      ),
+    );
   }
 
   bool _isAlreadyAttachedError(Object error) {

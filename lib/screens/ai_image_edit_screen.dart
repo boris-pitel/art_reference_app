@@ -10,6 +10,18 @@ import '../services/image_asset_service.dart';
 import '../services/user_activity_logger.dart';
 import '../widgets/cached_image.dart';
 
+/// What the AI editor hands back: the sketch it saved, resolved before leaving.
+///
+/// The URL is looked up while the editor is still on screen so that the caller
+/// can act the instant it closes, rather than fetching it afterwards with an
+/// intermediate screen sitting visible.
+class AiEditResult {
+  const AiEditResult({required this.id, required this.url});
+
+  final String id;
+  final String url;
+}
+
 class AiImageEditScreen extends StatefulWidget {
   const AiImageEditScreen({
     required this.sourceImageId,
@@ -48,6 +60,7 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
   /// behind would never learn that sketches had been added and would show a
   /// stale list.
   String? _lastSavedImageId;
+  String? _lastSavedImageUrl;
 
   @override
   void dispose() {
@@ -214,12 +227,33 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
         bytes,
         widget.parentImageId,
       );
+      // Looked up now, while this screen is still on top, so that leaving is
+      // instant. Doing it after the pop left the crop editor sitting visible
+      // for a whole network round trip before it closed in turn — which is
+      // what made it flash past on the way out.
+      String? savedUrl;
+      try {
+        final associated = await _imageService.listAssociatedImages(
+          widget.parentImageId,
+        );
+        savedUrl = associated
+            .where((image) => image.id == imageId)
+            .firstOrNull
+            ?.imageUrl;
+      } catch (error) {
+        // Not fatal: the image is saved either way, and the screen behind can
+        // reload without this. It only costs the smooth exit.
+        debugPrint('Could not resolve the saved sketch URL: $error');
+      }
+
       if (!mounted) return;
 
       // The prompt deliberately survives. Everything else goes, so the screen
       // looks untouched — but wording an instruction is the effortful part,
       // and the next attempt is usually a small change to it rather than
       // something written from nothing.
+      _lastSavedImageUrl = savedUrl;
+
       setState(() {
         // Remembered so leaving still tells the screen behind that something
         // was added, even though accepting no longer leaves by itself. Not
@@ -254,7 +288,13 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop || !mounted) return;
-        Navigator.of(context).pop(_lastSavedImageId);
+
+        final id = _lastSavedImageId;
+        final url = _lastSavedImageUrl;
+
+        Navigator.of(context).pop(
+          id == null || url == null ? null : AiEditResult(id: id, url: url),
+        );
       },
       child: _buildScaffold(context, busy),
     );
