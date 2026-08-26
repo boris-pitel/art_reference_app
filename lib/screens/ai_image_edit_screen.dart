@@ -49,12 +49,6 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
   /// stale list.
   String? _lastSavedImageId;
 
-  /// How many sketches this visit has saved, so the screen can say so.
-  ///
-  /// The preview is cleared on accept, so without this the image simply
-  /// disappears and the only confirmation is a snackbar that fades.
-  int _savedCount = 0;
-
   @override
   void dispose() {
     _promptController.dispose();
@@ -222,14 +216,17 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
       );
       if (!mounted) return;
 
+      // The prompt deliberately survives. Everything else goes, so the screen
+      // looks untouched — but wording an instruction is the effortful part,
+      // and the next attempt is usually a small change to it rather than
+      // something written from nothing.
       setState(() {
         // Remembered so leaving still tells the screen behind that something
-        // was added, even though accepting no longer leaves by itself.
+        // was added, even though accepting no longer leaves by itself. Not
+        // shown anywhere — it is bookkeeping, not a trace.
         _lastSavedImageId = imageId;
-        _savedCount += 1;
-        // Cleared so the same result cannot be saved twice. Without this,
-        // tapping Accept again would file a second identical sketch.
         _previewBytes = null;
+        _error = null;
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -366,28 +363,6 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
           _isGenerating
               ? 'AI is editing the image…'
               : 'Saving as an associated image…',
-        ),
-      ],
-      if (_savedCount > 0) ...[
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Icon(
-              Icons.check_circle_outline,
-              size: 18,
-              color: theme.colorScheme.primary,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                _savedCount == 1
-                    ? 'One AI image saved to this reference’s sketches.'
-                    : '$_savedCount AI images saved to this '
-                          'reference’s sketches.',
-                style: theme.textTheme.bodyMedium,
-              ),
-            ),
-          ],
         ),
       ],
       const SizedBox(height: 12),
