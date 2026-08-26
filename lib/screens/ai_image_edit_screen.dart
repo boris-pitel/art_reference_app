@@ -303,7 +303,11 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
                 border: OutlineInputBorder(),
               ),
             ),
-            const SizedBox(height: 12),
+            // Directly under the prompt, where the hand already is. The
+            // quality picker and the notices below are read once and then
+            // ignored; the button is used on every attempt.
+            ..._buildActions(context, busy),
+            const SizedBox(height: 20),
             DropdownButtonFormField<AiImageQuality>(
               initialValue: _quality,
               decoration: const InputDecoration(
@@ -334,77 +338,85 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
             ),
             const SizedBox(height: 12),
             const _ResolutionNotice(),
-            if (_error != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                _error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ],
-            const SizedBox(height: 16),
-            if (_isGenerating || _isAccepting) ...[
-              const LinearProgressIndicator(),
-              const SizedBox(height: 8),
-              Text(
-                _isGenerating
-                    ? 'AI is editing the image…'
-                    : 'Saving as an associated image…',
-              ),
-            ],
-            if (_savedCount > 0) ...[
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Icon(
-                    Icons.check_circle_outline,
-                    size: 18,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _savedCount == 1
-                          ? 'One AI image saved to this reference’s sketches.'
-                          : '$_savedCount AI images saved to this '
-                                'reference’s sketches.',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              alignment: WrapAlignment.end,
-              children: [
-                if (_previewBytes != null)
-                  OutlinedButton(
-                    onPressed: busy
-                        ? null
-                        : () => setState(() => _previewBytes = null),
-                    child: const Text('Reject'),
-                  ),
-                FilledButton.icon(
-                  onPressed: busy ? null : _generate,
-                  icon: const Icon(Icons.auto_awesome),
-                  label: Text(
-                    _previewBytes == null ? 'Generate' : 'Generate again',
-                  ),
-                ),
-                if (_previewBytes != null)
-                  FilledButton.icon(
-                    onPressed: busy ? null : _accept,
-                    icon: const Icon(Icons.check),
-                    label: const Text('Accept'),
-                  ),
-              ],
-            ),
           ],
         ),
       ),
     );
+  }
+
+  /// Everything to do with acting on the prompt, kept together.
+  ///
+  /// Placed under the prompt field rather than at the foot of the page: the
+  /// quality picker and the notices are read once, while the button is used on
+  /// every attempt, and the progress and errors belong beside the control that
+  /// caused them.
+  List<Widget> _buildActions(BuildContext context, bool busy) {
+    final theme = Theme.of(context);
+
+    return [
+      if (_error != null) ...[
+        const SizedBox(height: 12),
+        Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
+      ],
+      if (_isGenerating || _isAccepting) ...[
+        const SizedBox(height: 12),
+        const LinearProgressIndicator(),
+        const SizedBox(height: 8),
+        Text(
+          _isGenerating
+              ? 'AI is editing the image…'
+              : 'Saving as an associated image…',
+        ),
+      ],
+      if (_savedCount > 0) ...[
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Icon(
+              Icons.check_circle_outline,
+              size: 18,
+              color: theme.colorScheme.primary,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                _savedCount == 1
+                    ? 'One AI image saved to this reference’s sketches.'
+                    : '$_savedCount AI images saved to this '
+                          'reference’s sketches.',
+                style: theme.textTheme.bodyMedium,
+              ),
+            ),
+          ],
+        ),
+      ],
+      const SizedBox(height: 12),
+      Wrap(
+        spacing: 12,
+        runSpacing: 12,
+        alignment: WrapAlignment.end,
+        children: [
+          if (_previewBytes != null)
+            OutlinedButton(
+              onPressed: busy
+                  ? null
+                  : () => setState(() => _previewBytes = null),
+              child: const Text('Reject'),
+            ),
+          FilledButton.icon(
+            onPressed: busy ? null : _generate,
+            icon: const Icon(Icons.auto_awesome),
+            label: Text(_previewBytes == null ? 'Generate' : 'Generate again'),
+          ),
+          if (_previewBytes != null)
+            FilledButton.icon(
+              onPressed: busy ? null : _accept,
+              icon: const Icon(Icons.check),
+              label: const Text('Accept'),
+            ),
+        ],
+      ),
+    ];
   }
 }
 
