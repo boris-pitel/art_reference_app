@@ -1,5 +1,11 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { v5 as uuidV5 } from "npm:uuid@11";
+import {
+  computeEditSize,
+  inspectJpeg,
+  stripApplicationSegments,
+  withOrientation,
+} from "./source_image.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -13,57 +19,6 @@ function jsonResponse(body: Record<string, unknown>, status = 200): Response {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
-}
-
-// gpt-image-2 accepts an arbitrary WIDTHxHEIGHT as long as both sides are
-// divisible by 16, the aspect ratio stays within 1:3..3:1, and the result fits
-// inside 3840x2160. Asking for a concrete size matters: size="auto" picks a
-// small output (a 8000x6000 source came back as 1427x1102), so an edit of a
-// large photo loses far more resolution than the model actually requires.
-const maxLongSide = 3840;
-const maxShortSide = 2160;
-
-// Below this the source is small enough that picking a size buys nothing, and
-// scaling to a /16 boundary risks upscaling. Let the model decide instead.
-const minLongSide = 512;
-
-function roundDownToMultipleOf16(value: number): number {
-  return Math.max(16, Math.floor(value / 16) * 16);
-}
-
-function computeEditSize(width: unknown, height: unknown): string {
-  if (
-    typeof width !== "number" ||
-    typeof height !== "number" ||
-    !Number.isFinite(width) ||
-    !Number.isFinite(height) ||
-    width <= 0 ||
-    height <= 0
-  ) {
-    return "auto";
-  }
-
-  const isLandscape = width >= height;
-  const sourceLong = isLandscape ? width : height;
-  const sourceShort = isLandscape ? height : width;
-
-  if (sourceLong < minLongSide) return "auto";
-
-  // Outside the supported aspect range there is no faithful size to request,
-  // so defer rather than distorting the image.
-  if (sourceLong / sourceShort > 3) return "auto";
-
-  // Never scale up — that would invent detail the source does not have.
-  const scale = Math.min(
-    maxLongSide / sourceLong,
-    maxShortSide / sourceShort,
-    1,
-  );
-
-  const long = Math.min(roundDownToMultipleOf16(sourceLong * scale), maxLongSide);
-  const short = Math.min(roundDownToMultipleOf16(sourceShort * scale), maxShortSide);
-
-  return isLandscape ? `${long}x${short}` : `${short}x${long}`;
 }
 
 Deno.serve(async (request) => {
@@ -133,8 +88,32 @@ Deno.serve(async (request) => {
       throw new Error(`Unable to download image: ${downloadError?.message ?? "no data"}`);
     }
 
-    const sourceBytes = new Uint8Array(await source.arrayBuffer());
-    const sourceMime = detectImageMime(sourceBytes);
+    const originalBytes = new Uint8Array(await source.arrayBuffer());
+    const sourceMime = detectImageMime(originalBytes);
+
+    // Some photographs were refused outright with "Invalid image file or mode
+    // for image 1" while much larger ones edited fine — an 8000x6000 source
+    // succeeded where a 4284x5712 one failed every time, on every platform.
+    // What the refused files had in common was not their size but their
+    // wrapping: Apple HDR photographs carrying EXIF, XMP, extra APP2 segments
+    // and an APP10 gain map. Rebuilding them without that wrapping is a byte
+    // copy, so nothing about the picture itself changes.
+    const profile = sourceMime === "image/jpeg" ? inspectJpeg(originalBytes) : null;
+    const sourceBytes = profile?.needsRebuild
+      ? stripApplicationSegments(originalBytes)
+      : originalBytes;
+
+    // Deliberately the frame's own dimensions rather than the record's. The
+    // record stores the size the photograph *displays* at, which for a rotated
+    // camera file is the transpose of how its pixels are actually stored — so
+    // using it asked for a portrait result while supplying a landscape image,
+    // quietly instructing the model to turn the picture on its side. Stripping
+    // the EXIF above removes the rotation flag, so the frame is now the whole
+    // truth; the turn is put back on the result further down.
+    const requestedSize = profile
+      ? computeEditSize(profile.frameWidth, profile.frameHeight)
+      : computeEditSize(record.width, record.height);
+    const restoreOrientation = profile?.needsRebuild ? profile.orientation : 1;
 
     const buildRequest = (size: string): FormData => {
       const form = new FormData();
@@ -169,8 +148,6 @@ Deno.serve(async (request) => {
         headers: { Authorization: `Bearer ${openAiApiKey}` },
         body: buildRequest(size),
       });
-
-    const requestedSize = computeEditSize(record.width, record.height);
 
     // Taken immediately before the model is called, and not before: a request
     // that fails validation or names a missing image has cost nothing and must
@@ -278,11 +255,24 @@ Deno.serve(async (request) => {
     if (typeof imageBase64 !== "string" || imageBase64.length === 0) {
       throw new Error("OpenAI returned no edited image.");
     }
+
+    // The model worked from the stripped frame, so its answer is stored the
+    // same way round. Recording the camera's own turn on it puts it upright
+    // without touching a pixel.
+    const edited = restoreOrientation === 1
+      ? imageBase64
+      : reencodeBase64(imageBase64, restoreOrientation);
+
     return jsonResponse({
       success: true,
-      image_base64: imageBase64,
+      image_base64: edited,
       output_format: "jpeg",
       quality,
+      // Reported so the caller can record what was actually asked for. Output
+      // size is the dominant term in what an edit costs, and until now nothing
+      // wrote it down.
+      size: requestedSize,
+      source_rebuilt: profile?.needsRebuild ?? false,
       usage: result.usage ?? null,
     });
   } catch (error) {
@@ -293,6 +283,33 @@ Deno.serve(async (request) => {
     );
   }
 });
+
+/**
+ * Stamps an orientation onto a base64 JPEG.
+ *
+ * Base64 in, base64 out, with only the metadata block changed. A failure here
+ * must never lose the edit the user just paid for, so anything unexpected
+ * returns the image as it came back — upright is worth less than present.
+ */
+function reencodeBase64(encoded: string, orientation: number): string {
+  try {
+    const binary = atob(encoded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+
+    const stamped = withOrientation(bytes, orientation);
+    if (stamped === bytes) return encoded;
+
+    let out = "";
+    for (let i = 0; i < stamped.length; i += 0x8000) {
+      out += String.fromCharCode(...stamped.subarray(i, i + 0x8000));
+    }
+    return btoa(out);
+  } catch (error) {
+    console.error("Could not stamp orientation on the edited image", error);
+    return encoded;
+  }
+}
 
 function extensionForMime(mime: string): string {
   if (mime.includes("png")) return "png";
