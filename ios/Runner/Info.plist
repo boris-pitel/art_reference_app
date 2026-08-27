@@ -90,5 +90,19 @@
 			</array>
 		</dict>
 	</array>
+	<!--
+	     Answers the export compliance question once, here, instead of by hand
+	     in App Store Connect on every single build. Without it, each upload
+	     arrives flagged "Missing Compliance" and cannot be given to a tester
+	     until somebody clicks through the dialog again.
+
+	     False states that the app uses no encryption beyond the exemptions,
+	     which is the same answer given by hand: all network traffic is
+	     ordinary HTTPS provided by iOS, and the only other cryptographic call
+	     in the app is the SHA-256 hash used to recognise a photograph that has
+	     already been uploaded. A hash conceals nothing and is not encryption.
+	-->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>
