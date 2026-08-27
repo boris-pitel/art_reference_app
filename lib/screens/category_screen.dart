@@ -97,12 +97,33 @@ class CategoryScreen extends StatefulWidget {
   State<CategoryScreen> createState() => _CategoryScreenState();
 }
 
-class _CategoryScreenState extends State<CategoryScreen> {
+class _CategoryScreenState extends State<CategoryScreen>
+    with WidgetsBindingObserver {
   final ImagePicker _imagePicker = ImagePicker();
 
   late final ImageAssetService _imageAssetService;
 
   final List<_LoadedImage> _images = [];
+
+  /// Every image URL on this screen is signed and stops working after an hour.
+  /// Listing them again is the only way to get working ones.
+  static const Duration _signedUrlLifetime = Duration(hours: 1);
+
+  /// Comfortably inside that hour, so a screen returning to the foreground is
+  /// refreshed before its URLs die rather than after a picture has failed.
+  static const Duration _refreshAfter = Duration(minutes: 45);
+
+  /// When the URLs now on screen were issued.
+  DateTime? _urlsIssuedAt;
+
+  /// Whether a failed thumbnail has already prompted a re-listing for this
+  /// batch. One retry is a recovery; retrying on every failure would be a
+  /// loop, because an image whose file is genuinely gone fails every time.
+  bool _retriedAfterFailure = false;
+
+  /// Thumbnails already reported, so a grid that rebuilds while scrolling
+  /// writes one log line per broken image rather than one per rebuild.
+  final Set<String> _reportedThumbnailFailures = {};
 
   bool _isLoading = true;
   bool _isUploading = false;
@@ -241,9 +262,86 @@ class _CategoryScreenState extends State<CategoryScreen> {
   void initState() {
     super.initState();
 
+    WidgetsBinding.instance.addObserver(this);
+
     _imageAssetService = ImageAssetService(Supabase.instance.client);
 
     _loadImages();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+
+    super.dispose();
+  }
+
+  /// Re-lists the images when the app comes back after being away a while.
+  ///
+  /// This screen used to load once and never again: the URLs it was holding
+  /// were signed for an hour, and nothing re-issued them. Leaving the app for
+  /// lunch and returning to this screen therefore meant every picture not
+  /// already on the device failed to load, while the cached ones carried on
+  /// looking fine — which is why only some tiles ever broke.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    if (state != AppLifecycleState.resumed) return;
+    if (_isLoading || _isBusy) return;
+
+    final issued = _urlsIssuedAt;
+    if (issued == null) return;
+    if (DateTime.now().difference(issued) < _refreshAfter) return;
+
+    _loadImages();
+  }
+
+  /// A thumbnail that would not load.
+  ///
+  /// Nothing recorded this before, which is why a screen full of broken tiles
+  /// left no trace in the logs and had to be diagnosed by reasoning rather
+  /// than by evidence. The age of the URLs is included because an expired
+  /// signature and a missing file look identical from here, and the age is
+  /// what tells them apart.
+  void _onThumbnailFailed(_LoadedImage image, Object error) {
+    final issued = _urlsIssuedAt;
+    final age = issued == null
+        ? null
+        : DateTime.now().difference(issued).inSeconds;
+
+    if (_reportedThumbnailFailures.add(image.id)) {
+      UserActivityLogger.instance.record(
+        operation: 'image_thumbnail_view',
+        status: 'failed',
+        targetType: 'image',
+        targetId: image.id,
+        details: {
+          'category': widget.category.databaseCode,
+          'url_age_seconds': ?age,
+          if (age != null)
+            'url_expired': age >= _signedUrlLifetime.inSeconds,
+          'retried': _retriedAfterFailure,
+        },
+        error: error,
+      );
+    }
+
+    // Recover rather than only complain. Re-listing re-signs every URL, so one
+    // pass repairs the whole grid instead of one tile at a time.
+    if (_retriedAfterFailure || _isLoading || _isBusy) return;
+
+    _retriedAfterFailure = true;
+
+    // This arrives from an error widget's builder, so the frame is still being
+    // laid out. Reloading here would rebuild the tree during a build; waiting
+    // for the frame to finish is the difference between a recovery and a
+    // crash.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
+      _loadImages();
+    });
   }
 
   Future<List<_LoadedImage>> _fetchImages() async {
@@ -280,6 +378,11 @@ class _CategoryScreenState extends State<CategoryScreen> {
         _images
           ..clear()
           ..addAll(loadedImages);
+
+        // A fresh batch of signatures, so the clock restarts and the tiles
+        // that failed against the old ones are worth reporting again.
+        _urlsIssuedAt = DateTime.now();
+        _reportedThumbnailFailures.clear();
 
         _isLoading = false;
       });
@@ -1539,6 +1642,7 @@ class _CategoryScreenState extends State<CategoryScreen> {
       placeholder: const Center(
         child: CircularProgressIndicator(strokeWidth: 2),
       ),
+      onFailed: (error) => _onThumbnailFailed(image, error),
       errorWidget: (context, error) {
         return _buildThumbnailPlaceholder();
       },
