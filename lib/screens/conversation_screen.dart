@@ -13,13 +13,17 @@ import '../services/image_asset_service.dart';
 import '../services/image_save_service.dart';
 import '../services/image_share_service.dart';
 import '../services/messaging_service.dart';
+import '../services/report_service.dart';
 import '../widgets/home_button.dart';
 import '../widgets/image_delivery.dart';
+import '../widgets/report_dialog.dart';
 
 Future<Uint8List> _downloadImageBytes(String url) async {
   final response = await http.get(Uri.parse(url));
   if (response.statusCode < 200 || response.statusCode >= 300) {
-    throw StateError('Image download failed with status ${response.statusCode}.');
+    throw StateError(
+      'Image download failed with status ${response.statusCode}.',
+    );
   }
   if (response.bodyBytes.isEmpty) {
     throw StateError('The downloaded image is empty.');
@@ -58,6 +62,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
   final ImagePicker _imagePicker = ImagePicker();
 
   late final MessagingService _messagingService;
+  late final ReportService _reportService;
   RealtimeChannel? _channel;
 
   List<ChatMessage> _messages = const [];
@@ -72,6 +77,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
   void initState() {
     super.initState();
     _messagingService = MessagingService(_supabase);
+    _reportService = ReportService(_supabase);
     _loadMessages();
     _subscribeToNewMessages();
   }
@@ -180,6 +186,122 @@ class _ConversationScreenState extends State<ConversationScreen> {
     }
   }
 
+  /// Reports the person, from the conversation's own menu.
+  ///
+  /// Separate from reporting a message because the complaint is often about a
+  /// pattern rather than one thing said — and because somebody being harassed
+  /// should not have to pick which message was the worst one before they can
+  /// ask for help.
+  Future<void> _reportPerson() async {
+    final who = widget.otherLoginName ?? 'this person';
+    final outcome = await showReportDialog(
+      context: context,
+      title: 'Report $who',
+      subtitle: 'Tell us what is wrong and we will look at it.',
+      blockLabel: 'Also block $who',
+    );
+    if (outcome == null || !mounted) return;
+
+    await _send(
+      () => _reportService.reportUser(
+        userId: widget.otherUserId,
+        conversationId: widget.conversationId,
+        reason: outcome.reason,
+        details: outcome.details,
+      ),
+      alsoBlock: outcome.alsoBlock,
+    );
+  }
+
+  Future<void> _reportMessage(ChatMessage message) async {
+    final who = widget.otherLoginName ?? 'this person';
+    final outcome = await showReportDialog(
+      context: context,
+      title: 'Report this message',
+      subtitle: 'Tell us what is wrong and we will look at it.',
+      blockLabel: 'Also block $who',
+    );
+    if (outcome == null || !mounted) return;
+
+    await _send(
+      () => _reportService.reportMessage(
+        messageId: message.id,
+        reason: outcome.reason,
+        details: outcome.details,
+      ),
+      alsoBlock: outcome.alsoBlock,
+    );
+  }
+
+  /// Files the report, then blocks if that was asked for.
+  ///
+  /// In that order, and the block is not allowed to take the report down with
+  /// it: someone who reports and blocks has said the more important thing
+  /// first, and a failure to block should not read as a failure to report.
+  Future<void> _send(
+    Future<void> Function() file, {
+    required bool alsoBlock,
+  }) async {
+    try {
+      await file();
+
+      if (alsoBlock) {
+        try {
+          await _messagingService.blockUser(widget.otherUserId);
+        } catch (error) {
+          debugPrint('Reported, but the block failed: $error');
+        }
+      }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            alsoBlock
+                ? 'Thank you. We will look into it, and they have been blocked.'
+                : 'Thank you. We will look into it.',
+          ),
+        ),
+      );
+
+      if (alsoBlock && mounted) Navigator.of(context).maybePop();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('$error')));
+    }
+  }
+
+  /// The actions on a message that is not yours.
+  ///
+  /// Text messages had no menu at all before this: only images were long
+  /// pressable, so the one thing in the app most likely to need reporting —
+  /// something somebody wrote — was the one thing that could not be.
+  Future<void> _showMessageActions(ChatMessage message) async {
+    if (message.isMine || _busyImageMessageId != null) return;
+
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.flag_outlined),
+              title: const Text('Report this message'),
+              onTap: () => Navigator.of(sheetContext).pop('report'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+
+    if (action == 'report' && mounted) await _reportMessage(message);
+  }
+
   Future<void> _showImageActions(ChatMessage message) async {
     final imageUrl = message.imageUrl;
     if (imageUrl == null || _busyImageMessageId != null) return;
@@ -209,6 +331,14 @@ class _ConversationScreenState extends State<ConversationScreen> {
                   title: Text(ImageSaveService.actionLabel),
                   onTap: () => Navigator.of(sheetContext).pop('photos'),
                 ),
+                if (!message.isMine) ...[
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.flag_outlined),
+                    title: const Text('Report this image'),
+                    onTap: () => Navigator.of(sheetContext).pop('report'),
+                  ),
+                ],
                 const SizedBox(height: 8),
               ],
             ),
@@ -226,6 +356,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
         await _shareImage(message, imageUrl);
       case 'photos':
         await _saveImageToPhotos(message, imageUrl);
+      case 'report':
+        await _reportMessage(message);
     }
   }
 
@@ -402,8 +534,10 @@ class _ConversationScreenState extends State<ConversationScreen> {
             tooltip: 'Conversation actions',
             onSelected: (value) {
               if (value == 'block') unawaited(_confirmBlock());
+              if (value == 'report') unawaited(_reportPerson());
             },
             itemBuilder: (context) => const [
+              PopupMenuItem(value: 'report', child: Text('Report')),
               PopupMenuItem(value: 'block', child: Text('Block')),
             ],
           ),
@@ -467,92 +601,98 @@ class _ConversationScreenState extends State<ConversationScreen> {
     ).formatTimeOfDay(TimeOfDay.fromDateTime(message.createdAt.toLocal()));
     return Align(
       alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.72,
-        ),
-        margin: EdgeInsets.only(top: extraTopGap, bottom: 10),
-        padding: message.imageUrl != null
-            ? const EdgeInsets.all(4)
-            : const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: isMine
-              ? theme.colorScheme.primaryContainer
-              : theme.colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(16),
-          border: message.imageUrl != null
-              ? Border.all(color: theme.colorScheme.outlineVariant)
-              : null,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (message.imageUrl != null)
-              GestureDetector(
-                onLongPress: _busyImageMessageId != null
-                    ? null
-                    : () => _showImageActions(message),
-                child: Stack(
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Image.network(
-                        message.imageUrl!,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) =>
-                            const Padding(
-                              padding: EdgeInsets.all(24),
-                              child: Icon(Icons.broken_image_outlined),
-                            ),
-                      ),
-                    ),
-                    if (_busyImageMessageId == message.id)
-                      Positioned.fill(
-                        child: ColoredBox(
-                          color: Colors.black38,
-                          child: const Center(
-                            child: CircularProgressIndicator(),
-                          ),
+      // Long pressing anything somebody else sent offers to report it. An
+      // image already had its own menu; this is what gives a written message
+      // one, and images keep theirs because the inner gesture wins.
+      child: GestureDetector(
+        onLongPress: isMine ? null : () => _showMessageActions(message),
+        child: Container(
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width * 0.72,
+          ),
+          margin: EdgeInsets.only(top: extraTopGap, bottom: 10),
+          padding: message.imageUrl != null
+              ? const EdgeInsets.all(4)
+              : const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: isMine
+                ? theme.colorScheme.primaryContainer
+                : theme.colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(16),
+            border: message.imageUrl != null
+                ? Border.all(color: theme.colorScheme.outlineVariant)
+                : null,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (message.imageUrl != null)
+                GestureDetector(
+                  onLongPress: _busyImageMessageId != null
+                      ? null
+                      : () => _showImageActions(message),
+                  child: Stack(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.network(
+                          message.imageUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) =>
+                              const Padding(
+                                padding: EdgeInsets.all(24),
+                                child: Icon(Icons.broken_image_outlined),
+                              ),
                         ),
                       ),
-                  ],
+                      if (_busyImageMessageId == message.id)
+                        Positioned.fill(
+                          child: ColoredBox(
+                            color: Colors.black38,
+                            child: const Center(
+                              child: CircularProgressIndicator(),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-            if (message.body != null)
+              if (message.body != null)
+                Padding(
+                  padding: message.imageUrl != null
+                      ? const EdgeInsets.fromLTRB(8, 8, 8, 4)
+                      : EdgeInsets.zero,
+                  child: Text(
+                    message.body!,
+                    style: TextStyle(
+                      color: isMine
+                          ? theme.colorScheme.onPrimaryContainer
+                          : theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
               Padding(
-                padding: message.imageUrl != null
-                    ? const EdgeInsets.fromLTRB(8, 8, 8, 4)
-                    : EdgeInsets.zero,
+                padding: EdgeInsets.only(
+                  top: message.imageUrl != null ? 4 : 4,
+                  left: message.imageUrl != null ? 4 : 0,
+                ),
                 child: Text(
-                  message.body!,
+                  timeLabel,
                   style: TextStyle(
+                    fontSize: 11,
                     color: isMine
-                        ? theme.colorScheme.onPrimaryContainer
-                        : theme.colorScheme.onSurfaceVariant,
+                        ? theme.colorScheme.onPrimaryContainer.withValues(
+                            alpha: 0.7,
+                          )
+                        : theme.colorScheme.onSurfaceVariant.withValues(
+                            alpha: 0.7,
+                          ),
                   ),
                 ),
               ),
-            Padding(
-              padding: EdgeInsets.only(
-                top: message.imageUrl != null ? 4 : 4,
-                left: message.imageUrl != null ? 4 : 0,
-              ),
-              child: Text(
-                timeLabel,
-                style: TextStyle(
-                  fontSize: 11,
-                  color: isMine
-                      ? theme.colorScheme.onPrimaryContainer.withValues(
-                          alpha: 0.7,
-                        )
-                      : theme.colorScheme.onSurfaceVariant.withValues(
-                          alpha: 0.7,
-                        ),
-                ),
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

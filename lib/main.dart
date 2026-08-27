@@ -20,6 +20,7 @@ import 'widgets/legal_agreement_notice.dart';
 import 'screens/keyword_search_screen.dart';
 import 'screens/messages_screen.dart';
 import 'screens/messaging_settings_screen.dart';
+import 'screens/reports_screen.dart';
 import 'screens/shared_image_import_screen.dart';
 import 'services/app_image_cache.dart';
 import 'services/app_status_service.dart';
@@ -30,6 +31,7 @@ import 'services/impersonation_controller.dart';
 import 'services/library_home_cache.dart';
 import 'services/image_asset_service.dart';
 import 'services/messaging_service.dart';
+import 'services/report_service.dart';
 import 'utils/performance_profiler.dart';
 
 Future<void> main() async {
@@ -51,9 +53,7 @@ Future<void> main() async {
 
   // Resolved before the first screen so activity logs carry device details
   // from the outset. Diagnostic only, so a failure here must not stop launch.
-  await DeviceProfile.load().catchError(
-    (_) => const <String, Object?>{},
-  );
+  await DeviceProfile.load().catchError((_) => const <String, Object?>{});
 
   runApp(const ArtReferenceApp());
 }
@@ -351,7 +351,8 @@ class _MaintenanceGateState extends State<_MaintenanceGate>
   }
 
   bool get _isAdmin =>
-      Supabase.instance.client.auth.currentUser?.appMetadata['is_admin'] == true;
+      Supabase.instance.client.auth.currentUser?.appMetadata['is_admin'] ==
+      true;
 
   Future<void> _refresh() async {
     if (_isChecking) return;
@@ -455,7 +456,8 @@ class _MaintenanceBlockScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  message ?? 'We are making some updates. Please check back shortly.',
+                  message ??
+                      'We are making some updates. Please check back shortly.',
                   style: theme.textTheme.bodyMedium,
                   textAlign: TextAlign.center,
                 ),
@@ -563,6 +565,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   late final CategoryService _categoryService;
   late final ImageAssetService _imageAssetService;
   late final MessagingService _messagingService;
+  late final ReportService _reportService;
 
   final List<ReferenceCategory> _categories = <ReferenceCategory>[];
   final Map<String, int> _imageCountsByCategoryCode = <String, int>{};
@@ -572,6 +575,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   bool _isAddingCategory = false;
   bool _isAdmin = false;
   int _unreadMessageCount = 0;
+  int _openReportCount = 0;
   String? _errorMessage;
 
   bool get _cameraIsAvailable {
@@ -588,6 +592,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     _categoryService = CategoryService(supabase);
     _imageAssetService = ImageAssetService(supabase);
     _messagingService = MessagingService(supabase);
+    _reportService = ReportService(supabase);
 
     _restoreThenRefreshCategories();
     _refreshAdminStatus();
@@ -624,6 +629,30 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     }
   }
 
+  /// How many reports are waiting for an operator.
+  ///
+  /// Asked for unconditionally rather than only when the admin flag is set:
+  /// the flag comes from a token that may be a moment out of date, while the
+  /// answer here comes from the database, which is the thing that decides.
+  /// A non-operator is refused and gets zero.
+  Future<void> _refreshOpenReportCount() async {
+    try {
+      final count = await _reportService.openReportCount();
+      if (mounted && count != _openReportCount) {
+        setState(() => _openReportCount = count);
+      }
+    } catch (error) {
+      debugPrint('Unable to refresh the report count: $error');
+    }
+  }
+
+  Future<void> _openReports() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(builder: (_) => const ReportsScreen()),
+    );
+    await _refreshOpenReportCount();
+  }
+
   Future<void> _refreshUnreadMessageCount() async {
     try {
       final conversations = await _messagingService.listConversations();
@@ -644,6 +673,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       _loadCategories(),
       _refreshAdminStatus(),
       _refreshUnreadMessageCount(),
+      _refreshOpenReportCount(),
     ]);
   }
 
@@ -980,9 +1010,9 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         );
         return;
       case _AccountMenuAction.account:
-        await Navigator.of(context).push(
-          MaterialPageRoute<void>(builder: (_) => const AccountScreen()),
-        );
+        await Navigator.of(
+          context,
+        ).push(MaterialPageRoute<void>(builder: (_) => const AccountScreen()));
         return;
       case _AccountMenuAction.signOut:
         await _signOut();
@@ -1306,6 +1336,23 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh categories',
           ),
+          // Only an operator sees this, and only when something is waiting.
+          // A flag that is always present is furniture; one that appears is a
+          // message. The count comes from a table an ordinary user is refused
+          // by row level security, so this cannot be made to appear by anyone
+          // it is not meant for.
+          if (_isAdmin && _openReportCount > 0)
+            IconButton(
+              onPressed: _openReports,
+              icon: Badge(
+                label: Text('$_openReportCount'),
+                child: const Icon(Icons.flag),
+              ),
+              color: Theme.of(context).colorScheme.error,
+              tooltip: _openReportCount == 1
+                  ? '1 report waiting'
+                  : '$_openReportCount reports waiting',
+            ),
           if (_isAdmin)
             IconButton(
               onPressed: _openMaintenance,

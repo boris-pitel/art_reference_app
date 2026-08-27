@@ -64,3 +64,5 @@ verify_jwt = true
 verify_jwt = false
 [functions.replicate-to-backup]
 verify_jwt = false
+[functions.report-content]
+verify_jwt = false
