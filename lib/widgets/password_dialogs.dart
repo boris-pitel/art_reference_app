@@ -170,7 +170,19 @@ Future<bool> showSetPasswordDialog(
   BuildContext context, {
   required String title,
   String? subtitle,
+
+  /// Whether to ask for the password being replaced.
+  ///
+  /// True when somebody is changing a password they still know, which is the
+  /// case where it matters: without it, anyone holding an unlocked phone with
+  /// the app signed in could take the account away from its owner.
+  ///
+  /// False after a reset link, where the link is the proof of identity and
+  /// asking a person who has forgotten their password for their password
+  /// would defeat the entire purpose.
+  bool requireCurrentPassword = false,
 }) async {
+  final currentController = TextEditingController();
   final passwordController = TextEditingController();
   final confirmController = TextEditingController();
   final formKey = GlobalKey<FormState>();
@@ -196,9 +208,25 @@ Future<bool> showSetPasswordDialog(
                   Text(subtitle),
                   const SizedBox(height: 16),
                 ],
+                if (requireCurrentPassword) ...[
+                  TextFormField(
+                    controller: currentController,
+                    autofocus: true,
+                    obscureText: true,
+                    autofillHints: const [AutofillHints.password],
+                    decoration: const InputDecoration(
+                      labelText: 'Current password',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (value) => (value ?? '').isEmpty
+                        ? 'Enter your current password.'
+                        : null,
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 TextFormField(
                   controller: passwordController,
-                  autofocus: true,
+                  autofocus: !requireCurrentPassword,
                   obscureText: obscure,
                   autofillHints: const [AutofillHints.newPassword],
                   decoration: InputDecoration(
@@ -262,8 +290,29 @@ Future<bool> showSetPasswordDialog(
                       error = null;
                     });
 
+                    final auth = Supabase.instance.client.auth;
+
                     try {
-                      await Supabase.instance.client.auth.updateUser(
+                      if (requireCurrentPassword) {
+                        final email = auth.currentUser?.email?.trim() ?? '';
+                        if (email.isEmpty) {
+                          throw StateError(
+                            'You must be signed in to change your password.',
+                          );
+                        }
+
+                        // Proves the person at the keyboard is the account
+                        // holder and not somebody who picked up an unlocked
+                        // phone. Signing in again is the only way to check a
+                        // password from here — the server never hands one back
+                        // to be compared.
+                        await auth.signInWithPassword(
+                          email: email,
+                          password: currentController.text,
+                        );
+                      }
+
+                      await auth.updateUser(
                         UserAttributes(password: passwordController.text),
                       );
 
@@ -271,6 +320,7 @@ Future<bool> showSetPasswordDialog(
                         operation: 'password_changed',
                         status: 'succeeded',
                         targetType: 'account',
+                        details: {'verified': requireCurrentPassword},
                       );
 
                       if (dialogContext.mounted) {
@@ -284,9 +334,19 @@ Future<bool> showSetPasswordDialog(
                         error: saveError,
                       );
 
+                      // Supabase answers a wrong password with "Invalid login
+                      // credentials", which reads as though the whole account
+                      // is wrong rather than the one field that is.
+                      final wrongCurrent =
+                          requireCurrentPassword &&
+                          saveError is AuthException &&
+                          saveError.message.toLowerCase().contains('invalid');
+
                       setDialogState(() {
                         isSaving = false;
-                        error = '$saveError';
+                        error = wrongCurrent
+                            ? 'That is not your current password.'
+                            : '$saveError';
                       });
                     }
                   },
@@ -303,6 +363,7 @@ Future<bool> showSetPasswordDialog(
     ),
   );
 
+  currentController.dispose();
   passwordController.dispose();
   confirmController.dispose();
 

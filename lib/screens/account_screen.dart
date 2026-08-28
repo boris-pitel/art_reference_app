@@ -58,6 +58,7 @@ class _AccountScreenState extends State<AccountScreen> {
               final changed = await showSetPasswordDialog(
                 context,
                 title: 'Change your password',
+                requireCurrentPassword: true,
               );
 
               if (changed && context.mounted) {

@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/app_status_service.dart';
 import '../services/impersonation_controller.dart';
 import '../services/maintenance_service.dart';
+import '../services/user_activity_logger.dart';
 import '../widgets/home_button.dart';
 
 class MaintenanceScreen extends StatefulWidget {
@@ -303,8 +304,7 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
                       ),
                       IconButton(
                         tooltip: 'Set login name',
-                        onPressed: () =>
-                            Navigator.pop(dialogContext, 'edit'),
+                        onPressed: () => Navigator.pop(dialogContext, 'edit'),
                         icon: const Icon(Icons.edit_outlined, size: 18),
                         visualDensity: VisualDensity.compact,
                         padding: EdgeInsets.zero,
@@ -354,10 +354,7 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
                   'Stored files',
                   '${user['storage_file_count'] ?? 0}',
                 ),
-                _DetailRow(
-                  'AI edits today',
-                  '${user['ai_edits_today'] ?? 0}',
-                ),
+                _DetailRow('AI edits today', '${user['ai_edits_today'] ?? 0}'),
                 _DetailRow(
                   'AI edits this month',
                   '${user['ai_edits_this_month'] ?? 0}',
@@ -367,13 +364,23 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
                   // The failure count matters: a person whose edits keep
                   // failing looks like a heavy user from the total alone.
                   '${user['ai_edits_all_time'] ?? 0}'
-                  '${(user['ai_edits_failed'] ?? 0) == 0 ? '' : ' (${user['ai_edits_failed']} failed)'}',
+                      '${(user['ai_edits_failed'] ?? 0) == 0 ? '' : ' (${user['ai_edits_failed']} failed)'}',
                 ),
               ],
             ),
           ),
         ),
         actions: [
+          // Somebody locked out of their password used to mean a trip to the
+          // Supabase dashboard, or an administrator setting it by hand and
+          // then having to tell them what it was. This sends them a link and
+          // lets them choose it themselves, which is the only version where
+          // nobody else ever knows the password.
+          TextButton.icon(
+            onPressed: () => Navigator.pop(dialogContext, 'reset_password'),
+            icon: const Icon(Icons.lock_reset_outlined),
+            label: const Text('Send password reset'),
+          ),
           if (user['is_current_user'] != true)
             TextButton.icon(
               onPressed: () => Navigator.pop(dialogContext, 'impersonate'),
@@ -400,6 +407,67 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
     if (action == 'edit' && mounted) await _editLoginName(user);
     if (action == 'level' && mounted) await _editAiLevel(user);
     if (action == 'impersonate' && mounted) await _impersonateUser(user);
+    if (action == 'reset_password' && mounted) await _sendPasswordReset(user);
+  }
+
+  /// Emails a reset link to somebody who cannot get in.
+  ///
+  /// Confirmed first, because it lands unannounced in their inbox and a
+  /// password reset nobody asked for is alarming rather than helpful.
+  Future<void> _sendPasswordReset(Map<String, dynamic> user) async {
+    final email = user['email']?.toString().trim() ?? '';
+    if (email.isEmpty) {
+      _message('That account has no email address.', error: true);
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Send a password reset?'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: Text(
+            '$email will be emailed a link that lets them choose a new '
+            'password. Their current one keeps working until they do.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Send'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await Supabase.instance.client.auth.resetPasswordForEmail(email);
+
+      UserActivityLogger.instance.record(
+        operation: 'password_reset_sent',
+        status: 'succeeded',
+        targetType: 'account',
+        details: {'for': email},
+      );
+
+      if (mounted) _message('A reset link is on its way to $email.');
+    } catch (error) {
+      UserActivityLogger.instance.record(
+        operation: 'password_reset_sent',
+        status: 'failed',
+        targetType: 'account',
+        details: {'for': email},
+        error: error,
+      );
+
+      if (mounted) _message('Could not send it: $error', error: true);
+    }
   }
 
   /// Says what the person actually gets, not just what is stored.
@@ -441,7 +509,8 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
         children: [
           for (final entry in _aiLevels)
             SimpleDialogOption(
-              onPressed: () => Navigator.pop(dialogContext, entry['level'] as int),
+              onPressed: () =>
+                  Navigator.pop(dialogContext, entry['level'] as int),
               child: ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: Icon(
@@ -507,9 +576,8 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
             trailing: IconButton(
               tooltip: 'Change the service limit',
               icon: const Icon(Icons.edit_outlined),
-              onPressed: () => _editGlobalLimit(
-                globalDaily is int ? globalDaily : 0,
-              ),
+              onPressed: () =>
+                  _editGlobalLimit(globalDaily is int ? globalDaily : 0),
             ),
           ),
         ),
@@ -929,9 +997,7 @@ class _RecordList extends StatelessWidget {
         return Card(
           child: ListTile(
             leading: Icon(icon(row)),
-            title: selectable
-                ? SelectableText(title(row))
-                : Text(title(row)),
+            title: selectable ? SelectableText(title(row)) : Text(title(row)),
             subtitle: selectable
                 ? SelectableText(subtitle(row))
                 : Text(subtitle(row)),
@@ -999,10 +1065,11 @@ String? _deviceSummary(Map<String, dynamic> row) {
       device['model'],
     ].whereType<String>().where((value) => value.isNotEmpty).join(' '),
     [
-      device['android_version'],
-      device['system_version'],
-      device['platform_version'],
-    ].whereType<String>().where((value) => value.isNotEmpty).firstOrNull ?? '',
+          device['android_version'],
+          device['system_version'],
+          device['platform_version'],
+        ].whereType<String>().where((value) => value.isNotEmpty).firstOrNull ??
+        '',
     if (device['screen'] is String) device['screen'] as String,
   ].where((value) => value.isNotEmpty).toList();
 
