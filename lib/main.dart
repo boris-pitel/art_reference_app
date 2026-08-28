@@ -17,6 +17,7 @@ import 'screens/login_screen.dart';
 import 'screens/maintenance_screen.dart';
 import 'services/user_activity_logger.dart';
 import 'widgets/legal_agreement_notice.dart';
+import 'widgets/password_dialogs.dart';
 import 'screens/keyword_search_screen.dart';
 import 'screens/messages_screen.dart';
 import 'screens/messaging_settings_screen.dart';
@@ -128,6 +129,14 @@ class _ArtReferenceAppState extends State<ArtReferenceApp> {
 
         final isNowSignedIn = _isSignedIn;
 
+        // Somebody has followed a reset link. Supabase has already given them
+        // a session by this point, so without this they would simply find
+        // themselves signed in and never be asked for the new password they
+        // came here to set — and would be locked out again next time.
+        if (authState.event == AuthChangeEvent.passwordRecovery) {
+          _askForNewPassword();
+        }
+
         if (!wasSignedIn && isNowSignedIn) {
           _openPendingShareWhenReady();
           _logGoogleSignInIfPending();
@@ -176,6 +185,32 @@ class _ArtReferenceAppState extends State<ArtReferenceApp> {
     // The web sign-in leaves the page before the login screen can record this,
     // so the acceptance is recorded here alongside the login it belongs to.
     recordLegalAcceptance(method: provider);
+  }
+
+  /// Asks for the new password, once the app has a screen to ask on.
+  ///
+  /// The recovery event can arrive before the first frame — on web the link
+  /// *is* the page load — so this waits for a navigator rather than assuming
+  /// one is already there.
+  void _askForNewPassword() {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final context = rootNavigatorKey.currentContext;
+      if (context == null || !context.mounted) return;
+
+      final changed = await showSetPasswordDialog(
+        context,
+        title: 'Choose a new password',
+        subtitle:
+            'You followed a reset link, so pick a password you will '
+            'remember. You are signed in already.',
+      );
+
+      if (!changed || !context.mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Your password has changed.')),
+      );
+    });
   }
 
   Future<void> _initializeSharingListener() async {

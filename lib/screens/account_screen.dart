@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../services/app_image_cache.dart';
 import '../services/user_activity_logger.dart';
 import '../widgets/home_button.dart';
+import '../widgets/password_dialogs.dart';
 
 /// Account settings, and the only place an account can be deleted.
 ///
@@ -32,7 +33,10 @@ class _AccountScreenState extends State<AccountScreen> {
     final theme = Theme.of(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Account'), actions: const [HomeButton()]),
+      appBar: AppBar(
+        title: const Text('Account'),
+        actions: const [HomeButton()],
+      ),
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
         children: [
@@ -41,6 +45,27 @@ class _AccountScreenState extends State<AccountScreen> {
             leading: const Icon(Icons.person_outline),
             title: const Text('Signed in as'),
             subtitle: Text(_email.isEmpty ? 'Unknown' : _email),
+          ),
+          const Divider(height: 32),
+          Text('Security', style: theme.textTheme.titleSmall),
+          const SizedBox(height: 4),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.lock_outline),
+            title: const Text('Change password'),
+            subtitle: const Text('You will stay signed in on this device'),
+            onTap: () async {
+              final changed = await showSetPasswordDialog(
+                context,
+                title: 'Change your password',
+              );
+
+              if (changed && context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Your password has changed.')),
+                );
+              }
+            },
           ),
           const Divider(height: 32),
           Text('Documents', style: theme.textTheme.titleSmall),

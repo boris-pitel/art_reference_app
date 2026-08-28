@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/app_user_profile.dart';
 import '../services/user_activity_logger.dart';
 import '../widgets/legal_agreement_notice.dart';
+import '../widgets/password_dialogs.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -375,6 +376,16 @@ class _LoginScreenState extends State<LoginScreen> {
                                   : 'Need an account? Create one',
                             ),
                           ),
+                          // Only when signing in. Somebody creating an account
+                          // has no password to have forgotten, and offering to
+                          // reset one would suggest they already have one.
+                          if (!_isCreatingAccount)
+                            TextButton(
+                              onPressed: _isWorking
+                                  ? null
+                                  : () => showForgotPasswordDialog(context),
+                              child: const Text('Forgot your password?'),
+                            ),
                           // Google and Apple sign-in were both offered here and
                           // are both withdrawn. Apple refuses to authorise this
                           // app for Sign in with Apple — invalid_client through
