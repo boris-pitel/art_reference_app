@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	     Sign in with Apple, on the device rather than through a browser.
+
+	     The native flow authenticates against the app's own bundle id and this
+	     entitlement. It never touches the Services ID or a return URL, which
+	     is the whole reason it is here: the web flow is refused with
+	     invalid_client despite the portal reading as correct, and this route
+	     does not go through the part that is broken.
+
+	     It is also what an iPhone user should get — Face ID rather than typing
+	     an Apple Account password into Safari.
+	-->
+	<key>com.apple.developer.applesignin</key>
+	<array>
+		<string>Default</string>
+	</array>
+</dict>
+</plist>
