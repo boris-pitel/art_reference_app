@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/app_user_profile.dart';
+import '../services/apple_sign_in_service.dart';
 import '../services/google_sign_in_service.dart';
 import '../services/user_activity_logger.dart';
 import '../widgets/legal_agreement_notice.dart';
@@ -39,14 +40,25 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  Future<void> _signInWithGoogle() async {
+  Future<void> _signInWithGoogle() =>
+      _signInWithProvider('google', GoogleSignInService.signIn);
+
+  Future<void> _signInWithApple() =>
+      _signInWithProvider('apple', AppleSignInService.signIn);
+
+  /// One path for both providers, so the logging, the legal acceptance and the
+  /// error handling cannot drift apart between them.
+  Future<void> _signInWithProvider(
+    String provider,
+    Future<void> Function() signIn,
+  ) async {
     setState(() {
       _isWorking = true;
       _errorMessage = null;
     });
 
     try {
-      await GoogleSignInService.signIn();
+      await signIn();
 
       // On web the page has already navigated away by now, so this records
       // only the platforms that return here. Web sign-ins are logged by the
@@ -57,10 +69,10 @@ class _LoginScreenState extends State<LoginScreen> {
           status: 'succeeded',
           targetType: 'account',
           targetId: _supabase.auth.currentUser?.id,
-          details: const {'provider': 'google'},
+          details: {'provider': provider},
         );
 
-        recordLegalAcceptance(method: 'google');
+        recordLegalAcceptance(method: provider);
       }
 
       // main.dart listens to onAuthStateChange and replaces this screen once
@@ -69,7 +81,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) setState(() => _errorMessage = error.message);
     } catch (error) {
       if (mounted) {
-        setState(() => _errorMessage = 'Google sign-in failed: $error');
+        setState(() => _errorMessage = 'Sign-in failed: $error');
       }
     } finally {
       if (mounted) setState(() => _isWorking = false);
@@ -438,8 +450,18 @@ class _LoginScreenState extends State<LoginScreen> {
                             // account, and an existing address signs into it.
                             label: const Text('Continue with Google'),
                           ),
-                          // Below both buttons, so it is present on every
-                          // sign-in and covers the Google path as well.
+                          const SizedBox(height: 10),
+                          // Apple requires this wherever a third-party sign-in
+                          // is offered, and wants it presented no less
+                          // prominently than the others — hence the same
+                          // button, not a smaller one underneath.
+                          OutlinedButton.icon(
+                            onPressed: _isWorking ? null : _signInWithApple,
+                            icon: const Icon(Icons.apple, size: 24),
+                            label: const Text('Continue with Apple'),
+                          ),
+                          // Below every button, so it is present on all three
+                          // routes rather than only the password one.
                           const LegalAgreementNotice(),
                         ],
                       ),

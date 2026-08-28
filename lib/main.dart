@@ -26,6 +26,7 @@ import 'services/app_image_cache.dart';
 import 'services/app_status_service.dart';
 import 'services/category_service.dart';
 import 'services/device_profile.dart';
+import 'services/apple_sign_in_service.dart';
 import 'services/google_sign_in_service.dart';
 import 'services/impersonation_controller.dart';
 import 'services/library_home_cache.dart';
@@ -147,11 +148,20 @@ class _ArtReferenceAppState extends State<ArtReferenceApp> {
   /// code. Without this, Google users appear in the activity log logging out
   /// without ever having logged in.
   Future<void> _logGoogleSignInIfPending() async {
-    if (!await GoogleSignInService.consumeWebSignInPending()) return;
+    // Both providers leave their own marker, and both are checked: whichever
+    // one was used, the log should say so rather than recording every web
+    // sign-in as Google because Google was the one that existed first.
+    final provider = await GoogleSignInService.consumeWebSignInPending()
+        ? 'google'
+        : await AppleSignInService.consumeWebSignInPending()
+        ? 'apple'
+        : null;
+
+    if (provider == null) return;
 
     // A marker with no session behind it means the sign-in did not complete —
-    // the user cancelled at Google, or it failed. Recording a success there
-    // would be a login in the log that nobody performed.
+    // the user cancelled at the provider, or it failed. Recording a success
+    // there would be a login in the log that nobody performed.
     final user = _supabase.auth.currentUser;
     if (user == null) return;
 
@@ -160,12 +170,12 @@ class _ArtReferenceAppState extends State<ArtReferenceApp> {
       status: 'succeeded',
       targetType: 'account',
       targetId: user.id,
-      details: const {'provider': 'google'},
+      details: {'provider': provider},
     );
 
     // The web sign-in leaves the page before the login screen can record this,
     // so the acceptance is recorded here alongside the login it belongs to.
-    recordLegalAcceptance(method: 'google');
+    recordLegalAcceptance(method: provider);
   }
 
   Future<void> _initializeSharingListener() async {
