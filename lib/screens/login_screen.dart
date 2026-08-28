@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/app_user_profile.dart';
-import '../services/apple_sign_in_service.dart';
-import '../services/google_sign_in_service.dart';
 import '../services/user_activity_logger.dart';
 import '../widgets/legal_agreement_notice.dart';
 
@@ -38,54 +36,6 @@ class _LoginScreenState extends State<LoginScreen> {
     _loginNameController.dispose();
 
     super.dispose();
-  }
-
-  Future<void> _signInWithGoogle() =>
-      _signInWithProvider('google', GoogleSignInService.signIn);
-
-  Future<void> _signInWithApple() =>
-      _signInWithProvider('apple', AppleSignInService.signIn);
-
-  /// One path for both providers, so the logging, the legal acceptance and the
-  /// error handling cannot drift apart between them.
-  Future<void> _signInWithProvider(
-    String provider,
-    Future<void> Function() signIn,
-  ) async {
-    setState(() {
-      _isWorking = true;
-      _errorMessage = null;
-    });
-
-    try {
-      await signIn();
-
-      // On web the page has already navigated away by now, so this records
-      // only the platforms that return here. Web sign-ins are logged by the
-      // auth listener in main.dart instead, which runs after the redirect.
-      if (_supabase.auth.currentUser != null) {
-        UserActivityLogger.instance.record(
-          operation: 'login',
-          status: 'succeeded',
-          targetType: 'account',
-          targetId: _supabase.auth.currentUser?.id,
-          details: {'provider': provider},
-        );
-
-        recordLegalAcceptance(method: provider);
-      }
-
-      // main.dart listens to onAuthStateChange and replaces this screen once
-      // the session lands.
-    } on AuthException catch (error) {
-      if (mounted) setState(() => _errorMessage = error.message);
-    } catch (error) {
-      if (mounted) {
-        setState(() => _errorMessage = 'Sign-in failed: $error');
-      }
-    } finally {
-      if (mounted) setState(() => _isWorking = false);
-    }
   }
 
   Future<void> _submit() async {
@@ -425,43 +375,20 @@ class _LoginScreenState extends State<LoginScreen> {
                                   : 'Need an account? Create one',
                             ),
                           ),
-                          const SizedBox(height: 18),
-                          Row(
-                            children: [
-                              const Expanded(child: Divider()),
-                              Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                ),
-                                child: Text(
-                                  'or',
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                ),
-                              ),
-                              const Expanded(child: Divider()),
-                            ],
-                          ),
-                          const SizedBox(height: 18),
-                          OutlinedButton.icon(
-                            onPressed: _isWorking ? null : _signInWithGoogle,
-                            icon: const Icon(Icons.g_mobiledata, size: 28),
-                            // One label for both modes: with Google there is no
-                            // separate sign-up — a first sign-in creates the
-                            // account, and an existing address signs into it.
-                            label: const Text('Continue with Google'),
-                          ),
-                          const SizedBox(height: 10),
-                          // Apple requires this wherever a third-party sign-in
-                          // is offered, and wants it presented no less
-                          // prominently than the others — hence the same
-                          // button, not a smaller one underneath.
-                          OutlinedButton.icon(
-                            onPressed: _isWorking ? null : _signInWithApple,
-                            icon: const Icon(Icons.apple, size: 24),
-                            label: const Text('Continue with Apple'),
-                          ),
-                          // Below every button, so it is present on all three
-                          // routes rather than only the password one.
+                          // Google and Apple sign-in were both offered here and
+                          // are both withdrawn. Apple refuses to authorise this
+                          // app for Sign in with Apple — invalid_client through
+                          // the Services ID, error 1000 through the on-device
+                          // entitlement — with every setting in their portal
+                          // reading as correct and no explanation available.
+                          //
+                          // Guideline 4.8 only requires Sign in with Apple from
+                          // an app that offers some other third-party sign-in.
+                          // Offering none removes the requirement rather than
+                          // failing it, so the Google button goes too. The
+                          // services behind both remain in the repository, and
+                          // the buttons come back the day Apple starts
+                          // answering.
                           const LegalAgreementNotice(),
                         ],
                       ),
