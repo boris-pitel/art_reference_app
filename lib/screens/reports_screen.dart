@@ -6,12 +6,16 @@ import '../widgets/home_button.dart';
 
 /// What people have reported, for the operator to look at.
 ///
-/// Deliberately read-only. Acting on a report — suspending somebody, removing
-/// what they sent — happens in the admin console, where there is room to see
-/// the whole picture before doing something to a person's account. This screen
-/// exists so the operator can find out from their phone that something is
-/// waiting, which is the difference between a promise to respond within a day
-/// and a promise that depends on being at a desk.
+/// Tapping a report closes it, either as acted on or as needing nothing. That
+/// is the minimum for the queue to work at all: the red flag counts open
+/// reports, so without a way to close one it would stay lit for ever and stop
+/// meaning anything within a day.
+///
+/// The heavier consequences — suspending an account, removing what somebody
+/// sent — still belong in the admin console, where there is room to see the
+/// whole picture before doing something to a person. This screen is for
+/// finding out from a phone that something is waiting, and for saying it has
+/// been dealt with.
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
 
@@ -25,6 +29,75 @@ class _ReportsScreenState extends State<ReportsScreen> {
   List<ContentReport> _reports = const [];
   bool _isLoading = true;
   String? _errorMessage;
+
+  /// The report currently being closed, so its row can show it is working and
+  /// cannot be tapped twice.
+  String? _resolving;
+
+  /// Closes a report, having asked which of the two it is.
+  ///
+  /// "Acted on" and "Nothing needed" both clear it from the queue, and the
+  /// difference is kept rather than collapsed into one button: a run of
+  /// dismissals against one person reads very differently afterwards from a
+  /// run of actions.
+  Future<void> _close(ContentReport report) async {
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Close this report?'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: Text(
+            '${report.reasonLabel}, about '
+            '${report.reportedEmail ?? 'someone'}.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, 'dismissed'),
+            child: const Text('Nothing needed'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, 'actioned'),
+            child: const Text('Acted on it'),
+          ),
+        ],
+      ),
+    );
+    if (choice == null || !mounted) return;
+
+    setState(() => _resolving = report.id);
+
+    try {
+      await _reportService.resolve(reportId: report.id, status: choice);
+
+      if (!mounted) return;
+      setState(() {
+        // Removed here rather than by reloading, so the list does not jump
+        // under the finger that just tapped it.
+        _reports = _reports.where((r) => r.id != report.id).toList();
+        _resolving = null;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            choice == 'actioned' ? 'Marked as acted on.' : 'Report closed.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _resolving = null);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not close it: $error')));
+    }
+  }
 
   @override
   void initState() {
@@ -122,12 +195,22 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
     return ListTile(
       isThreeLine: true,
-      leading: Icon(
-        report.subjectType == 'user'
-            ? Icons.person_outline
-            : Icons.chat_bubble_outline,
-        color: theme.colorScheme.error,
-      ),
+      // Closing a report is the whole point of the queue, so it happens here
+      // rather than somewhere else: a badge that cannot be cleared stops being
+      // information within a day.
+      onTap: _resolving == report.id ? null : () => _close(report),
+      leading: _resolving == report.id
+          ? const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : Icon(
+              report.subjectType == 'user'
+                  ? Icons.person_outline
+                  : Icons.chat_bubble_outline,
+              color: theme.colorScheme.error,
+            ),
       title: Text(report.reasonLabel),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

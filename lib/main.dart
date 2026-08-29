@@ -642,6 +642,11 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     _restoreThenRefreshCategories();
     _refreshAdminStatus();
     _refreshUnreadMessageCount();
+    // Missing until now, so the flag was invisible after a fresh launch no
+    // matter how many reports were waiting — it appeared only if somebody
+    // happened to pull to refresh, which is not how anyone finds out that
+    // something needs attention.
+    _refreshOpenReportCount();
 
     // This screen's State is never recreated by an impersonation switch
     // (Navigator.popUntil reuses the existing root route rather than

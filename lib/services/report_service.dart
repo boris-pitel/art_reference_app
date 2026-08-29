@@ -150,6 +150,34 @@ class ReportService {
     }
   }
 
+  /// Closes a report, one way or the other.
+  ///
+  /// [status] is 'actioned' when something was done about it and 'dismissed'
+  /// when nothing needed to be. Both take the report out of the queue, and the
+  /// distinction is kept because a pattern of dismissals against one person
+  /// reads very differently from a pattern of actions.
+  ///
+  /// Who resolved it is recorded from the caller's own token rather than
+  /// passed in, so it cannot be attributed to somebody else.
+  Future<void> resolve({
+    required String reportId,
+    required String status,
+    String? note,
+  }) async {
+    assert(status == 'actioned' || status == 'dismissed');
+
+    await _supabase
+        .from('content_reports')
+        .update({
+          'status': status,
+          'resolved_at': DateTime.now().toUtc().toIso8601String(),
+          'resolved_by': _supabase.auth.currentUser?.email,
+          if (note != null && note.trim().isNotEmpty)
+            'resolution_note': note.trim(),
+        })
+        .eq('id', reportId);
+  }
+
   Future<List<ContentReport>> listOpenReports() async {
     final rows = await _supabase
         .from('content_reports')

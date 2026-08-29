@@ -305,10 +305,29 @@ class _AboutPage extends StatelessWidget {
       children: [
         const SizedBox(height: 12),
         Center(
-          child: Icon(
-            Icons.palette_outlined,
-            size: 72,
-            color: theme.colorScheme.primary,
+          // The app's own icon rather than a stock palette glyph. This is the
+          // one screen whose job is to say what the app is, and the mark the
+          // user taps to open it every day belongs here.
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(18),
+            child: Image.asset(
+              'assets/app_icon.png',
+              width: 88,
+              height: 88,
+              fit: BoxFit.cover,
+              // The asset is a 2.4 MB master used to generate the launcher
+              // icons. Decoding all of it to draw 88 points would cost far
+              // more memory than the picture is worth, so it is decoded at the
+              // size it is actually shown, allowing for a 3x screen.
+              cacheWidth: 264,
+              // Falls back to the old glyph rather than Flutter's broken-image
+              // box if the asset ever goes missing from a build.
+              errorBuilder: (context, error, stackTrace) => Icon(
+                Icons.palette_outlined,
+                size: 72,
+                color: theme.colorScheme.primary,
+              ),
+            ),
           ),
         ),
         const SizedBox(height: 20),
