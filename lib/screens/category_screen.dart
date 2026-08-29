@@ -979,7 +979,11 @@ class _CategoryScreenState extends State<CategoryScreen>
                           .map(
                             (category) => DropdownMenuItem(
                               value: category,
-                              child: Text(category.displayName),
+                              child: Text(
+                                category.displayName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                           )
                           .toList(growable: false),

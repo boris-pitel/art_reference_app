@@ -26,6 +26,7 @@ import '../widgets/home_button.dart';
 import '../widgets/image_delivery.dart';
 import 'ai_image_edit_screen.dart';
 import 'image_adjustment_screen.dart';
+import 'compare_images_screen.dart';
 import 'recipient_picker_screen.dart';
 
 class _ExportImageData {
@@ -105,7 +106,15 @@ String _saveResultMessage(ImageSaveResult result) {
   return kIsWeb ? 'Image downloaded.' : 'Image saved to Photos.';
 }
 
-enum _AssociatedImageAction { open, editImage, share, save, print, delete }
+enum _AssociatedImageAction {
+  open,
+  compare,
+  editImage,
+  share,
+  save,
+  print,
+  delete,
+}
 
 enum _MainImageAction { share, save, print, move, sendToFriend }
 
@@ -892,6 +901,10 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         await _openAssociatedImage(image);
         break;
 
+      case _AssociatedImageAction.compare:
+        await _compareWithReference(image);
+        break;
+
       case _AssociatedImageAction.editImage:
         await _openAssociatedImageForEditing(image);
         break;
@@ -914,7 +927,51 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     }
   }
 
+  /// Opens the sketch against the reference it belongs to.
+  ///
+  /// No picking: a sketch has exactly one parent, and the app already knows
+  /// which. That is the whole advantage of doing this here rather than in a
+  /// drawing app, where the reference would have to be found and imported
+  /// first — so the accuracy check is one tap and nothing else.
+  Future<void> _compareWithReference(ImageAssetInfo image) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (context) => CompareImagesScreen(
+          leftImageId: _currentImageId,
+          leftImageUrl: _currentImageUrl,
+          leftLabel: 'Reference',
+          rightImageId: image.id,
+          rightImageUrl: image.imageUrl,
+          rightLabel: 'Sketch',
+        ),
+      ),
+    );
+
+    UserActivityLogger.instance.record(
+      operation: 'compare_with_reference',
+      status: 'succeeded',
+      targetType: 'image',
+      targetId: image.id,
+      parentImageId: _currentImageId,
+    );
+  }
+
   Future<void> _openAssociatedImageForEditing(ImageAssetInfo image) async {
+    // The siblings travel with it, exactly as they do on the other route into
+    // a sketch. Without them this one had no neighbours at all, so moving
+    // between sketches silently did nothing here while working elsewhere —
+    // invisible while the only way through was an undiscoverable swipe, and
+    // plainly broken now that there are arrows to be missing.
+    final navigationItems = _associatedImages
+        .map(
+          (item) => ImageDetailsNavigationItem(
+            imageId: item.id,
+            imageUrl: item.imageUrl,
+            dateAdded: item.dateAdded,
+          ),
+        )
+        .toList(growable: false);
+
     await Navigator.of(context).push<bool>(
       MaterialPageRoute<bool>(
         builder: (context) => ImageDetailsScreen(
@@ -925,6 +982,10 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
           parentImageId: _currentImageId,
           dateAdded: image.dateAdded,
           startImageEditing: true,
+          navigationItems: navigationItems,
+          navigationIndex: _associatedImages.indexWhere(
+            (item) => item.id == image.id,
+          ),
         ),
       ),
     );
@@ -1464,7 +1525,11 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                                   .map(
                                     (category) => DropdownMenuItem(
                                       value: category,
-                                      child: Text(category.displayName),
+                                      child: Text(
+                                        category.displayName,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
                                     ),
                                   )
                                   .toList(growable: false),
@@ -1498,7 +1563,11 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                                 .map(
                                   (category) => DropdownMenuItem(
                                     value: category,
-                                    child: Text(category.displayName),
+                                    child: Text(
+                                      category.displayName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                   ),
                                 )
                                 .toList(growable: false),
@@ -1813,9 +1882,86 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                 right: 12,
                 child: _buildImageActionsMenu(context),
               ),
+              ..._buildNavigationControls(context),
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// Arrows and a position, over the image.
+  ///
+  /// Moving between images was a horizontal swipe and nothing else — invisible
+  /// on a phone, and on Windows and the web not merely hidden but absent,
+  /// since there is no swipe with a mouse. Desktop users had to go back to the
+  /// grid for every picture.
+  ///
+  /// Absent at the first and last image rather than disabled, so the ends of
+  /// the sequence are shown by the same controls that move through it.
+  List<Widget> _buildNavigationControls(BuildContext context) {
+    if (_navigationItems.length < 2) return const [];
+
+    final hasPrevious = _currentNavigationIndex > 0;
+    final hasNext = _currentNavigationIndex < _navigationItems.length - 1;
+
+    return [
+      if (hasPrevious)
+        Positioned(
+          left: 8,
+          top: 0,
+          bottom: 0,
+          child: Center(
+            child: _navigationButton(context, -1, Icons.chevron_left),
+          ),
+        ),
+      if (hasNext)
+        Positioned(
+          right: 8,
+          top: 0,
+          bottom: 0,
+          child: Center(
+            child: _navigationButton(context, 1, Icons.chevron_right),
+          ),
+        ),
+      Positioned(
+        left: 12,
+        bottom: 12,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.55),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            child: Text(
+              '${_currentNavigationIndex + 1} of ${_navigationItems.length}',
+              style: const TextStyle(color: Colors.white, fontSize: 12),
+            ),
+          ),
+        ),
+      ),
+    ];
+  }
+
+  Widget _navigationButton(BuildContext context, int delta, IconData icon) {
+    // Disabled while a move is in flight. Navigating first saves any pending
+    // metadata edit, and an arrow invites repeated tapping in a way a swipe
+    // never did — without this a double tap would move twice.
+    final enabled = !_isNavigatingHorizontally;
+
+    return Material(
+      color: Colors.black.withValues(alpha: 0.45),
+      shape: const CircleBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: IconButton(
+        onPressed: enabled
+            ? () => unawaited(_navigateHorizontally(delta))
+            : null,
+        icon: Icon(icon),
+        color: Colors.white,
+        disabledColor: Colors.white38,
+        tooltip: delta < 0 ? 'Previous image' : 'Next image',
       ),
     );
   }
@@ -2722,6 +2868,15 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                           contentPadding: EdgeInsets.zero,
                           leading: Icon(Icons.open_in_full_outlined),
                           title: Text('Open'),
+                        ),
+                      ),
+                      const PopupMenuItem<_AssociatedImageAction>(
+                        value: _AssociatedImageAction.compare,
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(Icons.compare_outlined),
+                          title: Text('Compare with the reference'),
+                          subtitle: Text('Check the drawing against the photo'),
                         ),
                       ),
                       const PopupMenuItem<_AssociatedImageAction>(
