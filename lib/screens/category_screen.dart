@@ -163,9 +163,7 @@ class _CategoryScreenState extends State<CategoryScreen>
       _ImageActionEntry(
         action: _ImageAction.edit,
         icon: Icons.edit_outlined,
-        label: widget.category.isMyArt
-            ? 'Edit parent details'
-            : 'Edit details',
+        label: widget.category.isMyArt ? 'Edit parent details' : 'Edit details',
         subtitle: 'Open titles, notes, and image options',
       ),
       const _ImageActionEntry(
@@ -319,8 +317,7 @@ class _CategoryScreenState extends State<CategoryScreen>
         details: {
           'category': widget.category.databaseCode,
           'url_age_seconds': ?age,
-          if (age != null)
-            'url_expired': age >= _signedUrlLifetime.inSeconds,
+          if (age != null) 'url_expired': age >= _signedUrlLifetime.inSeconds,
           'retried': _retriedAfterFailure,
         },
         error: error,
@@ -899,8 +896,7 @@ class _CategoryScreenState extends State<CategoryScreen>
       final allCategories = await categoryService.listCategories();
       final destinationCategories = allCategories
           .where(
-            (category) =>
-                category.databaseCode != widget.category.databaseCode,
+            (category) => category.databaseCode != widget.category.databaseCode,
           )
           .toList(growable: false);
 
@@ -960,8 +956,8 @@ class _CategoryScreenState extends State<CategoryScreen>
           builder: (context, setDialogState) {
             return AlertDialog(
               title: const Text('Move Reference'),
-              content: SizedBox(
-                width: 420,
+              content: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,

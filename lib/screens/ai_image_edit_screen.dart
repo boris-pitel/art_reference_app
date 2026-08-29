@@ -51,6 +51,11 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
   Uint8List? _previewBytes;
   bool _isGenerating = false;
   bool _isAccepting = false;
+
+  /// True while the compare control is held down, showing the original in the
+  /// result's place.
+  bool _isComparing = false;
+
   String? _error;
 
   /// The most recent sketch saved from this screen.
@@ -265,8 +270,10 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Saved to sketches. Describe another change to '
-              'keep editing, or go back to see it.'),
+          content: Text(
+            'Saved to sketches. Describe another change to '
+            'keep editing, or go back to see it.',
+          ),
           duration: Duration(seconds: 4),
         ),
       );
@@ -307,25 +314,42 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            AspectRatio(
-              aspectRatio: 1,
-              child: DecoratedBox(
+            _buildPreview(context),
+            // Directly under the image, where somebody waiting for a result is
+            // already looking, rather than under the prompt field where it
+            // could be scrolled off a phone screen entirely.
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              DecoratedBox(
                 decoration: BoxDecoration(
-                  color: Colors.black,
-                  borderRadius: BorderRadius.circular(12),
+                  color: Theme.of(context).colorScheme.errorContainer,
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: _previewBytes == null
-                      ? CachedImage(
-                          url: widget.sourceImageUrl,
-                          cacheKey: AppImageCache.fullKey(widget.sourceImageId),
-                          fit: BoxFit.contain,
-                        )
-                      : Image.memory(_previewBytes!, fit: BoxFit.contain),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.error_outline,
+                        color: Theme.of(context).colorScheme.onErrorContainer,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _error!,
+                          style: TextStyle(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onErrorContainer,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
+            ],
             const SizedBox(height: 16),
             TextField(
               controller: _promptController,
@@ -381,30 +405,148 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
     );
   }
 
+  /// The image pane, which always says what it is showing.
+  ///
+  /// It used to render the source image whenever there was no result — during
+  /// the whole of a sixty-second generation, and after every failure — at the
+  /// same size, in the same frame, with nothing to distinguish it from output.
+  /// So a failed edit looked exactly like a finished one that had changed
+  /// nothing, and the error explaining it sat below the prompt field, off the
+  /// bottom of a phone screen. That is reported as "it returns something and
+  /// it's the original", and it is not the model's doing.
+  Widget _buildPreview(BuildContext context) {
+    final theme = Theme.of(context);
+    final hasResult = _previewBytes != null;
+
+    // While comparing, the original is shown in the result's place — the point
+    // being to judge them in the same frame at the same size, where a small
+    // change is visible and a missing one is obvious.
+    final showingOriginal = !hasResult || _isComparing;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        AspectRatio(
+          aspectRatio: 1,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.black,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (showingOriginal)
+                    CachedImage(
+                      url: widget.sourceImageUrl,
+                      cacheKey: AppImageCache.fullKey(widget.sourceImageId),
+                      fit: BoxFit.contain,
+                    )
+                  else
+                    Image.memory(_previewBytes!, fit: BoxFit.contain),
+
+                  // Over the image rather than under the prompt. A minute-long
+                  // wait whose only indication is off the bottom of the screen
+                  // may as well have none.
+                  if (_isGenerating || _isAccepting)
+                    ColoredBox(
+                      color: Colors.black54,
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const CircularProgressIndicator(),
+                            const SizedBox(height: 16),
+                            Text(
+                              _isGenerating
+                                  ? 'Editing with AI…'
+                                  : 'Saving as a sketch…',
+                              style: const TextStyle(color: Colors.white),
+                            ),
+                            if (_isGenerating) ...[
+                              const SizedBox(height: 4),
+                              const Text(
+                                'This usually takes about a minute.',
+                                style: TextStyle(color: Colors.white70),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+
+                  Positioned(
+                    left: 8,
+                    top: 8,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.6),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        child: Text(
+                          showingOriginal ? 'Original' : 'AI result',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (hasResult) ...[
+          const SizedBox(height: 8),
+          // Held rather than toggled, so letting go always returns to the
+          // result and the control cannot be left in a state that misleads.
+          //
+          // This replaces comparing the two automatically. A generated image
+          // is re-rendered at another resolution and re-encoded, so it never
+          // matches the original byte for byte however little changed; and a
+          // perceptual comparison cannot tell "the model did nothing" from
+          // "the model did something small", which is most of what people ask
+          // for. The person who wrote the prompt can tell in half a second.
+          GestureDetector(
+            onTapDown: (_) => setState(() => _isComparing = true),
+            onTapUp: (_) => setState(() => _isComparing = false),
+            onTapCancel: () => setState(() => _isComparing = false),
+            child: OutlinedButton.icon(
+              onPressed: () {},
+              icon: const Icon(Icons.compare_outlined),
+              label: Text(
+                _isComparing ? 'Showing the original' : 'Hold to compare',
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: theme.colorScheme.primary,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
   /// Everything to do with acting on the prompt, kept together.
   ///
   /// Placed under the prompt field rather than at the foot of the page: the
   /// quality picker and the notices are read once, while the button is used on
-  /// every attempt, and the progress and errors belong beside the control that
-  /// caused them.
+  /// every attempt.
   List<Widget> _buildActions(BuildContext context, bool busy) {
-    final theme = Theme.of(context);
-
     return [
-      if (_error != null) ...[
-        const SizedBox(height: 12),
-        Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
-      ],
-      if (_isGenerating || _isAccepting) ...[
-        const SizedBox(height: 12),
-        const LinearProgressIndicator(),
-        const SizedBox(height: 8),
-        Text(
-          _isGenerating
-              ? 'AI is editing the image…'
-              : 'Saving as an associated image…',
-        ),
-      ],
+      // Progress and errors used to live here. They now sit on the image
+      // instead: this is below the prompt field, which on a phone is below the
+      // fold, so a failure after a minute of waiting was invisible at exactly
+      // the moment somebody was looking hardest for an answer.
       const SizedBox(height: 12),
       Wrap(
         spacing: 12,

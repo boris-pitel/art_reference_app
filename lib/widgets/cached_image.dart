@@ -57,16 +57,34 @@ class CachedImage extends StatelessWidget {
       // images already decoded.
       fadeInDuration: const Duration(milliseconds: 120),
       imageBuilder: (context, provider) {
-        // Reaching here means the bytes decoded, so the entry is in the cache
-        // and worth remembering for eviction.
+        // Reaching here means the file was obtained — not that it decoded.
+        // Tracking it for eviction is right either way; reporting it as
+        // rendered is not, and used to happen here.
         AppImageCache.track(cacheKey);
-        onRendered?.call();
 
         return Image(
           image: provider,
           fit: fit,
           width: width,
           height: height,
+          // The success signal belongs here, where a frame actually exists.
+          // Reporting it from imageBuilder above meant a file that arrived but
+          // could not be decoded — truncated, empty, not an image — was logged
+          // as a successful render while the screen showed nothing at all. A
+          // blank screen with a success in the log is worse than no log.
+          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+            if (frame != null || wasSynchronouslyLoaded) onRendered?.call();
+
+            return child;
+          },
+          // Likewise: a decode failure here produced no error, no report and
+          // no visible explanation, because this builder did not exist.
+          errorBuilder: (context, error, stackTrace) {
+            onFailed?.call(error);
+
+            return errorWidget?.call(context, error) ??
+                const Center(child: Icon(Icons.broken_image_outlined));
+          },
         );
       },
       placeholder: (context, _) =>

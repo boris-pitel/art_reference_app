@@ -23,10 +23,23 @@ class AppImageCache {
   /// not.
   static const String _trackedKey = 'cached_image_keys';
 
-  /// Long enough that a reference library survives a holiday, short enough that
-  /// anything deleted on another device disappears even if reconciliation never
-  /// runs on this one.
-  static const Duration _maximumAge = Duration(days: 30);
+  /// Effectively no age limit.
+  ///
+  /// Entries here cannot go stale. A key is an image id, and an image at a
+  /// given id never changes — editing produces a new id rather than new bytes
+  /// under the old one. So an age limit could never protect correctness; it
+  /// could only throw away a photograph that was still perfectly good and
+  /// guarantee it was downloaded again the next time somebody opened it, which
+  /// is the opposite of what a cache is for.
+  ///
+  /// A duration is still required by the library, so this is set beyond any
+  /// device's lifetime rather than nominally short.
+  static const Duration _maximumAge = Duration(days: 36500);
+
+  /// The real limit. When the cache is over this, the library keeps the most
+  /// recently touched entries and discards the rest — least-recently-used
+  /// eviction, which spends a fixed budget on whatever is actually being
+  /// looked at.
   static const int _maximumObjects = 800;
 
   static final CacheManager _manager = CacheManager(

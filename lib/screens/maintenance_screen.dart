@@ -65,8 +65,8 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
           builder: (context, setDialogState) {
             return AlertDialog(
               title: const Text('Service status'),
-              content: SizedBox(
-                width: 420,
+              content: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 420),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -278,9 +278,16 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
     final action = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
+        // Scrollable because this panel is taller than a phone. Without it the
+        // content overflows and the buttons are painted on top of the last
+        // few rows, which is unreadable rather than merely cramped.
+        scrollable: true,
         title: const Text('User details'),
-        content: SizedBox(
-          width: 560,
+        content: ConstrainedBox(
+          // A maximum rather than a fixed width. 560 was wider than the screen
+          // it had to fit on, so a phone was being asked to lay out something
+          // that could not fit and the text wrapped one character at a time.
+          constraints: const BoxConstraints(maxWidth: 560),
           child: SelectionArea(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -816,8 +823,8 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
             color: Theme.of(context).colorScheme.error,
           ),
           title: const Text('Permanently remove user?'),
-          content: SizedBox(
-            width: 560,
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -887,8 +894,8 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           title: Text('Set login name for ${user['email'] ?? userId}'),
-          content: SizedBox(
-            width: 420,
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
             child: TextField(
               controller: controller,
               autofocus: true,

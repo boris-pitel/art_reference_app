@@ -379,8 +379,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
             builder: (context, setDialogState) {
               return AlertDialog(
                 title: const Text('Save to a category'),
-                content: SizedBox(
-                  width: 420,
+                content: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
                   child: DropdownButtonFormField<ReferenceCategory>(
                     initialValue: selected,
                     decoration: const InputDecoration(

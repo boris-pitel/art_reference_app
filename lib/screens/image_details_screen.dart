@@ -36,13 +36,15 @@ class _ExportImageData {
 }
 
 Future<_ExportImageData> _downloadExportImage(String imageUrl) async {
-  final response = await http.get(Uri.parse(imageUrl)).timeout(
-    const Duration(seconds: 30),
-    onTimeout: () => throw TimeoutException(
-      'Image download timed out after 30 seconds',
-      const Duration(seconds: 30),
-    ),
-  );
+  final response = await http
+      .get(Uri.parse(imageUrl))
+      .timeout(
+        const Duration(seconds: 30),
+        onTimeout: () => throw TimeoutException(
+          'Image download timed out after 30 seconds',
+          const Duration(seconds: 30),
+        ),
+      );
   if (response.statusCode < 200 || response.statusCode >= 300) {
     throw StateError(
       'Image download failed with status ${response.statusCode}.',
@@ -449,8 +451,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       setState(() {
         _isFavorite = data['is_favorite'] == true;
         _isFinishedArtwork = data['is_finished_artwork'] == true;
-        _originalOwnerName = (data['original_owner_name'] as String?)
-            ?.trim();
+        _originalOwnerName = (data['original_owner_name'] as String?)?.trim();
         if (_originalOwnerName?.isEmpty ?? false) _originalOwnerName = null;
 
         _originalFilename = (data['original_filename'] as String?)?.trim();
@@ -1295,9 +1296,9 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       );
 
       if (mounted && !result.wasCancelled) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_saveResultMessage(result))),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_saveResultMessage(result))));
       }
     } catch (error) {
       if (mounted) {
@@ -1360,7 +1361,9 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Unable to prepare the image to send: $error')),
+          SnackBar(
+            content: Text('Unable to prepare the image to send: $error'),
+          ),
         );
       }
     } finally {
@@ -1443,8 +1446,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
 
                   return AlertDialog(
                     title: const Text('Move Reference'),
-                    content: SizedBox(
-                      width: 420,
+                    content: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 420),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2860,7 +2863,6 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
   CompositionGrid _grid = CompositionGrid.none;
   bool _monochrome = false;
 
-
   // The grid divides the picture, not the black around it, so the overlay needs
   // the shape of the bitmap actually on screen. Read from the decoded image
   // rather than the stored width and height, which describe the original and
@@ -2980,9 +2982,9 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
     try {
       final result = await _saveExportImage(context, _imageUrl, imageId);
       if (mounted && !result.wasCancelled) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_saveResultMessage(result))),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_saveResultMessage(result))));
       }
     } catch (error) {
       if (mounted) {
@@ -3011,6 +3013,7 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
   /// loadingBuilder never runs for a cached image, which would leave the
   /// failing case indistinguishable from one that was never attempted.
   void _reportFullViewStarted() {
+    _fullViewStartedAt = DateTime.now();
     _reportFullView('started');
   }
 
@@ -3018,15 +3021,29 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
     _reportFullView(status, error: error);
   }
 
+  /// When the viewer opened, so the render can say how long it took.
+  ///
+  /// Without this a picture that appeared instantly and one that left somebody
+  /// looking at a blank screen for half a minute logged identically — which is
+  /// why a report of "it stays blank" could not be answered from the data at
+  /// all, only guessed at.
+  DateTime? _fullViewStartedAt;
+
   void _reportFullView(String status, {Object? error}) {
     final key = '$status:${widget.exportImageId ?? _imageUrl}';
     if (!_reportedRenderKeys.add(key)) return;
+
+    final startedAt = _fullViewStartedAt;
+    final elapsed = status == 'started' || startedAt == null
+        ? null
+        : DateTime.now().difference(startedAt).inMilliseconds;
 
     UserActivityLogger.instance.record(
       operation: 'image_full_view',
       status: status,
       targetType: 'image',
       targetId: widget.exportImageId,
+      durationMs: elapsed,
       error: error,
     );
   }
@@ -3470,59 +3487,60 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
                                 _MaybeMonochrome(
                                   enabled: _monochrome,
                                   child: Center(
-                              child: Hero(
-                                tag: widget.heroTag,
-                                child: CachedImage(
-                                  url: _imageUrl,
-                                  // Null only for images opened without an id,
-                                  // which cannot be cached by id — those fall
-                                  // back to the URL and behave as before.
-                                  cacheKey: _imageId == null
-                                      ? _imageUrl
-                                      : AppImageCache.fullKey(_imageId!),
-                                  width: double.infinity,
-                                  height: double.infinity,
-                                  fit: BoxFit.contain,
-                                  // The reporting Image.network did through
-                                  // frameBuilder and errorBuilder. Carried
-                                  // across deliberately: it is the only thing
-                                  // that has ever identified a device where
-                                  // the image never arrives.
-                                  onRendered: () =>
-                                      _reportFullViewRender('succeeded'),
-                                  onFailed: (error) => _reportFullViewRender(
-                                    'failed',
-                                    error: error,
-                                  ),
-                                  placeholder: const Center(
-                                    child: CircularProgressIndicator(
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                  errorWidget: (context, error) {
-                                    return const Center(
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(
-                                            Icons.broken_image_outlined,
-                                            size: 64,
+                                    child: Hero(
+                                      tag: widget.heroTag,
+                                      child: CachedImage(
+                                        url: _imageUrl,
+                                        // Null only for images opened without an id,
+                                        // which cannot be cached by id — those fall
+                                        // back to the URL and behave as before.
+                                        cacheKey: _imageId == null
+                                            ? _imageUrl
+                                            : AppImageCache.fullKey(_imageId!),
+                                        width: double.infinity,
+                                        height: double.infinity,
+                                        fit: BoxFit.contain,
+                                        // The reporting Image.network did through
+                                        // frameBuilder and errorBuilder. Carried
+                                        // across deliberately: it is the only thing
+                                        // that has ever identified a device where
+                                        // the image never arrives.
+                                        onRendered: () =>
+                                            _reportFullViewRender('succeeded'),
+                                        onFailed: (error) =>
+                                            _reportFullViewRender(
+                                              'failed',
+                                              error: error,
+                                            ),
+                                        placeholder: const Center(
+                                          child: CircularProgressIndicator(
                                             color: Colors.white,
                                           ),
-                                          SizedBox(height: 14),
-                                          Text(
-                                            'Unable to load image.',
-                                            style: TextStyle(
-                                              color: Colors.white,
+                                        ),
+                                        errorWidget: (context, error) {
+                                          return const Center(
+                                            child: Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(
+                                                  Icons.broken_image_outlined,
+                                                  size: 64,
+                                                  color: Colors.white,
+                                                ),
+                                                SizedBox(height: 14),
+                                                Text(
+                                                  'Unable to load image.',
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                  ),
+                                                ),
+                                              ],
                                             ),
-                                          ),
-                                        ],
+                                          );
+                                        },
                                       ),
-                                    );
-                                  },
-                                ),
-                              ),
-                            ),
+                                    ),
+                                  ),
                                 ),
                                 if (_grid != CompositionGrid.none &&
                                     _displayedImageSize != null)
