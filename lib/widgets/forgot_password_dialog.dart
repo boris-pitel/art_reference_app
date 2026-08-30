@@ -54,8 +54,10 @@ class _ForgotPasswordDialogState extends State<ForgotPasswordDialog> {
 
   String get _email => _emailController.text.trim();
 
-  Future<void> _sendCode() async {
-    if (_emailFormKey.currentState?.validate() != true) return;
+  Future<void> _sendCode({bool validateEmail = true}) async {
+    if (validateEmail && _emailFormKey.currentState?.validate() != true) {
+      return;
+    }
 
     setState(() {
       _isWorking = true;
@@ -134,7 +136,7 @@ class _ForgotPasswordDialogState extends State<ForgotPasswordDialog> {
       if (!mounted) return;
 
       // A wrong or stale code answers with something about a token, which
-      // means nothing to the person who just typed six digits.
+      // means nothing to the person who just typed a code out of an email.
       final message = error.toString().toLowerCase();
       final isBadCode =
           message.contains('token') ||
@@ -145,8 +147,8 @@ class _ForgotPasswordDialogState extends State<ForgotPasswordDialog> {
       setState(() {
         _isWorking = false;
         _error = isBadCode
-            ? 'That code is wrong or has expired. Codes last an hour; send '
-                  'yourself another if you need to.'
+            ? 'That code is wrong or has expired. Send yourself another if '
+                  'you need to.'
             : '$error';
       });
     }
@@ -192,7 +194,7 @@ class _ForgotPasswordDialogState extends State<ForgotPasswordDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('We will email you a six-digit code.'),
+          const Text('We will email you a code.'),
           const SizedBox(height: 16),
           TextFormField(
             controller: _emailController,
@@ -229,18 +231,24 @@ class _ForgotPasswordDialogState extends State<ForgotPasswordDialog> {
             controller: _codeController,
             autofocus: true,
             keyboardType: TextInputType.number,
+            autofillHints: const [AutofillHints.oneTimeCode],
             inputFormatters: [
               FilteringTextInputFormatter.digitsOnly,
-              LengthLimitingTextInputFormatter(6),
+              // Long enough for any length the project is configured for.
+              // This was six, which is Supabase's default and not what this
+              // project sends — so the code could not be finished being typed.
+              LengthLimitingTextInputFormatter(12),
             ],
             decoration: const InputDecoration(
-              labelText: 'Six-digit code',
+              labelText: 'Code from the email',
               border: OutlineInputBorder(),
             ),
             validator: (value) {
               final code = (value ?? '').trim();
               if (code.isEmpty) return 'Enter the code from the email.';
-              if (code.length < 6) return 'The code is six digits.';
+              // No exact length: the code's length is a project setting, and
+              // hard-coding one here is how it came to be untypeable.
+              if (code.length < 4) return 'That code looks too short.';
               return null;
             },
           ),
@@ -278,7 +286,9 @@ class _ForgotPasswordDialogState extends State<ForgotPasswordDialog> {
           ),
           const SizedBox(height: 8),
           TextButton(
-            onPressed: _isWorking ? null : _sendCode,
+            onPressed: _isWorking
+                ? null
+                : () => _sendCode(validateEmail: false),
             child: const Text('Send another code'),
           ),
           _buildError(),
