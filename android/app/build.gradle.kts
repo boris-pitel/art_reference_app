@@ -34,8 +34,13 @@ android {
     }
 
     signingConfigs {
-        if (keystorePropertiesFile.exists()) {
-            create("release") {
+        create("release") {
+            if (System.getenv()["CI"].toBoolean()) {
+                storeFile = file(System.getenv()["CM_KEYSTORE_PATH"])
+                storePassword = System.getenv()["CM_KEYSTORE_PASSWORD"]
+                keyAlias = System.getenv()["CM_KEY_ALIAS"]
+                keyPassword = System.getenv()["CM_KEY_PASSWORD"]
+            } else if (keystorePropertiesFile.exists()) {
                 keyAlias = keystoreProperties["keyAlias"] as String
                 keyPassword = keystoreProperties["keyPassword"] as String
                 storeFile = file(keystoreProperties["storeFile"] as String)
@@ -47,7 +52,7 @@ android {
     buildTypes {
         release {
             signingConfig =
-                if (keystorePropertiesFile.exists()) {
+                if (System.getenv()["CI"].toBoolean() || keystorePropertiesFile.exists()) {
                     signingConfigs.getByName("release")
                 } else {
                     signingConfigs.getByName("debug")
