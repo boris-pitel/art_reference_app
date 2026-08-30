@@ -4,7 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/app_user_profile.dart';
 import '../services/user_activity_logger.dart';
 import '../widgets/legal_agreement_notice.dart';
-import '../widgets/password_dialogs.dart';
+import '../widgets/forgot_password_dialog.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -156,6 +156,21 @@ class _LoginScreenState extends State<LoginScreen> {
         });
       }
     }
+  }
+
+  Future<void> _forgotPassword() async {
+    final changed = await showForgotPasswordDialog(context);
+    if (!changed || !mounted) return;
+
+    // The code signed them in as a side effect of proving who they are, so
+    // main.dart's auth listener has already replaced this screen. Saying so
+    // is still worth it: otherwise the app simply changes underneath somebody
+    // who was expecting to be asked to sign in again.
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Your password has changed and you are signed in.'),
+      ),
+    );
   }
 
   void _switchMode() {
@@ -381,9 +396,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           // reset one would suggest they already have one.
                           if (!_isCreatingAccount)
                             TextButton(
-                              onPressed: _isWorking
-                                  ? null
-                                  : () => showForgotPasswordDialog(context),
+                              onPressed: _isWorking ? null : _forgotPassword,
                               child: const Text('Forgot your password?'),
                             ),
                           // Google and Apple sign-in were both offered here and

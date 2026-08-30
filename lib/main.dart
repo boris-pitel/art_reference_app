@@ -192,10 +192,54 @@ class _ArtReferenceAppState extends State<ArtReferenceApp> {
   /// The recovery event can arrive before the first frame — on web the link
   /// *is* the page load — so this waits for a navigator rather than assuming
   /// one is already there.
+  bool _askingForNewPassword = false;
+
   void _askForNewPassword() {
+    if (_askingForNewPassword) return;
+    _askingForNewPassword = true;
+
+    UserActivityLogger.instance.record(
+      operation: 'password_recovery_opened',
+      status: 'started',
+      targetType: 'account',
+    );
+
+    _askForNewPasswordWhenReady(0);
+  }
+
+  /// Waits for a navigator before asking.
+  ///
+  /// The recovery event can arrive before the app has drawn anything — opening
+  /// a reset link cold-starts it — and the first version checked once, found no
+  /// navigator, and returned silently. The person was then signed in by the
+  /// link, dropped on the home screen, and never asked for the password they
+  /// had come to set: exactly the outcome this was written to prevent, and
+  /// worse than an error, because it looks like it worked.
+  void _askForNewPasswordWhenReady(int attempt) {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final context = rootNavigatorKey.currentContext;
-      if (context == null || !context.mounted) return;
+
+      if (context == null || !context.mounted) {
+        // Roughly ten seconds. A cold start over a slow connection can take
+        // several; giving up sooner reintroduces the bug on exactly the phones
+        // that are slowest.
+        if (attempt >= 100) {
+          _askingForNewPassword = false;
+          UserActivityLogger.instance.record(
+            operation: 'password_recovery_opened',
+            status: 'failed',
+            targetType: 'account',
+            details: const {'reason': 'no_navigator'},
+          );
+          return;
+        }
+
+        Future.delayed(
+          const Duration(milliseconds: 100),
+          () => _askForNewPasswordWhenReady(attempt + 1),
+        );
+        return;
+      }
 
       final changed = await showSetPasswordDialog(
         context,
@@ -203,6 +247,15 @@ class _ArtReferenceAppState extends State<ArtReferenceApp> {
         subtitle:
             'You followed a reset link, so pick a password you will '
             'remember. You are signed in already.',
+      );
+
+      _askingForNewPassword = false;
+
+      UserActivityLogger.instance.record(
+        operation: 'password_recovery_opened',
+        status: changed ? 'succeeded' : 'cancelled',
+        targetType: 'account',
+        details: {'attempts': attempt + 1},
       );
 
       if (!changed || !context.mounted) return;
