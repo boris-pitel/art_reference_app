@@ -154,11 +154,27 @@ Future<void> showForgotPasswordDialog(BuildContext context) async {
 
 /// Where a reset link comes back to.
 ///
-/// On a phone, through the scheme the app already registers for returning from
-/// a browser. On web it is left to Supabase's own site URL, because the page
-/// the link opens *is* the app and a custom scheme would mean nothing there.
-String? get _resetRedirect =>
-    kIsWeb ? null : 'com.painterreference.app://login-callback';
+/// Only Android and iOS register com.painterreference.app://, and this used to
+/// send every platform that was not web to that scheme — so a link opened on
+/// Windows redirected to something Windows cannot handle and the browser showed
+/// an empty page. The reset was never lost, but there was nowhere to type the
+/// new password.
+///
+/// Desktop is sent to the web app instead, which is the same application and
+/// can complete the reset in the browser; the new password then signs them in
+/// on Windows. Web passes null and lets Supabase use its own site URL, because
+/// the page the link opens is already the app.
+String? get _resetRedirect {
+  if (kIsWeb) return null;
+
+  final isMobile =
+      defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS;
+
+  return isMobile
+      ? 'com.painterreference.app://login-callback'
+      : 'https://painterreference.com';
+}
 
 /// Takes a new password and sets it.
 ///
