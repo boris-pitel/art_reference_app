@@ -100,6 +100,18 @@ class AppImageCache {
     }
   }
 
+  /// Returns bytes already held for [key], without attempting a network fetch.
+  static Future<Uint8List?> read(String key) async {
+    try {
+      final cached = await _manager.getFileFromCache(key);
+      if (cached == null) return null;
+      return cached.file.readAsBytes();
+    } catch (error) {
+      debugPrint('Unable to read cached image $key: $error');
+      return null;
+    }
+  }
+
   /// Removes everything this device holds for images the user no longer has.
   ///
   /// [liveImageIds] must be the complete set the user can see. A partial or

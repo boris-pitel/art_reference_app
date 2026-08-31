@@ -111,7 +111,7 @@ class ImageAdjustmentScreen extends StatefulWidget {
   final FutureOr<void> Function(Uint8List)? onDone;
   final ValueChanged<bool>? onProcessingChanged;
   final ImageAdjustmentController? controller;
-  final VoidCallback? onEditWithAi;
+  final FutureOr<void> Function(Uint8List bytes)? onEditWithAi;
   final ImageAdjustmentProcessor? imageProcessor;
   final SavedAspectRatioStore? aspectRatioStore;
 
@@ -139,7 +139,7 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
 
   Size? _imageSize;
   String? _loadError;
-  Rect _crop = const Rect.fromLTWH(0.06, 0.06, 0.88, 0.88);
+  Rect _crop = const Rect.fromLTWH(0, 0, 1, 1);
   bool _cropHasBeenAdjusted = false;
   double _straightenAngle = 0;
   int _quarterTurns = 0;
@@ -150,6 +150,7 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
   bool _monochrome = false;
   String _ratio = 'Free';
   List<SavedAspectRatio> _savedRatios = const [];
+  List<SavedAspectRatio> _recentRatios = const [];
   bool _isSavingRatio = false;
   bool _isDetecting = false;
   bool _isApplying = false;
@@ -158,6 +159,19 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
   _CropDragTarget? _hoverCropTarget;
 
   double get _totalAngle => _quarterTurns * 90 + _straightenAngle;
+
+  double? get _rotatedImageAspect {
+    final size = _imageSize;
+    if (size == null || size.width <= 0 || size.height <= 0) return null;
+    final radians = _totalAngle * math.pi / 180;
+    final width =
+        size.width * math.cos(radians).abs() +
+        size.height * math.sin(radians).abs();
+    final height =
+        size.width * math.sin(radians).abs() +
+        size.height * math.cos(radians).abs();
+    return height <= 0 ? null : width / height;
+  }
 
   void _markChanged() {
     widget.controller?.hasChanges.value = true;
@@ -174,7 +188,13 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
   Future<void> _loadSavedRatios() async {
     try {
       final ratios = await _aspectRatioStore.load();
-      if (mounted) setState(() => _savedRatios = ratios);
+      final recent = await _aspectRatioStore.loadRecent();
+      if (mounted) {
+        setState(() {
+          _savedRatios = ratios;
+          _recentRatios = recent;
+        });
+      }
     } catch (error) {
       debugPrint('Unable to load saved aspect ratios: $error');
     }
@@ -264,9 +284,10 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
     setState(() {
       _ratio = ratio;
       final saved = _savedRatioForKey(ratio);
-      if (saved != null) {
-        _widthController.text = _ratioNumber(saved.width);
-        _heightController.text = _ratioNumber(saved.height);
+      final remembered = saved ?? _recentRatioForKey(ratio);
+      if (remembered != null) {
+        _widthController.text = _ratioNumber(remembered.width);
+        _heightController.text = _ratioNumber(remembered.height);
       }
       if (ratio != 'Free') {
         _cropHasBeenAdjusted = true;
@@ -278,14 +299,13 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
 
   double? _ratioValue(String ratio) {
     if (ratio == 'Original') {
-      final size = _imageSize;
-      if (size == null) return null;
-      final turned = _quarterTurns.isOdd;
-      return turned ? size.height / size.width : size.width / size.height;
+      return _rotatedImageAspect;
     }
     if (ratio == 'Custom') return _customRatio()?.value;
     final saved = _savedRatioForKey(ratio);
     if (saved != null) return saved.value;
+    final recent = _recentRatioForKey(ratio);
+    if (recent != null) return recent.value;
     for (final preset in _aspectRatioPresets) {
       if (preset.key == ratio) return preset.value;
     }
@@ -311,6 +331,17 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
   }
 
   String _savedRatioKey(SavedAspectRatio ratio) => 'saved:${ratio.key}';
+
+  SavedAspectRatio? _recentRatioForKey(String key) {
+    if (!key.startsWith('recent:')) return null;
+    final recentKey = key.substring('recent:'.length);
+    for (final ratio in _recentRatios) {
+      if (ratio.key == recentKey) return ratio;
+    }
+    return null;
+  }
+
+  String _recentRatioKey(SavedAspectRatio ratio) => 'recent:${ratio.key}';
 
   String _ratioNumber(double value) {
     if (value == value.roundToDouble()) return value.toInt().toString();
@@ -369,23 +400,20 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
   }
 
   void _applyRatio(double? ratio) {
-    if (ratio == null) return;
+    final imageAspect = _rotatedImageAspect;
+    if (ratio == null || imageAspect == null) return;
+    final normalizedRatio = ratio / imageAspect;
     final center = _crop.center;
-    var width = _crop.width;
-    var height = width / ratio;
-    if (height > 0.9) {
-      height = 0.9;
-      width = height * ratio;
-    }
-    if (width > 0.9) {
-      width = 0.9;
-      height = width / ratio;
-    }
-    _crop = Rect.fromCenter(
-      center: center,
-      width: width,
-      height: height,
-    ).intersect(const Rect.fromLTWH(0, 0, 1, 1));
+    final width = normalizedRatio >= 1 ? 1.0 : normalizedRatio;
+    final height = normalizedRatio >= 1 ? 1 / normalizedRatio : 1.0;
+    var next = Rect.fromCenter(center: center, width: width, height: height);
+    next = next.shift(
+      Offset(
+        next.left < 0 ? -next.left : (next.right > 1 ? 1 - next.right : 0),
+        next.top < 0 ? -next.top : (next.bottom > 1 ? 1 - next.bottom : 0),
+      ),
+    );
+    _crop = next;
   }
 
   void _resizeCrop(Offset delta, Size area, Alignment handle) {
@@ -410,7 +438,11 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
     right = right.clamp(left + minimum, 1.0);
     top = top.clamp(0.0, bottom - minimum);
     bottom = bottom.clamp(top + minimum, 1.0);
-    final ratio = _ratioValue(_ratio);
+    final outputRatio = _ratioValue(_ratio);
+    final imageAspect = _rotatedImageAspect;
+    final ratio = outputRatio == null || imageAspect == null
+        ? null
+        : outputRatio / imageAspect;
     if (_ratio != 'Free' && ratio != null) {
       if (dy.abs() >= dx.abs()) {
         final centerX = (left + right) / 2;
@@ -571,16 +603,7 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
     // Give Flutter a frame to display progress before expensive image work.
     await WidgetsBinding.instance.endOfFrame;
     try {
-      final adjusted =
-          await (widget.imageProcessor ?? ImageAdjustmentService.apply)(
-            bytes: widget.imageBytes,
-            angle: _totalAngle,
-            crop: _cropHasBeenAdjusted
-                ? _crop
-                : const Rect.fromLTWH(0, 0, 1, 1),
-            monochrome: _monochrome,
-            gridDivisions: _grid.divisions,
-          );
+      final adjusted = await _applyAdjustments();
       if (!mounted) return;
       final onDone = widget.onDone;
       if (onDone != null) {
@@ -593,6 +616,45 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
         setState(() => _isApplying = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Unable to adjust the image: $error')),
+        );
+      }
+    } finally {
+      widget.onProcessingChanged?.call(false);
+      if (mounted) setState(() => _isApplying = false);
+    }
+  }
+
+  Future<Uint8List> _applyAdjustments() async {
+    final adjusted =
+        await (widget.imageProcessor ?? ImageAdjustmentService.apply)(
+          bytes: widget.imageBytes,
+          angle: _totalAngle,
+          crop: _cropHasBeenAdjusted ? _crop : const Rect.fromLTWH(0, 0, 1, 1),
+          monochrome: _monochrome,
+          gridDivisions: _grid.divisions,
+        );
+    final recentRatio = _ratio == 'Custom'
+        ? _customRatio()
+        : _recentRatioForKey(_ratio);
+    if (recentRatio != null) {
+      _recentRatios = await _aspectRatioStore.rememberRecent(recentRatio);
+    }
+    return adjusted;
+  }
+
+  Future<void> _editWithAi() async {
+    final onEditWithAi = widget.onEditWithAi;
+    if (onEditWithAi == null || _isApplying) return;
+    setState(() => _isApplying = true);
+    widget.onProcessingChanged?.call(true);
+    await WidgetsBinding.instance.endOfFrame;
+    try {
+      final adjusted = await _applyAdjustments();
+      if (mounted) await onEditWithAi(adjusted);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to prepare the AI edit: $error')),
         );
       }
     } finally {
@@ -763,6 +825,14 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
                     'Rotate 90°',
                     () {
                       setState(() {
+                        if (_cropHasBeenAdjusted) {
+                          _crop = Rect.fromLTWH(
+                            1 - _crop.bottom,
+                            _crop.left,
+                            _crop.height,
+                            _crop.width,
+                          );
+                        }
                         _quarterTurns = (_quarterTurns + 1) % 4;
                         if (_ratio != 'Free') _applyRatio(_ratioValue(_ratio));
                       });
@@ -778,17 +848,12 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
                   ),
                 ),
                 Expanded(
-                  child: _toolButton(
-                    Icons.tonality,
-                    'Monochrome',
-                    () {
-                      setState(() => _monochrome = !_monochrome);
-                      // Unlike the grid, this one changes the pixels that get
-                      // saved, so it counts as an edit.
-                      _markChanged();
-                    },
-                    selected: _monochrome,
-                  ),
+                  child: _toolButton(Icons.tonality, 'Monochrome', () {
+                    setState(() => _monochrome = !_monochrome);
+                    // Unlike the grid, this one changes the pixels that get
+                    // saved, so it counts as an edit.
+                    _markChanged();
+                  }, selected: _monochrome),
                 ),
               ],
             ),
@@ -809,10 +874,7 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
                   ),
                   segments: [
                     for (final option in CompositionGrid.values)
-                      ButtonSegment(
-                        value: option,
-                        label: Text(option.label),
-                      ),
+                      ButtonSegment(value: option, label: Text(option.label)),
                   ],
                   selected: {_grid},
                   onSelectionChanged: (selection) {
@@ -829,7 +891,7 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.tonalIcon(
-                  onPressed: _isApplying ? null : widget.onEditWithAi,
+                  onPressed: _isApplying ? null : _editWithAi,
                   icon: const Icon(Icons.auto_awesome),
                   label: const Text('Edit with AI'),
                 ),
@@ -893,6 +955,19 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
                           value: _savedRatioKey(ratio),
                           child: Text(
                             ratio.label,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      for (final ratio in _recentRatios.where(
+                        (recent) => !_savedRatios.any(
+                          (saved) => saved.hasSameProportion(recent),
+                        ),
+                      ))
+                        DropdownMenuItem(
+                          value: _recentRatioKey(ratio),
+                          child: Text(
+                            '${_ratioNumber(ratio.width)}:'
+                            '${_ratioNumber(ratio.height)} — Recent',
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),

@@ -45,4 +45,40 @@ void main() {
 
     expect(await store.load(), isEmpty);
   });
+
+  test(
+    'recent custom ratios are newest first and proportional duplicates move',
+    () async {
+      const store = SavedAspectRatioStore();
+      await store.rememberRecent(const SavedAspectRatio(width: 16, height: 9));
+      await store.rememberRecent(const SavedAspectRatio(width: 4, height: 5));
+      await store.rememberRecent(const SavedAspectRatio(width: 32, height: 18));
+
+      final recent = await store.loadRecent();
+
+      expect(recent, hasLength(2));
+      expect(recent.first.width, 32);
+      expect(recent.first.height, 18);
+      expect(recent.last.value, closeTo(4 / 5, 0.000001));
+    },
+  );
+
+  test('recent custom ratio history retains only the five newest', () async {
+    const store = SavedAspectRatioStore();
+    for (
+      var index = 1;
+      index <= SavedAspectRatioStore.maximumRecentRatios + 2;
+      index++
+    ) {
+      await store.rememberRecent(
+        SavedAspectRatio(width: index.toDouble(), height: 11),
+      );
+    }
+
+    final recent = await store.loadRecent();
+
+    expect(recent, hasLength(SavedAspectRatioStore.maximumRecentRatios));
+    expect(recent.first.width, 7);
+    expect(recent.last.width, 3);
+  });
 }

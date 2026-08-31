@@ -36,6 +36,11 @@ class _ExportImageData {
   String get extension => mimeType == 'image/png' ? 'png' : 'jpg';
 }
 
+_ExportImageData _exportImageDataFromBytes(Uint8List bytes) {
+  final isPng = bytes.length >= 8 && bytes[0] == 0x89 && bytes[1] == 0x50;
+  return _ExportImageData(bytes, isPng ? 'image/png' : 'image/jpeg');
+}
+
 Future<_ExportImageData> _downloadExportImage(String imageUrl) async {
   final response = await http
       .get(Uri.parse(imageUrl))
@@ -3207,7 +3212,35 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
     if (_isLoadingEditor || _isApplyingEdit) return;
     setState(() => _isLoadingEditor = true);
     try {
-      final image = await _downloadExportImage(_imageUrl);
+      final imageId = _imageId;
+      final cached = imageId == null
+          ? null
+          : await AppImageCache.read(AppImageCache.fullKey(imageId));
+      late final _ExportImageData image;
+      if (cached != null) {
+        image = _exportImageDataFromBytes(cached);
+      } else {
+        try {
+          image = await _downloadExportImage(_imageUrl);
+        } on StateError catch (error) {
+          final unauthorized =
+              error.toString().contains('status 401') ||
+              error.toString().contains('status 403');
+          final parentId =
+              widget.createSketchParentImageId ?? widget.editableParentImageId;
+          if (!unauthorized || imageId == null || parentId == null) rethrow;
+
+          final refreshed = await ImageAssetService(
+            Supabase.instance.client,
+          ).listAssociatedImages(parentId);
+          final current = refreshed
+              .where((candidate) => candidate.id == imageId)
+              .firstOrNull;
+          if (current == null) rethrow;
+          _imageUrl = current.imageUrl;
+          image = await _downloadExportImage(_imageUrl);
+        }
+      }
       if (mounted) {
         _resetZoom();
         setState(() => _editingBytes = image.bytes);
@@ -3269,7 +3302,7 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
     }
   }
 
-  Future<void> _openAiEditor() async {
+  Future<void> _openAiEditor([Uint8List? adjustedSourceBytes]) async {
     final sourceImageId = _imageId ?? widget.createSketchParentImageId;
     final parentImageId =
         widget.createSketchParentImageId ?? widget.editableParentImageId;
@@ -3281,6 +3314,7 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
         builder: (_) => AiImageEditScreen(
           sourceImageId: sourceImageId,
           sourceImageUrl: _imageUrl,
+          sourceImageBytes: adjustedSourceBytes,
           parentImageId: parentImageId,
         ),
       ),

@@ -152,13 +152,15 @@ class PreparedImageUpload {
         'Response: $data',
       );
     }
-    if (thumbnailStoragePath is! String || thumbnailStoragePath.trim().isEmpty) {
+    if (thumbnailStoragePath is! String ||
+        thumbnailStoragePath.trim().isEmpty) {
       throw StateError(
         'prepare-image-upload did not return a valid thumbnail Storage path. '
         'Response: $data',
       );
     }
-    if (thumbnailUploadToken is! String || thumbnailUploadToken.trim().isEmpty) {
+    if (thumbnailUploadToken is! String ||
+        thumbnailUploadToken.trim().isEmpty) {
       throw StateError(
         'prepare-image-upload did not return a valid thumbnail upload token. '
         'Response: $data',
@@ -394,7 +396,9 @@ class ImageAssetService {
       );
 
       final isHeif = ImageImportService.isHeif(imageBytes);
-      profiler.checkpoint('EXIF source detected: ${isHeif ? 'HEIC' : 'non-HEIC'}');
+      profiler.checkpoint(
+        'EXIF source detected: ${isHeif ? 'HEIC' : 'non-HEIC'}',
+      );
 
       final Future<PhotoMetadataExtraction> photoMetadataFuture;
       if (isHeif) {
@@ -428,9 +432,7 @@ class ImageAssetService {
         );
       }
       unawaited(
-        photoMetadataFuture.catchError(
-          (_) => const PhotoMetadataExtraction(),
-        ),
+        photoMetadataFuture.catchError((_) => const PhotoMetadataExtraction()),
       );
 
       final imageHash = await ImageHashService.calculateSha256(
@@ -484,7 +486,7 @@ class ImageAssetService {
       final thumbnailBytes = derivatives.thumbnailBytes;
       profiler.checkpoint(
         'Thumbnail created; size: '
-        '${(thumbnailBytes.lengthInBytes / 1024).toStringAsFixed(1)} KB'
+        '${(thumbnailBytes.lengthInBytes / 1024).toStringAsFixed(1)} KB',
       );
       if (thumbnailBytes.isEmpty) {
         throw const UnsupportedImageFormatException();
@@ -549,8 +551,7 @@ class ImageAssetService {
           'thumbnail_storage_path': thumbnailStoragePath,
           'original_owner_name': ?originalOwnerName,
           'original_filename': ?originalFilename,
-          'capture_timestamp': ?photoMetadata
-              .captureTimestamp
+          'capture_timestamp': ?photoMetadata.captureTimestamp
               ?.toIso8601String(),
           'photo_metadata': ?photoMetadata.metadata?.toJson(),
           'width': ?imageWidth,
@@ -605,14 +606,15 @@ class ImageAssetService {
       // connection that fetch is also the likeliest to stall, leaving somebody
       // who has just uploaded a photograph looking at nothing.
       //
-      // Deliberately not awaited: a cache that fails to write must not fail an
-      // upload that succeeded.
-      unawaited(
-        AppImageCache.seed(
-          key: AppImageCache.fullKey(finalizedImageId),
-          url: storagePath,
-          bytes: normalizedImageBytes,
-        ),
+      // Finish seeding before returning the new id. The next action can be
+      // Edit, and returning first created a race where editing bypassed the
+      // still-empty cache and followed a just-issued URL that could answer 401.
+      // seed catches its own failures, so a cache problem still cannot fail a
+      // successful upload.
+      await AppImageCache.seed(
+        key: AppImageCache.fullKey(finalizedImageId),
+        url: storagePath,
+        bytes: normalizedImageBytes,
       );
 
       profiler.finish();
@@ -838,9 +840,7 @@ class ImageAssetService {
 
     return ImageCategoryCounts(
       byCategoryCode: counts,
-      finishedArtwork: artwork is int
-          ? artwork
-          : int.tryParse('$artwork') ?? 0,
+      finishedArtwork: artwork is int ? artwork : int.tryParse('$artwork') ?? 0,
       // Left null unless the server actually sent a list. An absent field must
       // not read as "you own nothing", which would empty the cache.
       ownedImageIds: ids is List

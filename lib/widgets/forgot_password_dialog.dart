@@ -30,16 +30,21 @@ class ForgotPasswordDialog extends StatefulWidget {
 enum _Step { askEmail, enterCode }
 
 class _ForgotPasswordDialogState extends State<ForgotPasswordDialog> {
+  static const _recoveryCodeLength = 8;
+
   final _emailController = TextEditingController();
   final _codeController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmController = TextEditingController();
+  final _codeFocusNode = FocusNode();
+  final _passwordFocusNode = FocusNode();
 
   final _emailFormKey = GlobalKey<FormState>();
   final _codeFormKey = GlobalKey<FormState>();
 
   _Step _step = _Step.askEmail;
   bool _isWorking = false;
+  bool _codeVerified = false;
   bool _obscure = true;
   String? _error;
 
@@ -49,10 +54,22 @@ class _ForgotPasswordDialogState extends State<ForgotPasswordDialog> {
     _codeController.dispose();
     _passwordController.dispose();
     _confirmController.dispose();
+    _codeFocusNode.dispose();
+    _passwordFocusNode.dispose();
     super.dispose();
   }
 
   String get _email => _emailController.text.trim();
+
+  Future<void> _cancel() async {
+    // verifyOTP creates a temporary authenticated recovery session. If the
+    // person stops before choosing a new password, do not leave that session
+    // signed in behind the dismissed dialog.
+    if (_codeVerified) {
+      await Supabase.instance.client.auth.signOut();
+    }
+    if (mounted) Navigator.of(context).pop(false);
+  }
 
   Future<void> _sendCode({bool validateEmail = true}) async {
     if (validateEmail && _emailFormKey.currentState?.validate() != true) {
@@ -79,7 +96,12 @@ class _ForgotPasswordDialogState extends State<ForgotPasswordDialog> {
       setState(() {
         _step = _Step.enterCode;
         _isWorking = false;
+        _codeVerified = false;
+        _codeController.clear();
+        _passwordController.clear();
+        _confirmController.clear();
       });
+      _codeFocusNode.requestFocus();
     } catch (error) {
       UserActivityLogger.instance.record(
         operation: 'password_reset_requested',
@@ -96,8 +118,14 @@ class _ForgotPasswordDialogState extends State<ForgotPasswordDialog> {
     }
   }
 
-  Future<void> _verifyAndSet() async {
-    if (_codeFormKey.currentState?.validate() != true) return;
+  Future<void> _verifyCode() async {
+    if (_isWorking || _codeVerified) return;
+
+    final code = _codeController.text.trim();
+    if (code.length != _recoveryCodeLength) {
+      _codeFormKey.currentState?.validate();
+      return;
+    }
 
     setState(() {
       _isWorking = true;
@@ -107,15 +135,51 @@ class _ForgotPasswordDialogState extends State<ForgotPasswordDialog> {
     final auth = Supabase.instance.client.auth;
 
     try {
-      // The code both proves who they are and signs them in, which is what
-      // makes the password change below permissible.
-      await auth.verifyOTP(
-        email: _email,
-        token: _codeController.text.trim(),
-        type: OtpType.recovery,
-      );
+      // The password controls stay disabled until the code has proved that
+      // this person owns the account.
+      await auth.verifyOTP(email: _email, token: code, type: OtpType.recovery);
 
-      await auth.updateUser(UserAttributes(password: _passwordController.text));
+      if (!mounted) return;
+      setState(() {
+        _isWorking = false;
+        _codeVerified = true;
+        _error = null;
+      });
+      _passwordFocusNode.requestFocus();
+    } catch (error) {
+      if (!mounted) return;
+
+      final message = error.toString().toLowerCase();
+      final isBadCode =
+          message.contains('token') ||
+          message.contains('otp') ||
+          message.contains('expired') ||
+          message.contains('invalid');
+
+      setState(() {
+        _isWorking = false;
+        _error = isBadCode
+            ? 'That code is wrong or has expired. Send yourself another if '
+                  'you need to.'
+            : '$error';
+      });
+    }
+  }
+
+  Future<void> _setPassword() async {
+    if (!_codeVerified || _codeFormKey.currentState?.validate() != true) {
+      return;
+    }
+
+    setState(() {
+      _isWorking = true;
+      _error = null;
+    });
+
+    try {
+      await Supabase.instance.client.auth.updateUser(
+        UserAttributes(password: _passwordController.text),
+      );
 
       UserActivityLogger.instance.record(
         operation: 'password_reset_completed',
@@ -135,21 +199,9 @@ class _ForgotPasswordDialogState extends State<ForgotPasswordDialog> {
 
       if (!mounted) return;
 
-      // A wrong or stale code answers with something about a token, which
-      // means nothing to the person who just typed a code out of an email.
-      final message = error.toString().toLowerCase();
-      final isBadCode =
-          message.contains('token') ||
-          message.contains('otp') ||
-          message.contains('expired') ||
-          message.contains('invalid');
-
       setState(() {
         _isWorking = false;
-        _error = isBadCode
-            ? 'That code is wrong or has expired. Send yourself another if '
-                  'you need to.'
-            : '$error';
+        _error = '$error';
       });
     }
   }
@@ -161,27 +213,38 @@ class _ForgotPasswordDialogState extends State<ForgotPasswordDialog> {
         _step == _Step.askEmail ? 'Reset your password' : 'Enter your code',
       ),
       content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 360),
-        child: SingleChildScrollView(
-          child: _step == _Step.askEmail ? _buildEmailStep() : _buildCodeStep(),
+        constraints: const BoxConstraints(maxWidth: 500),
+        child: SizedBox(
+          width: 460,
+          child: SingleChildScrollView(
+            child: _step == _Step.askEmail
+                ? _buildEmailStep()
+                : _buildCodeStep(),
+          ),
         ),
       ),
       actions: [
         TextButton(
-          onPressed: _isWorking ? null : () => Navigator.of(context).pop(false),
+          onPressed: _isWorking ? null : _cancel,
           child: const Text('Cancel'),
         ),
         FilledButton(
           onPressed: _isWorking
               ? null
-              : (_step == _Step.askEmail ? _sendCode : _verifyAndSet),
+              : (_step == _Step.askEmail
+                    ? _sendCode
+                    : (_codeVerified ? _setPassword : _verifyCode)),
           child: _isWorking
               ? const SizedBox(
                   width: 18,
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : Text(_step == _Step.askEmail ? 'Send code' : 'Set password'),
+              : Text(
+                  _step == _Step.askEmail
+                      ? 'Send code'
+                      : (_codeVerified ? 'Set password' : 'Verify code'),
+                ),
         ),
       ],
     );
@@ -194,7 +257,7 @@ class _ForgotPasswordDialogState extends State<ForgotPasswordDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('We will email you a code.'),
+          const Text('We will email you an eight-digit code.'),
           const SizedBox(height: 16),
           TextFormField(
             controller: _emailController,
@@ -225,36 +288,53 @@ class _ForgotPasswordDialogState extends State<ForgotPasswordDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Sent to $_email. Enter the code and choose a new password.'),
+          Text(
+            'Sent to $_email. Enter the eight-digit code to unlock the '
+            'password fields.',
+          ),
           const SizedBox(height: 16),
           TextFormField(
             controller: _codeController,
+            focusNode: _codeFocusNode,
             autofocus: true,
+            enabled: !_codeVerified,
             keyboardType: TextInputType.number,
             autofillHints: const [AutofillHints.oneTimeCode],
             inputFormatters: [
               FilteringTextInputFormatter.digitsOnly,
-              // Long enough for any length the project is configured for.
-              // This was six, which is Supabase's default and not what this
-              // project sends — so the code could not be finished being typed.
-              LengthLimitingTextInputFormatter(12),
+              LengthLimitingTextInputFormatter(_recoveryCodeLength),
             ],
+            onChanged: (value) {
+              if (value.length == _recoveryCodeLength) _verifyCode();
+            },
             decoration: const InputDecoration(
-              labelText: 'Code from the email',
+              labelText: 'Eight-digit code from the email',
               border: OutlineInputBorder(),
             ),
             validator: (value) {
               final code = (value ?? '').trim();
               if (code.isEmpty) return 'Enter the code from the email.';
-              // No exact length: the code's length is a project setting, and
-              // hard-coding one here is how it came to be untypeable.
-              if (code.length < 4) return 'That code looks too short.';
+              if (code.length != _recoveryCodeLength) {
+                return 'Enter the complete $_recoveryCodeLength-digit code.';
+              }
               return null;
             },
           ),
+          if (_codeVerified) ...[
+            const SizedBox(height: 8),
+            const Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.green, size: 20),
+                SizedBox(width: 8),
+                Text('Code verified. Choose your new password.'),
+              ],
+            ),
+          ],
           const SizedBox(height: 12),
           TextFormField(
             controller: _passwordController,
+            focusNode: _passwordFocusNode,
+            enabled: _codeVerified,
             obscureText: _obscure,
             autofillHints: const [AutofillHints.newPassword],
             decoration: InputDecoration(
@@ -267,7 +347,9 @@ class _ForgotPasswordDialogState extends State<ForgotPasswordDialog> {
                       : Icons.visibility_off_outlined,
                 ),
                 tooltip: _obscure ? 'Show password' : 'Hide password',
-                onPressed: () => setState(() => _obscure = !_obscure),
+                onPressed: _codeVerified
+                    ? () => setState(() => _obscure = !_obscure)
+                    : null,
               ),
             ),
             validator: validateNewPassword,
@@ -275,6 +357,7 @@ class _ForgotPasswordDialogState extends State<ForgotPasswordDialog> {
           const SizedBox(height: 12),
           TextFormField(
             controller: _confirmController,
+            enabled: _codeVerified,
             obscureText: _obscure,
             decoration: const InputDecoration(
               labelText: 'Repeat it',

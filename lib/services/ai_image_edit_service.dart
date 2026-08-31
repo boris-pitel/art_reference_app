@@ -79,6 +79,7 @@ class AiImageEditService {
 
   Future<Uint8List> editImage({
     required String imageId,
+    Uint8List? imageBytes,
     required String prompt,
     required AiImageQuality quality,
   }) async {
@@ -96,6 +97,7 @@ class AiImageEditService {
         'ai-edit-image',
         body: {
           'imageId': imageId,
+          if (imageBytes != null) 'imageBase64': base64Encode(imageBytes),
           'prompt': normalizedPrompt,
           'quality': quality.name,
         },

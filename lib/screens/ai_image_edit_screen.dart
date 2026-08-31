@@ -27,12 +27,14 @@ class AiImageEditScreen extends StatefulWidget {
   const AiImageEditScreen({
     required this.sourceImageId,
     required this.sourceImageUrl,
+    this.sourceImageBytes,
     required this.parentImageId,
     super.key,
   });
 
   final String sourceImageId;
   final String sourceImageUrl;
+  final Uint8List? sourceImageBytes;
   final String parentImageId;
 
   @override
@@ -113,6 +115,7 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
     try {
       final bytes = await _aiService.editImage(
         imageId: widget.sourceImageId,
+        imageBytes: widget.sourceImageBytes,
         prompt: prompt,
         quality: _quality,
       );
@@ -408,7 +411,9 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
                               (prompt) => PopupMenuItem(
                                 value: prompt,
                                 child: ConstrainedBox(
-                                  constraints: const BoxConstraints(maxWidth: 320),
+                                  constraints: const BoxConstraints(
+                                    maxWidth: 320,
+                                  ),
                                   child: Text(
                                     prompt,
                                     maxLines: 3,
@@ -496,11 +501,14 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
                 fit: StackFit.expand,
                 children: [
                   if (showingOriginal)
-                    CachedImage(
-                      url: widget.sourceImageUrl,
-                      cacheKey: AppImageCache.fullKey(widget.sourceImageId),
-                      fit: BoxFit.contain,
-                    )
+                    if (widget.sourceImageBytes case final bytes?)
+                      Image.memory(bytes, fit: BoxFit.contain)
+                    else
+                      CachedImage(
+                        url: widget.sourceImageUrl,
+                        cacheKey: AppImageCache.fullKey(widget.sourceImageId),
+                        fit: BoxFit.contain,
+                      )
                   else
                     Image.memory(_previewBytes!, fit: BoxFit.contain),
 

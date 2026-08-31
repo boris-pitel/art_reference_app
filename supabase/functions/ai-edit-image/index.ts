@@ -54,14 +54,16 @@ Deno.serve(async (request) => {
 
     const body = await request.json() as {
       imageId?: string;
+      imageBase64?: string;
       prompt?: string;
       quality?: string;
     };
     const imageId = body.imageId?.trim();
+    const imageBase64 = body.imageBase64?.trim();
     const prompt = body.prompt?.trim();
     const quality = body.quality?.trim() ?? "medium";
-    if (!imageId || !prompt) {
-      return jsonResponse({ success: false, error: "imageId and prompt are required." }, 400);
+    if ((!imageId && !imageBase64) || !prompt) {
+      return jsonResponse({ success: false, error: "An image and prompt are required." }, 400);
     }
     if (prompt.length > 1000) {
       return jsonResponse({ success: false, error: "Prompt cannot exceed 1,000 characters." }, 400);
@@ -70,25 +72,39 @@ Deno.serve(async (request) => {
       return jsonResponse({ success: false, error: "Invalid AI quality." }, 400);
     }
 
-    const { data: record, error: recordError } = await supabase
-      .from("image_assets")
-      .select("id,storage_path,width,height")
-      .eq("id", imageId)
-      .eq("user_id", expectedUserId)
-      .maybeSingle();
-    if (recordError) throw new Error(`Unable to read image: ${recordError.message}`);
-    if (!record?.storage_path) {
-      return jsonResponse({ success: false, error: "Image not found." }, 404);
-    }
+    let record: { width: number | null; height: number | null } | null = null;
+    let originalBytes: Uint8Array;
+    if (imageBase64) {
+      try {
+        const binary = atob(imageBase64);
+        originalBytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) {
+          originalBytes[index] = binary.charCodeAt(index);
+        }
+      } catch (_) {
+        return jsonResponse({ success: false, error: "The adjusted image is invalid." }, 400);
+      }
+    } else {
+      const { data, error: recordError } = await supabase
+        .from("image_assets")
+        .select("id,storage_path,width,height")
+        .eq("id", imageId!)
+        .eq("user_id", expectedUserId)
+        .maybeSingle();
+      if (recordError) throw new Error(`Unable to read image: ${recordError.message}`);
+      if (!data?.storage_path) {
+        return jsonResponse({ success: false, error: "Image not found." }, 404);
+      }
+      record = data;
 
-    const { data: source, error: downloadError } = await supabase.storage
-      .from("reference-images")
-      .download(record.storage_path);
-    if (downloadError || !source) {
-      throw new Error(`Unable to download image: ${downloadError?.message ?? "no data"}`);
+      const { data: source, error: downloadError } = await supabase.storage
+        .from("reference-images")
+        .download(data.storage_path);
+      if (downloadError || !source) {
+        throw new Error(`Unable to download image: ${downloadError?.message ?? "no data"}`);
+      }
+      originalBytes = new Uint8Array(await source.arrayBuffer());
     }
-
-    const originalBytes = new Uint8Array(await source.arrayBuffer());
     const sourceMime = detectImageMime(originalBytes);
 
     // Some photographs were refused outright with "Invalid image file or mode
@@ -112,7 +128,7 @@ Deno.serve(async (request) => {
     // truth; the turn is put back on the result further down.
     const requestedSize = profile
       ? computeEditSize(profile.frameWidth, profile.frameHeight)
-      : computeEditSize(record.width, record.height);
+      : computeEditSize(record?.width, record?.height);
     const restoreOrientation = profile?.needsRebuild ? profile.orientation : 1;
 
     const buildRequest = (size: string): FormData => {
