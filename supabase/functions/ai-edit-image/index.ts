@@ -59,10 +59,10 @@ Deno.serve(async (request) => {
       quality?: string;
     };
     const imageId = body.imageId?.trim();
-    const imageBase64 = body.imageBase64?.trim();
+    const adjustedImageBase64 = body.imageBase64?.trim();
     const prompt = body.prompt?.trim();
     const quality = body.quality?.trim() ?? "medium";
-    if ((!imageId && !imageBase64) || !prompt) {
+    if ((!imageId && !adjustedImageBase64) || !prompt) {
       return jsonResponse({ success: false, error: "An image and prompt are required." }, 400);
     }
     if (prompt.length > 1000) {
@@ -74,9 +74,9 @@ Deno.serve(async (request) => {
 
     let record: { width: number | null; height: number | null } | null = null;
     let originalBytes: Uint8Array;
-    if (imageBase64) {
+    if (adjustedImageBase64) {
       try {
-        const binary = atob(imageBase64);
+        const binary = atob(adjustedImageBase64);
         originalBytes = new Uint8Array(binary.length);
         for (let index = 0; index < binary.length; index += 1) {
           originalBytes[index] = binary.charCodeAt(index);
