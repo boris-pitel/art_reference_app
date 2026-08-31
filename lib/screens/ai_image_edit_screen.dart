@@ -7,6 +7,7 @@ import '../services/ai_image_edit_service.dart';
 import '../services/app_image_cache.dart';
 import '../services/feedback_service.dart';
 import '../services/image_asset_service.dart';
+import '../services/recent_input_store.dart';
 import '../services/user_activity_logger.dart';
 import '../widgets/cached_image.dart';
 
@@ -52,6 +53,8 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
   bool _isGenerating = false;
   bool _isAccepting = false;
 
+  List<String> _recentPrompts = const [];
+
   /// True while the compare control is held down, showing the original in the
   /// result's place.
   bool _isComparing = false;
@@ -66,6 +69,27 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
   /// stale list.
   String? _lastSavedImageId;
   String? _lastSavedImageUrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRecentPrompts();
+  }
+
+  Future<void> _loadRecentPrompts() async {
+    final prompts = await RecentInputStore.aiPrompts();
+    if (!mounted) return;
+
+    setState(() {
+      _recentPrompts = prompts;
+      if (_promptController.text.isEmpty && prompts.isNotEmpty) {
+        _promptController.text = prompts.first;
+        _promptController.selection = TextSelection.collapsed(
+          offset: _promptController.text.length,
+        );
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -92,6 +116,7 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
         prompt: prompt,
         quality: _quality,
       );
+      final recentPrompts = await RecentInputStore.rememberAiPrompt(prompt);
       UserActivityLogger.instance.record(
         operation: 'ai_image_edit_generate',
         status: 'succeeded',
@@ -101,7 +126,12 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
         durationMs: stopwatch.elapsedMilliseconds,
         details: {'quality': _quality.name, 'output_bytes': bytes.length},
       );
-      if (mounted) setState(() => _previewBytes = bytes);
+      if (mounted) {
+        setState(() {
+          _recentPrompts = recentPrompts;
+          _previewBytes = bytes;
+        });
+      }
     } on AiQuotaExceeded catch (limit) {
       // Recorded as its own status rather than as a failure: nothing broke,
       // and counting these as failures would make the reliability figures lie.
@@ -357,11 +387,38 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
               minLines: 3,
               maxLines: 6,
               maxLength: 1000,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Describe the change',
                 hintText:
                     'Example: Remove the objects from the table and preserve the lighting.',
-                border: OutlineInputBorder(),
+                border: const OutlineInputBorder(),
+                suffixIcon: _recentPrompts.isEmpty
+                    ? null
+                    : PopupMenuButton<String>(
+                        tooltip: 'Recent AI prompts',
+                        icon: const Icon(Icons.history),
+                        onSelected: (prompt) {
+                          _promptController.text = prompt;
+                          _promptController.selection = TextSelection.collapsed(
+                            offset: prompt.length,
+                          );
+                        },
+                        itemBuilder: (_) => _recentPrompts
+                            .map(
+                              (prompt) => PopupMenuItem(
+                                value: prompt,
+                                child: ConstrainedBox(
+                                  constraints: const BoxConstraints(maxWidth: 320),
+                                  child: Text(
+                                    prompt,
+                                    maxLines: 3,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
+                            )
+                            .toList(growable: false),
+                      ),
               ),
             ),
             // Directly under the prompt, where the hand already is. The

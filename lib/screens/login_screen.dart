@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/app_user_profile.dart';
+import '../services/recent_input_store.dart';
 import '../services/user_activity_logger.dart';
 import '../widgets/legal_agreement_notice.dart';
 import '../widgets/forgot_password_dialog.dart';
@@ -26,9 +27,37 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isWorking = false;
   bool _obscurePassword = true;
 
+  List<String> _recentEmails = const [];
+
   String? _errorMessage;
 
   SupabaseClient get _supabase => Supabase.instance.client;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRecentEmails();
+  }
+
+  Future<void> _loadRecentEmails() async {
+    final emails = await RecentInputStore.loginEmails();
+    if (!mounted) return;
+
+    setState(() {
+      _recentEmails = emails;
+      if (_emailController.text.isEmpty && emails.isNotEmpty) {
+        _emailController.text = emails.first;
+        _emailController.selection = TextSelection.collapsed(
+          offset: _emailController.text.length,
+        );
+      }
+    });
+  }
+
+  Future<void> _rememberEmail(String email) async {
+    final emails = await RecentInputStore.rememberLoginEmail(email);
+    if (mounted) setState(() => _recentEmails = emails);
+  }
 
   @override
   void dispose() {
@@ -77,6 +106,7 @@ class _LoginScreenState extends State<LoginScreen> {
           password: password,
           data: loginName.isEmpty ? null : {'login_name': loginName},
         );
+        await _rememberEmail(email);
 
         final registeredUser = response.user;
         registeredProfile = registeredUser == null
@@ -102,6 +132,7 @@ class _LoginScreenState extends State<LoginScreen> {
           email: email,
           password: password,
         );
+        await _rememberEmail(email);
       }
       UserActivityLogger.instance.record(
         operation: creatingAccount ? 'account_create' : 'login',
@@ -283,10 +314,31 @@ class _LoginScreenState extends State<LoginScreen> {
                             autofillHints: const [AutofillHints.email],
                             autocorrect: false,
                             validator: _validateEmail,
-                            decoration: const InputDecoration(
+                            decoration: InputDecoration(
                               labelText: 'Email',
-                              prefixIcon: Icon(Icons.email_outlined),
-                              border: OutlineInputBorder(),
+                              prefixIcon: const Icon(Icons.email_outlined),
+                              border: const OutlineInputBorder(),
+                              suffixIcon: _recentEmails.isEmpty
+                                  ? null
+                                  : PopupMenuButton<String>(
+                                      tooltip: 'Recent email addresses',
+                                      icon: const Icon(Icons.history),
+                                      onSelected: (email) {
+                                        _emailController.text = email;
+                                        _emailController.selection =
+                                            TextSelection.collapsed(
+                                              offset: email.length,
+                                            );
+                                      },
+                                      itemBuilder: (_) => _recentEmails
+                                          .map(
+                                            (email) => PopupMenuItem(
+                                              value: email,
+                                              child: Text(email),
+                                            ),
+                                          )
+                                          .toList(growable: false),
+                                    ),
                             ),
                           ),
                           if (_isCreatingAccount) ...[
