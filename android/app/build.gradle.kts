@@ -1,4 +1,5 @@
 import java.util.Properties
+import com.android.build.api.dsl.ApplicationExtension
 
 plugins {
     id("com.android.application")
@@ -12,7 +13,7 @@ if (keystorePropertiesFile.exists()) {
     keystorePropertiesFile.inputStream().use(keystoreProperties::load)
 }
 
-android {
+extensions.configure<ApplicationExtension> {
     namespace = "com.painterreference.app"
     compileSdk = 37
     ndkVersion = flutter.ndkVersion
@@ -36,7 +37,7 @@ android {
     signingConfigs {
         create("release") {
             if (System.getenv()["CI"].toBoolean()) {
-                storeFile = file(System.getenv()["CM_KEYSTORE_PATH"])
+                storeFile = file(requireNotNull(System.getenv("CM_KEYSTORE_PATH")))
                 storePassword = System.getenv()["CM_KEYSTORE_PASSWORD"]
                 keyAlias = System.getenv()["CM_KEY_ALIAS"]
                 keyPassword = System.getenv()["CM_KEY_PASSWORD"]
