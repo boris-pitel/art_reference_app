@@ -62,4 +62,8 @@ class LibraryHomeCache {
       value,
     );
   }
+
+  static Future<void> clear(String userId) async {
+    await (await SharedPreferences.getInstance()).remove('$_prefix$userId');
+  }
 }

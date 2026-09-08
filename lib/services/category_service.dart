@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 
 import '../models/reference_category.dart';
 import 'user_activity_logger.dart';
+import 'app_image_cache.dart';
 
 class CategoryDeletionResult {
   const CategoryDeletionResult({required this.movedToInbox});
@@ -303,6 +304,9 @@ class CategoryService {
           ),
         );
     final coverUrl = 'storage://category-covers/$path';
+    await AppImageCache.remove(
+      AppImageCache.categoryCoverKey(category.databaseCode),
+    );
     if (category.isBuiltIn) {
       await _supabase.from('user_category_cover_overrides').upsert({
         'auth_user_id': authId,

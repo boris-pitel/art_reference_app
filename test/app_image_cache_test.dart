@@ -1,5 +1,8 @@
+import 'dart:convert';
+
 import 'package:art_reference_app/services/app_image_cache.dart';
 import 'package:art_reference_app/services/image_asset_service.dart';
+import 'package:art_reference_app/services/local_user_session.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -97,6 +100,36 @@ void main() {
 
       final preferences = await SharedPreferences.getInstance();
       expect(preferences.getStringList('cached_image_keys'), hasLength(1));
+    });
+
+    test('tracks downloaded files under the active user', () async {
+      SharedPreferences.setMockInitialValues({
+        'last_authenticated_user_v1': jsonEncode({
+          'user_id': 'user-a',
+          'email': 'person@example.com',
+        }),
+      });
+      await LocalUserSession.initialize();
+      expect(LocalUserSession.activateOffline('person@example.com'), isTrue);
+
+      await AppImageCache.track(AppImageCache.fullKey('one'));
+
+      final preferences = await SharedPreferences.getInstance();
+      expect(preferences.getStringList('cached_image_keys_v2_user-a'), [
+        AppImageCache.fullKey('one'),
+      ]);
+      expect(preferences.getStringList('cached_image_keys'), isNull);
+    });
+
+    test('does not treat category covers as deleted image ids', () {
+      final cover = AppImageCache.categoryCoverKey('portrait');
+      final split = AppImageCache.partition(
+        tracked: [cover, AppImageCache.fullKey('gone')],
+        liveImageIds: {'kept'},
+      );
+
+      expect(split.keep, [cover]);
+      expect(split.remove, [AppImageCache.fullKey('gone')]);
     });
   });
 

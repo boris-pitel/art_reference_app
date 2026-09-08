@@ -50,7 +50,7 @@ class UserActivityLogger {
   @visibleForTesting
   Future<void> Function(Map<String, Object?> entry)? sink;
 
-  Future<void> log({
+  Future<bool> log({
     required String operation,
     required String status,
     String? targetType,
@@ -73,13 +73,13 @@ class UserActivityLogger {
           'details': details,
           if (error != null) 'error_message': _sanitizeError(error),
         });
-        return;
+        return true;
       }
 
       final client = Supabase.instance.client;
       final user = client.auth.currentUser;
       final email = user?.email?.trim().toLowerCase();
-      if (user == null || email == null || email.isEmpty) return;
+      if (user == null || email == null || email.isEmpty) return false;
       await client.from('user_activity_logs').insert({
         'user_id': user.id,
         'user_email': email,
@@ -97,10 +97,12 @@ class UserActivityLogger {
         'details': {...details, 'device': DeviceProfile.current},
         if (error != null) 'error_message': _sanitizeError(error),
       });
+      return true;
     } catch (loggingError) {
       debugPrint(
         '[ACTIVITY LOG] $operation/$status could not be stored: $loggingError',
       );
+      return false;
     }
   }
 
@@ -124,7 +126,7 @@ class UserActivityLogger {
         durationMs: durationMs,
         details: details,
         error: error,
-      ),
+      ).then<void>((_) {}),
     );
   }
 

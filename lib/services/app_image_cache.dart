@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'local_user_session.dart';
+
 /// Keeps images on the device so they are fetched once rather than every time.
 ///
 /// Keyed by image id, never by URL. Signed URLs carry an expiry that changes
@@ -22,6 +24,7 @@ class AppImageCache {
   /// because eviction needs to know what exists in order to remove what should
   /// not.
   static const String _trackedKey = 'cached_image_keys';
+  static const String _trackedUserPrefix = 'cached_image_keys_v2_';
 
   /// Effectively no age limit.
   ///
@@ -59,15 +62,41 @@ class AppImageCache {
   /// a key of its own.
   static String thumbnailKey(String imageId) => 'thumb:$imageId';
 
+  static String categoryCoverKey(String categoryCode) =>
+      'cover:${LocalUserSession.effectiveUserId ?? 'unknown'}:$categoryCode';
+
+  static String _trackedKeyFor(String? userId) =>
+      userId == null || userId.isEmpty
+      ? _trackedKey
+      : '$_trackedUserPrefix$userId';
+
+  /// Assigns cache entries written by older releases to the last signed-in
+  /// user. Old releases kept one global list and also erased it on logout, so
+  /// the remaining entries can only belong to the remembered user.
+  static Future<void> claimLegacyEntriesForUser(String userId) async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      final legacy = preferences.getStringList(_trackedKey) ?? const <String>[];
+      if (legacy.isEmpty) return;
+      final key = _trackedKeyFor(userId);
+      final owned = preferences.getStringList(key) ?? <String>[];
+      await preferences.setStringList(key, {...owned, ...legacy}.toList());
+      await preferences.remove(_trackedKey);
+    } catch (error) {
+      debugPrint('Unable to assign the legacy image cache: $error');
+    }
+  }
+
   /// Records that a key is held, so eviction can find it later.
   static Future<void> track(String key) async {
     try {
       final preferences = await SharedPreferences.getInstance();
-      final tracked = preferences.getStringList(_trackedKey) ?? <String>[];
+      final trackedKey = _trackedKeyFor(LocalUserSession.effectiveUserId);
+      final tracked = preferences.getStringList(trackedKey) ?? <String>[];
       if (tracked.contains(key)) return;
 
       tracked.add(key);
-      await preferences.setStringList(_trackedKey, tracked);
+      await preferences.setStringList(trackedKey, tracked);
     } catch (error) {
       // Losing the bookkeeping costs a later eviction, not correctness: the
       // cache still works, it just holds an entry longer than it should.
@@ -136,6 +165,10 @@ class AppImageCache {
     final remove = <String>[];
 
     for (final key in tracked) {
+      if (!key.startsWith('full:') && !key.startsWith('thumb:')) {
+        keep.add(key);
+        continue;
+      }
       final separator = key.indexOf(':');
       final imageId = separator < 0 ? key : key.substring(separator + 1);
       (liveImageIds.contains(imageId) ? keep : remove).add(key);
@@ -149,7 +182,8 @@ class AppImageCache {
 
     try {
       final preferences = await SharedPreferences.getInstance();
-      final tracked = preferences.getStringList(_trackedKey) ?? <String>[];
+      final trackedKey = _trackedKeyFor(LocalUserSession.effectiveUserId);
+      final tracked = preferences.getStringList(trackedKey) ?? <String>[];
       if (tracked.isEmpty) return 0;
 
       final split = partition(tracked: tracked, liveImageIds: liveImageIds);
@@ -161,7 +195,7 @@ class AppImageCache {
       }
 
       if (remove.isNotEmpty) {
-        await preferences.setStringList(_trackedKey, keep);
+        await preferences.setStringList(trackedKey, keep);
       }
 
       return remove.length;
@@ -171,17 +205,49 @@ class AppImageCache {
     }
   }
 
-  /// Empties the cache entirely.
+  /// Removes only files recorded as belonging to [userId].
   ///
-  /// Called on sign-out and on account deletion. Without this, one person's
-  /// photographs would still be on the device after somebody else signs in,
-  /// which would quietly contradict what the privacy policy promises about
-  /// deletion.
+  /// Normal sign-out deliberately does not call this: downloaded photographs
+  /// remain available for the same user's later offline login. Account
+  /// deletion and an explicit remove-downloads action do call it.
+  static Future<void> clearForUser(String userId) async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      final trackedKey = _trackedKeyFor(userId);
+      final tracked = preferences.getStringList(trackedKey) ?? const <String>[];
+      for (final key in tracked) {
+        await _manager.removeFile(key);
+      }
+      await preferences.remove(trackedKey);
+    } catch (error) {
+      debugPrint('Unable to clear the image cache for $userId: $error');
+    }
+  }
+
+  static Future<void> remove(String key) async {
+    try {
+      await _manager.removeFile(key);
+      final preferences = await SharedPreferences.getInstance();
+      final trackedKey = _trackedKeyFor(LocalUserSession.effectiveUserId);
+      final tracked = preferences.getStringList(trackedKey) ?? <String>[];
+      if (tracked.remove(key)) {
+        await preferences.setStringList(trackedKey, tracked);
+      }
+    } catch (error) {
+      debugPrint('Unable to remove cached image $key: $error');
+    }
+  }
+
+  /// Clears every image cache entry, retained for diagnostics and tests.
   static Future<void> clear() async {
     try {
       await _manager.emptyCache();
       final preferences = await SharedPreferences.getInstance();
-      await preferences.remove(_trackedKey);
+      for (final key in preferences.getKeys()) {
+        if (key == _trackedKey || key.startsWith(_trackedUserPrefix)) {
+          await preferences.remove(key);
+        }
+      }
     } catch (error) {
       debugPrint('Unable to clear the image cache: $error');
     }

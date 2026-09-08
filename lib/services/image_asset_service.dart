@@ -11,6 +11,9 @@ import 'app_image_cache.dart';
 import 'heif_exif_reader.dart';
 import 'image_hash_service.dart';
 import 'image_import_service.dart';
+import 'library_image_cache.dart';
+import 'local_user_session.dart';
+import 'network_availability.dart';
 import 'image_derivatives.dart';
 import 'photo_metadata_service.dart';
 import 'thumbnail_service.dart';
@@ -206,7 +209,9 @@ class ImageAssetService {
   }
 
   String get _normalizedUserEmail {
-    final email = _supabase.auth.currentUser?.email?.trim().toLowerCase();
+    final email =
+        _supabase.auth.currentUser?.email?.trim().toLowerCase() ??
+        LocalUserSession.effectiveEmail;
 
     if (email == null || email.isEmpty) {
       throw StateError(
@@ -249,6 +254,7 @@ class ImageAssetService {
           'bytes': imageBytes.lengthInBytes,
         },
       );
+      ConnectivityMonitor.instance.reportBackendSuccess();
       return id;
     } catch (error) {
       final duplicate = isDuplicateRejection(error);
@@ -265,6 +271,9 @@ class ImageAssetService {
         },
         error: error,
       );
+      if (NetworkAvailability.isNetworkFailure(error)) {
+        ConnectivityMonitor.instance.reportBackendFailure(error);
+      }
       rethrow;
     }
   }
@@ -308,6 +317,7 @@ class ImageAssetService {
         durationMs: stopwatch.elapsedMilliseconds,
         details: {'bytes': imageBytes.lengthInBytes},
       );
+      ConnectivityMonitor.instance.reportBackendSuccess();
       return id;
     } catch (error) {
       final duplicate = isDuplicateRejection(error);
@@ -324,6 +334,9 @@ class ImageAssetService {
         },
         error: error,
       );
+      if (NetworkAvailability.isNetworkFailure(error)) {
+        ConnectivityMonitor.instance.reportBackendFailure(error);
+      }
       rethrow;
     }
   }
@@ -853,47 +866,75 @@ class ImageAssetService {
     if (category.isMyArt) {
       return listFinishedArtworks();
     }
-    final cacheBuster = DateTime.now().millisecondsSinceEpoch;
-
-    final response = await _invokeListWithRetry(
-      () => _supabase.functions.invoke(
-        'list-images?refresh=$cacheBuster',
-        method: HttpMethod.get,
-        headers: {
-          'x-user-id': _userId,
-          'x-category-code': category.databaseCode,
-        },
-      ),
-    );
-
-    final data = response.data;
-
-    if (data is! List) {
-      throw StateError(
-        'The list-images function returned '
-        'an unexpected response: $data',
-      );
+    final authUserId = LocalUserSession.effectiveUserId;
+    final scope = 'category:${category.databaseCode}';
+    if (ConnectivityMonitor.instance.isOffline ||
+        LocalUserSession.isOfflineActive) {
+      return _readCachedImages(authUserId, scope, 'saved category');
     }
-
-    return parseImageAssetList(data, responseName: 'list-images');
+    final cacheBuster = DateTime.now().millisecondsSinceEpoch;
+    try {
+      final response = await _invokeListWithRetry(
+        () => _supabase.functions.invoke(
+          'list-images?refresh=$cacheBuster',
+          method: HttpMethod.get,
+          headers: {
+            'x-user-id': _userId,
+            'x-category-code': category.databaseCode,
+          },
+        ),
+      );
+      final data = response.data;
+      if (data is! List) {
+        throw StateError(
+          'The list-images function returned '
+          'an unexpected response: $data',
+        );
+      }
+      if (authUserId != null) {
+        await LibraryImageCache.write(authUserId, scope, data);
+      }
+      ConnectivityMonitor.instance.reportBackendSuccess();
+      return parseImageAssetList(data, responseName: 'list-images');
+    } catch (error) {
+      if (!NetworkAvailability.isNetworkFailure(error)) rethrow;
+      ConnectivityMonitor.instance.reportBackendFailure(error);
+      return _readCachedImages(authUserId, scope, 'saved category');
+    }
   }
 
   Future<List<ImageAssetInfo>> listFinishedArtworks() async {
-    final cacheBuster = DateTime.now().millisecondsSinceEpoch;
-    final response = await _invokeListWithRetry(
-      () => _supabase.functions.invoke(
-        'list-finished-artworks?refresh=$cacheBuster',
-        method: HttpMethod.get,
-        headers: {'x-user-id': _userId},
-      ),
-    );
-    final data = response.data;
-    if (data is! List) {
-      throw StateError(
-        'list-finished-artworks returned an unexpected response: $data',
-      );
+    final authUserId = LocalUserSession.effectiveUserId;
+    const scope = 'finished_artworks';
+    if (ConnectivityMonitor.instance.isOffline ||
+        LocalUserSession.isOfflineActive) {
+      return _readCachedImages(authUserId, scope, 'saved My Art');
     }
-    return parseImageAssetList(data, responseName: 'list-finished-artworks');
+    final cacheBuster = DateTime.now().millisecondsSinceEpoch;
+    try {
+      final response = await _invokeListWithRetry(
+        () => _supabase.functions.invoke(
+          'list-finished-artworks?refresh=$cacheBuster',
+          method: HttpMethod.get,
+          headers: {'x-user-id': _userId},
+        ),
+      );
+      final data = response.data;
+      if (data is! List) {
+        throw StateError(
+          'list-finished-artworks returned an unexpected response: $data',
+        );
+      }
+      if (authUserId != null) {
+        await LibraryImageCache.write(authUserId, scope, data);
+      }
+      ConnectivityMonitor.instance.reportBackendSuccess();
+      return parseImageAssetList(data, responseName: 'list-finished-artworks');
+    } catch (error) {
+      if (!NetworkAvailability.isNetworkFailure(error)) rethrow;
+      ConnectivityMonitor.instance.reportBackendFailure(error);
+      return _readCachedImages(authUserId, scope, 'saved My Art');
+    }
   }
 
   Future<List<ImageAssetInfo>> listAssociatedImages(
@@ -909,29 +950,56 @@ class ImageAssetService {
       );
     }
 
-    final cacheBuster = DateTime.now().millisecondsSinceEpoch;
-
-    final response = await _invokeListWithRetry(
-      () => _supabase.functions.invoke(
-        'list-associated-images?refresh=$cacheBuster',
-        method: HttpMethod.get,
-        headers: {
-          'x-user-id': _userId,
-          'x-parent-image-id': normalizedParentImageId,
-        },
-      ),
-    );
-
-    final data = response.data;
-
-    if (data is! List) {
-      throw StateError(
-        'The list-associated-images function '
-        'returned an unexpected response: $data',
-      );
+    final authUserId = LocalUserSession.effectiveUserId;
+    final scope = 'associated:$normalizedParentImageId';
+    if (ConnectivityMonitor.instance.isOffline ||
+        LocalUserSession.isOfflineActive) {
+      return _readCachedImages(authUserId, scope, 'saved sketches');
     }
+    final cacheBuster = DateTime.now().millisecondsSinceEpoch;
+    try {
+      final response = await _invokeListWithRetry(
+        () => _supabase.functions.invoke(
+          'list-associated-images?refresh=$cacheBuster',
+          method: HttpMethod.get,
+          headers: {
+            'x-user-id': _userId,
+            'x-parent-image-id': normalizedParentImageId,
+          },
+        ),
+      );
+      final data = response.data;
+      if (data is! List) {
+        throw StateError(
+          'The list-associated-images function '
+          'returned an unexpected response: $data',
+        );
+      }
+      if (authUserId != null) {
+        await LibraryImageCache.write(authUserId, scope, data);
+      }
+      ConnectivityMonitor.instance.reportBackendSuccess();
+      return parseImageAssetList(data, responseName: 'list-associated-images');
+    } catch (error) {
+      if (!NetworkAvailability.isNetworkFailure(error)) rethrow;
+      ConnectivityMonitor.instance.reportBackendFailure(error);
+      return _readCachedImages(authUserId, scope, 'saved sketches');
+    }
+  }
 
-    return parseImageAssetList(data, responseName: 'list-associated-images');
+  Future<List<ImageAssetInfo>> _readCachedImages(
+    String? authUserId,
+    String scope,
+    String label,
+  ) async {
+    if (authUserId == null) {
+      throw StateError('Internet is required for the first login.');
+    }
+    final rows = await LibraryImageCache.read(authUserId, scope);
+    if (rows == null) {
+      throw StateError('No $label data has been downloaded on this device.');
+    }
+    return parseImageAssetList(rows, responseName: label);
   }
 
   static List<ImageAssetInfo> parseImageAssetList(

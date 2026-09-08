@@ -16,6 +16,9 @@ import '../services/image_share_service.dart';
 import '../services/user_activity_logger.dart';
 import '../widgets/home_button.dart';
 import '../services/app_image_cache.dart';
+import '../services/local_user_session.dart';
+import '../services/offline_upload_queue.dart';
+import '../services/network_availability.dart';
 import '../widgets/cached_image.dart';
 import '../widgets/image_delivery.dart';
 import 'help_screen.dart';
@@ -126,6 +129,7 @@ class _CategoryScreenState extends State<CategoryScreen>
   final Set<String> _reportedThumbnailFailures = {};
 
   bool _isLoading = true;
+  List<PendingImageUpload> _pendingUploads = [];
   bool _isUploading = false;
 
   String _uploadStatus = '';
@@ -143,6 +147,16 @@ class _CategoryScreenState extends State<CategoryScreen>
   bool _isSelecting = false;
   bool _isBulkMoving = false;
   final Set<String> _selectedImageIds = <String>{};
+
+  bool get _isReadOnly =>
+      ConnectivityMonitor.instance.isOffline ||
+      LocalUserSession.isOfflineActive;
+
+  void _reportBackendFailure(Object error) {
+    if (NetworkAvailability.isNetworkFailure(error)) {
+      ConnectivityMonitor.instance.reportBackendFailure(error);
+    }
+  }
 
   bool get _isBusy {
     return _isUploading ||
@@ -264,12 +278,44 @@ class _CategoryScreenState extends State<CategoryScreen>
 
     _imageAssetService = ImageAssetService(Supabase.instance.client);
 
+    ConnectivityMonitor.instance.addListener(_handleConnectivityChange);
+    OfflineUploadQueue.instance.addListener(_handleQueueChange);
+    _handleQueueChange();
     _loadImages();
+  }
+
+  void _handleQueueChange() {
+    unawaited(_loadPendingUploads());
+  }
+
+  Future<void> _loadPendingUploads() async {
+    final userId = LocalUserSession.effectiveUserId;
+    if (userId == null) return;
+    try {
+      final pending = await OfflineUploadQueue.instance.listForUser(
+        userId,
+        categoryCode: widget.category.databaseCode,
+      );
+      if (!mounted || userId != LocalUserSession.effectiveUserId) return;
+      final completed = _pendingUploads.length > pending.length;
+      setState(() => _pendingUploads = pending);
+      if (completed && !_isReadOnly) await _loadImages();
+    } catch (error) {
+      debugPrint('Unable to read pending uploads: $error');
+    }
+  }
+
+  void _handleConnectivityChange() {
+    if (!mounted) return;
+    setState(() {});
+    if (!_isReadOnly) unawaited(_loadImages());
   }
 
   @override
   void dispose() {
+    OfflineUploadQueue.instance.removeListener(_handleQueueChange);
     WidgetsBinding.instance.removeObserver(this);
+    ConnectivityMonitor.instance.removeListener(_handleConnectivityChange);
 
     super.dispose();
   }
@@ -439,6 +485,7 @@ class _CategoryScreenState extends State<CategoryScreen>
 
       return;
     } on FunctionException catch (error) {
+      _reportBackendFailure(error);
       if (!mounted) {
         return;
       }
@@ -451,6 +498,7 @@ class _CategoryScreenState extends State<CategoryScreen>
         context,
       ).showSnackBar(SnackBar(content: Text(message)));
     } catch (error) {
+      _reportBackendFailure(error);
       if (!mounted) {
         return;
       }
@@ -498,6 +546,7 @@ class _CategoryScreenState extends State<CategoryScreen>
     final failures = <XFile>[];
     String? firstFailure;
     var saved = 0;
+    var queued = 0;
     for (var index = 0; index < files.length; index++) {
       if (!mounted) return;
       setState(() {
@@ -521,13 +570,40 @@ class _CategoryScreenState extends State<CategoryScreen>
 
       try {
         final bytes = await files[index].readAsBytes();
-        await _imageAssetService.uploadImage(
-          bytes,
-          widget.category,
-          originalFilename: files[index].name,
-        );
-        saved++;
+        Future<void> queueImage() async {
+          final userId = LocalUserSession.effectiveUserId;
+          final email = LocalUserSession.effectiveEmail;
+          if (userId == null || email == null) {
+            throw StateError('Sign in before adding images.');
+          }
+          await OfflineUploadQueue.instance.enqueue(
+            userId: userId,
+            userEmail: email,
+            category: widget.category,
+            imageBytes: bytes,
+            originalFilename: files[index].name,
+          );
+          queued++;
+        }
+
+        if (_isReadOnly) {
+          await queueImage();
+        } else {
+          try {
+            await _imageAssetService.uploadImage(
+              bytes,
+              widget.category,
+              originalFilename: files[index].name,
+            );
+            saved++;
+          } catch (error) {
+            if (!NetworkAvailability.isNetworkFailure(error)) rethrow;
+            _reportBackendFailure(error);
+            await queueImage();
+          }
+        }
       } catch (error) {
+        _reportBackendFailure(error);
         // Previously discarded, which is why a failed upload could not be
         // explained afterwards by the user or the logs.
         final duplicate = ImageAssetService.isDuplicateRejection(error);
@@ -554,16 +630,25 @@ class _CategoryScreenState extends State<CategoryScreen>
       _uploadProgress = 1;
       _uploadStatus = 'Refreshing ${widget.category.displayName}…';
     });
+    if (queued > 0 && !_isReadOnly) {
+      try {
+        await OfflineUploadQueue.instance.syncForCurrentUser(
+          Supabase.instance.client,
+        );
+      } catch (error) {
+        debugPrint('Pending upload sync deferred: $error');
+      }
+    }
     await _loadImages();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           failures.isEmpty
-              ? '$saved ${saved == 1 ? 'photo' : 'photos'} saved.'
+              ? '$saved saved; $queued waiting to upload.'
               // Naming the reason: "1 failed" alone gave the user nothing to
               // act on and nothing to report.
-              : '$saved saved; ${failures.length} failed.'
+              : '$saved saved; $queued waiting to upload; ${failures.length} failed.'
                     '${firstFailure == null ? '' : ' $firstFailure'}',
         ),
         duration: failures.isEmpty
@@ -597,6 +682,11 @@ class _CategoryScreenState extends State<CategoryScreen>
 
   Future<void> _openImageDetails(_LoadedImage image) async {
     if (_rejectWhileBusy()) return;
+
+    if (_isReadOnly) {
+      await _openOfflineImage(image);
+      return;
+    }
 
     setState(() {
       _openingImageId = image.id;
@@ -654,6 +744,45 @@ class _CategoryScreenState extends State<CategoryScreen>
         });
       }
     }
+  }
+
+  Future<void> _openOfflineImage(_LoadedImage image) async {
+    final imageId = widget.category.isMyArt
+        ? image.parentImageId ?? image.id
+        : image.id;
+    final imageUrl = widget.category.isMyArt
+        ? image.parentImageUrl ?? image.imageUrl
+        : image.displayUrl ?? image.imageUrl;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (context) => Scaffold(
+          appBar: AppBar(title: const Text('View image')),
+          body: ColoredBox(
+            color: Colors.black,
+            child: Center(
+              child: InteractiveViewer(
+                minScale: 0.5,
+                maxScale: 6,
+                child: CachedImage(
+                  url: imageUrl,
+                  cacheKey: AppImageCache.fullKey(imageId),
+                  fit: BoxFit.contain,
+                  errorWidget: (_, _) => const Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Text(
+                      'This full-size image has not been downloaded to this '
+                      'device.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   /// How long a single image download may take before it is abandoned.
@@ -931,6 +1060,7 @@ class _CategoryScreenState extends State<CategoryScreen>
 
       _showMessage('Image moved to ${toCategory.displayName}.');
     } catch (error) {
+      _reportBackendFailure(error);
       if (!mounted) {
         return;
       }
@@ -1054,6 +1184,7 @@ class _CategoryScreenState extends State<CategoryScreen>
           );
           movedIds.add(imageId);
         } catch (error) {
+          _reportBackendFailure(error);
           failed += 1;
 
           // The loop continues so one bad image cannot strand the rest, but
@@ -1084,6 +1215,7 @@ class _CategoryScreenState extends State<CategoryScreen>
             : '${movedIds.length} moved to ${toCategory.displayName}; $failed failed.',
       );
     } catch (error) {
+      _reportBackendFailure(error);
       if (mounted) _showMessage('Unable to move images: $error');
     } finally {
       if (mounted) setState(() => _isBulkMoving = false);
@@ -1141,6 +1273,7 @@ class _CategoryScreenState extends State<CategoryScreen>
 
       _showMessage('Reference removed.');
     } catch (error) {
+      _reportBackendFailure(error);
       if (!mounted) {
         return;
       }
@@ -1314,7 +1447,7 @@ class _CategoryScreenState extends State<CategoryScreen>
         actions: [
           if (!widget.category.isMyArt)
             IconButton(
-              onPressed: _isLoading || (_isBusy && !_isSelecting)
+              onPressed: _isReadOnly || _isLoading || (_isBusy && !_isSelecting)
                   ? null
                   : _toggleSelecting,
               icon: Icon(
@@ -1330,23 +1463,146 @@ class _CategoryScreenState extends State<CategoryScreen>
               tooltip: 'Help and About',
             ),
             IconButton(
-              onPressed: _isLoading || _isBusy ? null : _loadImages,
+              onPressed: _isReadOnly || _isLoading || _isBusy
+                  ? null
+                  : _loadImages,
               icon: const Icon(Icons.refresh),
               tooltip: 'Refresh',
             ),
           ],
         ],
       ),
-      body: Stack(
+      body: Column(
         children: [
-          Positioned.fill(child: _buildBody()),
-          if (_isUploading) Positioned.fill(child: _buildUploadOverlay()),
+          if (_isReadOnly) _buildOfflineBanner(),
+          if (_pendingUploads.isNotEmpty) _buildPendingUploads(),
+          Expanded(
+            child: Stack(
+              children: [
+                Positioned.fill(child: _buildBody()),
+                if (_isUploading) Positioned.fill(child: _buildUploadOverlay()),
+              ],
+            ),
+          ),
         ],
       ),
       floatingActionButton: widget.category.isMyArt || _isSelecting
           ? null
           : _buildAddButtons(),
-      bottomNavigationBar: _isSelecting ? _buildSelectionBar() : null,
+      bottomNavigationBar: !_isReadOnly && _isSelecting
+          ? _buildSelectionBar()
+          : null,
+    );
+  }
+
+  Widget _buildPendingUploads() {
+    return SizedBox(
+      height: 120,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        itemCount: _pendingUploads.length,
+        itemBuilder: (context, index) {
+          final item = _pendingUploads[index];
+          return SizedBox(
+            width: 150,
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: Image.memory(
+                        item.previewBytes,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, error, stack) =>
+                            const Icon(Icons.image),
+                      ),
+                    ),
+                    Tooltip(
+                      message:
+                          item.lastError ??
+                          'Uploads after reconnecting and signing in.',
+                      child: TextButton(
+                        onPressed: _isReadOnly
+                            ? null
+                            : () async {
+                                try {
+                                  await OfflineUploadQueue.instance
+                                      .syncForCurrentUser(
+                                        Supabase.instance.client,
+                                      );
+                                } catch (error) {
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        'Unable to retry upload: $error',
+                                      ),
+                                    ),
+                                  );
+                                }
+                              },
+                        child: Text(
+                          item.lastError == null
+                              ? 'Waiting to upload'
+                              : 'Retry upload',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildOfflineBanner() {
+    final scheme = Theme.of(context).colorScheme;
+    final backendUnavailable =
+        ConnectivityMonitor.instance.state ==
+        BackendConnectivityState.backendUnavailable;
+    return Material(
+      color: scheme.secondaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            Icon(Icons.cloud_off_outlined, color: scheme.onSecondaryContainer),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                backendUnavailable
+                    ? 'Painter Reference service is unavailable. Read-only.'
+                    : LocalUserSession.isOfflineActive &&
+                          !ConnectivityMonitor.instance.isOffline
+                    ? 'Connection restored. Sign in online to make changes.'
+                    : 'Offline. Existing images are read-only; new images wait here for upload.',
+                style: TextStyle(color: scheme.onSecondaryContainer),
+              ),
+            ),
+            if (backendUnavailable)
+              TextButton(
+                onPressed: () {
+                  ConnectivityMonitor.instance.prepareBackendRetry();
+                },
+                child: const Text('Try again'),
+              ),
+            if (LocalUserSession.isOfflineActive &&
+                ConnectivityMonitor.instance.state ==
+                    BackendConnectivityState.online)
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).popUntil((route) => route.isFirst);
+                  LocalUserSession.deactivateOffline();
+                },
+                child: const Text('Sign in'),
+              ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1531,10 +1787,10 @@ class _CategoryScreenState extends State<CategoryScreen>
         final isSelected = _selectedImageIds.contains(image.id);
 
         return GestureDetector(
-          onLongPress: isWorking || _isSelecting
+          onLongPress: _isReadOnly || isWorking || _isSelecting
               ? null
               : () => _handleLongPress(image),
-          onSecondaryTapDown: isWorking || _isSelecting
+          onSecondaryTapDown: _isReadOnly || isWorking || _isSelecting
               ? null
               : (details) => _showDesktopActions(image, details.globalPosition),
           child: Material(

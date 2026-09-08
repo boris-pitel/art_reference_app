@@ -3,6 +3,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../services/app_image_cache.dart';
+import '../services/library_home_cache.dart';
+import '../services/library_image_cache.dart';
+import '../services/local_user_session.dart';
+import '../services/offline_upload_queue.dart';
 import '../services/user_activity_logger.dart';
 import '../widgets/home_button.dart';
 import '../widgets/password_dialogs.dart';
@@ -208,6 +212,7 @@ class _AccountScreenState extends State<AccountScreen> {
 
   Future<void> _deleteAccount() async {
     setState(() => _isDeleting = true);
+    final deletedUserId = _supabase.auth.currentUser?.id;
 
     try {
       await UserActivityLogger.instance.trace<void>(
@@ -235,7 +240,13 @@ class _AccountScreenState extends State<AccountScreen> {
       // Deletion has to mean deletion here too. Leaving cached copies on the
       // device after the account is gone would quietly contradict what the
       // privacy policy promises.
-      await AppImageCache.clear();
+      if (deletedUserId != null) {
+        await OfflineUploadQueue.instance.clearForUser(deletedUserId);
+        await AppImageCache.clearForUser(deletedUserId);
+        await LibraryHomeCache.clear(deletedUserId);
+        await LibraryImageCache.clearUser(deletedUserId);
+        await LocalUserSession.forget(userId: deletedUserId);
+      }
 
       // The account is gone, so the session is meaningless; signing out is what
       // returns the app to the login screen.

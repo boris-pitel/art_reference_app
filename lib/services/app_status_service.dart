@@ -1,5 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'network_availability.dart';
+
 /// Whether the app is currently withheld from normal use.
 class AppStatus {
   const AppStatus({required this.maintenanceEnabled, this.message});
@@ -39,8 +41,12 @@ class AppStatusService {
           .invoke('get-app-status')
           .timeout(_timeout);
 
+      ConnectivityMonitor.instance.reportBackendSuccess();
       return AppStatus.fromResponse(response.data);
-    } catch (_) {
+    } catch (error) {
+      if (NetworkAvailability.isNetworkFailure(error)) {
+        ConnectivityMonitor.instance.reportBackendFailure(error);
+      }
       // Fail open. A status lookup that errors, times out, or hits an
       // unreachable backend must never be able to lock every user out — that
       // failure would be worse than the outage the gate exists to announce.

@@ -3,6 +3,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/app_user_profile.dart';
 import '../services/recent_input_store.dart';
+import '../services/local_user_session.dart';
+import '../services/network_availability.dart';
 import '../services/user_activity_logger.dart';
 import '../widgets/legal_agreement_notice.dart';
 import '../widgets/forgot_password_dialog.dart';
@@ -36,7 +38,16 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void initState() {
     super.initState();
+    ConnectivityMonitor.instance.addListener(_handleConnectivityChange);
+    final rememberedEmail = LocalUserSession.rememberedUser?.email;
+    if (rememberedEmail != null) {
+      _emailController.text = rememberedEmail;
+    }
     _loadRecentEmails();
+  }
+
+  void _handleConnectivityChange() {
+    if (mounted) setState(() => _errorMessage = null);
   }
 
   Future<void> _loadRecentEmails() async {
@@ -61,11 +72,23 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   void dispose() {
+    ConnectivityMonitor.instance.removeListener(_handleConnectivityChange);
     _emailController.dispose();
     _passwordController.dispose();
     _loginNameController.dispose();
 
     super.dispose();
+  }
+
+  void _openSavedLibrary() {
+    if (_isWorking) return;
+    final email = _emailController.text.trim().toLowerCase();
+    if (LocalUserSession.activateOffline(email)) return;
+    setState(() {
+      _errorMessage = LocalUserSession.rememberedUser == null
+          ? 'Internet is required for the first login on this device.'
+          : 'This device has no saved library for that email address.';
+    });
   }
 
   Future<void> _submit() async {
@@ -134,6 +157,7 @@ class _LoginScreenState extends State<LoginScreen> {
         );
         await _rememberEmail(email);
       }
+      ConnectivityMonitor.instance.reportBackendSuccess();
       UserActivityLogger.instance.record(
         operation: creatingAccount ? 'account_create' : 'login',
         status: 'succeeded',
@@ -153,6 +177,9 @@ class _LoginScreenState extends State<LoginScreen> {
       // main.dart listens to onAuthStateChange.
       // It will automatically replace this screen after authentication.
     } on AuthException catch (error) {
+      if (NetworkAvailability.isNetworkFailure(error)) {
+        ConnectivityMonitor.instance.reportBackendFailure(error);
+      }
       var message = error.message;
       if (creatingAccount && loginName.isNotEmpty) {
         try {
@@ -173,6 +200,9 @@ class _LoginScreenState extends State<LoginScreen> {
         _errorMessage = message;
       });
     } catch (error) {
+      if (NetworkAvailability.isNetworkFailure(error)) {
+        ConnectivityMonitor.instance.reportBackendFailure(error);
+      }
       if (!mounted) {
         return;
       }
@@ -266,6 +296,9 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (ConnectivityMonitor.instance.isOffline) {
+      return _buildOfflineLogin(context);
+    }
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
@@ -469,6 +502,98 @@ class _LoginScreenState extends State<LoginScreen> {
                         ],
                       ),
                     ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOfflineLogin(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final backendUnavailable =
+        ConnectivityMonitor.instance.state ==
+        BackendConnectivityState.backendUnavailable;
+    final remembered = LocalUserSession.rememberedUser;
+
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 440),
+              child: Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(28),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Icon(
+                        backendUnavailable
+                            ? Icons.cloud_off_outlined
+                            : Icons.wifi_off_outlined,
+                        size: 58,
+                        color: colorScheme.primary,
+                      ),
+                      const SizedBox(height: 18),
+                      Text(
+                        backendUnavailable
+                            ? 'Painter Reference service is unavailable'
+                            : 'No internet available',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        backendUnavailable
+                            ? 'Your internet connection works, but Supabase '
+                                  'cannot be reached. You can open the saved '
+                                  'library in read-only mode.'
+                            : 'You can open the saved library on this device '
+                                  'in read-only mode.',
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 24),
+                      TextFormField(
+                        controller: _emailController,
+                        readOnly: remembered != null,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: const InputDecoration(
+                          labelText: 'Email',
+                          prefixIcon: Icon(Icons.email_outlined),
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      if (_errorMessage != null) ...[
+                        const SizedBox(height: 16),
+                        Text(
+                          _errorMessage!,
+                          style: TextStyle(color: colorScheme.error),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                      const SizedBox(height: 22),
+                      FilledButton.icon(
+                        onPressed: _openSavedLibrary,
+                        icon: const Icon(Icons.login),
+                        label: const Text('Login'),
+                      ),
+                      if (backendUnavailable) ...[
+                        const SizedBox(height: 8),
+                        TextButton(
+                          onPressed: () {
+                            ConnectivityMonitor.instance.prepareBackendRetry();
+                          },
+                          child: const Text('Try online sign-in again'),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               ),

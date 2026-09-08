@@ -17,6 +17,7 @@ import 'screens/login_screen.dart';
 import 'screens/maintenance_screen.dart';
 import 'services/user_activity_logger.dart';
 import 'widgets/legal_agreement_notice.dart';
+import 'widgets/cached_image.dart';
 import 'screens/keyword_search_screen.dart';
 import 'screens/messages_screen.dart';
 import 'screens/messaging_settings_screen.dart';
@@ -30,6 +31,9 @@ import 'services/apple_sign_in_service.dart';
 import 'services/google_sign_in_service.dart';
 import 'services/impersonation_controller.dart';
 import 'services/library_home_cache.dart';
+import 'services/local_user_session.dart';
+import 'services/network_availability.dart';
+import 'services/offline_upload_queue.dart';
 import 'services/image_asset_service.dart';
 import 'services/messaging_service.dart';
 import 'services/report_service.dart';
@@ -51,6 +55,16 @@ Future<void> main() async {
   }
 
   await Supabase.initialize(url: supabaseUrl, publishableKey: publishableKey);
+  await LocalUserSession.initialize();
+  final restoredUser = Supabase.instance.client.auth.currentUser;
+  if (restoredUser != null) {
+    await LocalUserSession.rememberOnlineUser(restoredUser);
+  }
+  final cachedIdentity = LocalUserSession.rememberedUser;
+  if (cachedIdentity != null) {
+    await AppImageCache.claimLegacyEntriesForUser(cachedIdentity.userId);
+  }
+  await ConnectivityMonitor.instance.start();
 
   // Resolved before the first screen so activity logs carry device details
   // from the outset. Diagnostic only, so a failure here must not stop launch.
@@ -66,7 +80,8 @@ class ArtReferenceApp extends StatefulWidget {
   State<ArtReferenceApp> createState() => _ArtReferenceAppState();
 }
 
-class _ArtReferenceAppState extends State<ArtReferenceApp> {
+class _ArtReferenceAppState extends State<ArtReferenceApp>
+    with WidgetsBindingObserver {
   StreamSubscription<AuthState>? _authSubscription;
   StreamSubscription<List<SharedMediaFile>>? _sharingSubscription;
 
@@ -90,15 +105,18 @@ class _ArtReferenceAppState extends State<ArtReferenceApp> {
   }
 
   bool get _isSignedIn {
-    return _session?.user.email?.trim().isNotEmpty == true;
+    return _session?.user.email?.trim().isNotEmpty == true ||
+        LocalUserSession.isOfflineActive;
   }
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
 
     _session = _supabase.auth.currentSession;
     _authStateIsReady = true;
+    LocalUserSession.changes.addListener(_handleLocalSessionChange);
 
     // Checked here as well as on the sign-in transition, because on web there
     // is no transition to catch: returning from Google reloads the page, and
@@ -126,6 +144,13 @@ class _ArtReferenceAppState extends State<ArtReferenceApp> {
           _authStateIsReady = true;
         });
 
+        final user = authState.session?.user;
+        if (user != null) {
+          unawaited(LocalUserSession.rememberOnlineUser(user));
+        } else if (!LocalUserSession.isOfflineActive) {
+          LocalUserSession.markOnlineSignedOut();
+        }
+
         final isNowSignedIn = _isSignedIn;
 
         if (!wasSignedIn && isNowSignedIn) {
@@ -141,6 +166,10 @@ class _ArtReferenceAppState extends State<ArtReferenceApp> {
         debugPrint('Supabase authentication stream error: $error');
       },
     );
+  }
+
+  void _handleLocalSessionChange() {
+    if (mounted) setState(() {});
   }
 
   /// Records a web Google sign-in, which the login screen cannot log itself:
@@ -293,9 +322,18 @@ class _ArtReferenceAppState extends State<ArtReferenceApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _authSubscription?.cancel();
     _sharingSubscription?.cancel();
+    LocalUserSession.changes.removeListener(_handleLocalSessionChange);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(ConnectivityMonitor.instance.checkNow());
+    }
   }
 
   @override
@@ -366,6 +404,11 @@ class _MaintenanceGateState extends State<_MaintenanceGate>
 
   Future<void> _refresh() async {
     if (_isChecking) return;
+    if (ConnectivityMonitor.instance.state ==
+        BackendConnectivityState.noInternet) {
+      if (mounted) setState(() => _status = AppStatus.available);
+      return;
+    }
     setState(() => _isChecking = true);
     final status = await AppStatusService(Supabase.instance.client).load();
     if (!mounted) return;
@@ -588,6 +631,35 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   int _openReportCount = 0;
   String? _errorMessage;
 
+  bool get _hasOnlineSession =>
+      Supabase.instance.client.auth.currentSession != null;
+  bool get _isReadOnly =>
+      ConnectivityMonitor.instance.isOffline || !_hasOnlineSession;
+
+  String get _offlineMessage {
+    switch (ConnectivityMonitor.instance.state) {
+      case BackendConnectivityState.noInternet:
+        return 'No internet available. Existing images are read-only; new '
+            'images will wait on this device for upload.';
+      case BackendConnectivityState.backendUnavailable:
+        return 'Painter Reference service is unavailable. '
+            'Existing images are read-only; new images will wait on this '
+            'device for upload.';
+      case BackendConnectivityState.online:
+        return _hasOnlineSession
+            ? ''
+            : 'Connection restored. Sign in online to make changes.';
+      case BackendConnectivityState.unknown:
+        return 'Checking connection. Saved library is read-only.';
+    }
+  }
+
+  void _reportBackendFailure(Object error) {
+    if (NetworkAvailability.isNetworkFailure(error)) {
+      ConnectivityMonitor.instance.reportBackendFailure(error);
+    }
+  }
+
   bool get _cameraIsAvailable {
     if (kIsWeb) return true;
     return defaultTargetPlatform == TargetPlatform.android ||
@@ -604,14 +676,19 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     _messagingService = MessagingService(supabase);
     _reportService = ReportService(supabase);
 
-    _restoreThenRefreshCategories();
-    _refreshAdminStatus();
-    _refreshUnreadMessageCount();
+    ConnectivityMonitor.instance.addListener(_handleConnectivityChange);
+    unawaited(
+      _restoreThenRefreshCategories().then((_) => _syncPendingUploads()),
+    );
+    if (!_isReadOnly) {
+      _refreshAdminStatus();
+      _refreshUnreadMessageCount();
+    }
     // Missing until now, so the flag was invisible after a fresh launch no
     // matter how many reports were waiting — it appeared only if somebody
     // happened to pull to refresh, which is not how anyone finds out that
     // something needs attention.
-    _refreshOpenReportCount();
+    if (!_isReadOnly) _refreshOpenReportCount();
 
     // This screen's State is never recreated by an impersonation switch
     // (Navigator.popUntil reuses the existing root route rather than
@@ -625,10 +702,51 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
 
   @override
   void dispose() {
+    ConnectivityMonitor.instance.removeListener(_handleConnectivityChange);
     ImpersonationController.instance.impersonatedEmail.removeListener(
       _refreshHome,
     );
     super.dispose();
+  }
+
+  void _handleConnectivityChange() {
+    if (!mounted) return;
+    setState(() {});
+    if (!_isReadOnly) unawaited(_syncThenRefresh());
+  }
+
+  Future<void> _syncThenRefresh() async {
+    await _syncPendingUploads(refreshAfterUpload: false);
+    await _refreshHome();
+  }
+
+  Future<void> _syncPendingUploads({bool refreshAfterUpload = true}) async {
+    if (_isReadOnly) return;
+    late final OfflineUploadSyncResult result;
+    try {
+      result = await OfflineUploadQueue.instance.syncForCurrentUser(
+        Supabase.instance.client,
+      );
+    } catch (error) {
+      if (mounted) {
+        _showCategoryMessage('Unable to sync pending uploads: $error');
+      }
+      return;
+    }
+    if (!mounted) return;
+    if (result.uploaded > 0) {
+      _showCategoryMessage(
+        '${result.uploaded} queued '
+        '${result.uploaded == 1 ? 'image' : 'images'} uploaded.',
+      );
+      if (refreshAfterUpload) await _loadCategories(showLoading: false);
+    }
+    if (result.failed > 0) {
+      _showCategoryMessage(
+        '${result.failed} queued '
+        '${result.failed == 1 ? 'image needs' : 'images need'} attention.',
+      );
+    }
   }
 
   Future<void> _refreshAdminStatus() async {
@@ -684,6 +802,10 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   }
 
   Future<void> _refreshHome() async {
+    if (_isReadOnly) {
+      await _restoreThenRefreshCategories();
+      return;
+    }
     await Future.wait<void>([
       _loadCategories(),
       _refreshAdminStatus(),
@@ -700,7 +822,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   }
 
   Future<void> _restoreThenRefreshCategories() async {
-    final userId = Supabase.instance.client.auth.currentUser?.id;
+    final userId = LocalUserSession.effectiveUserId;
     if (userId != null) {
       final cached = await LibraryHomeCache.read(userId);
       if (cached != null && mounted) {
@@ -725,10 +847,24 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         });
       }
     }
+    if (_isReadOnly) {
+      if (mounted && _categories.isEmpty) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage =
+              'No saved library has been downloaded on this device.';
+        });
+      }
+      return;
+    }
     await _loadCategories(showLoading: _categories.isEmpty);
   }
 
   Future<void> _loadCategories({bool showLoading = true}) async {
+    if (_isReadOnly) {
+      await _restoreThenRefreshCategories();
+      return;
+    }
     final profiler = PerformanceProfiler('CATEGORY RETURN/REFRESH');
 
     // Timed into the activity log, not just the profiler. The profiler prints
@@ -747,6 +883,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
 
     try {
       final categories = await _loadOrderedCategoriesWithRetry();
+      ConnectivityMonitor.instance.reportBackendSuccess();
       categoryWatch.stop();
       profiler.checkpoint('Category records loaded');
 
@@ -774,6 +911,9 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         // absent, so a partial answer can never delete good entries.
         unawaited(AppImageCache.evictMissing(counts.ownedImageIds));
       } catch (error) {
+        if (NetworkAvailability.isNetworkFailure(error)) {
+          ConnectivityMonitor.instance.reportBackendFailure(error);
+        }
         // Keeping the previous numbers is better than showing zeroes, but it
         // must leave a trace: counts that quietly stop updating look like a
         // library that stopped changing.
@@ -841,13 +981,16 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       } else {
         profiler.checkpoint('Category grid unchanged');
       }
-      final userId = Supabase.instance.client.auth.currentUser?.id;
+      final userId = LocalUserSession.effectiveUserId;
       if (userId != null) {
         await LibraryHomeCache.write(userId, categories, counts);
         profiler.checkpoint('Category cache written');
       }
       profiler.finish();
     } catch (error) {
+      if (NetworkAvailability.isNetworkFailure(error)) {
+        ConnectivityMonitor.instance.reportBackendFailure(error);
+      }
       profiler.fail(error);
       UserActivityLogger.instance.record(
         operation: 'home_refresh',
@@ -939,7 +1082,8 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         return AlertDialog(
           title: const Text('Sign out?'),
           content: const Text(
-            'You will need your email and password to sign in again.',
+            'Downloaded library files will stay on this device and can be '
+            'opened offline.',
           ),
           actions: [
             TextButton(
@@ -970,15 +1114,14 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       targetType: 'account',
       targetId: auth.currentUser?.id,
     );
-    // Before signing out rather than after: whoever signs in next must not
-    // find the previous person's photographs still on the device.
-    await AppImageCache.clear();
     try {
       await auth.signOut(scope: SignOutScope.local);
+      LocalUserSession.markOnlineSignedOut();
     } on AuthException catch (error) {
       // Supabase clears the local session before it attempts remote token
       // revocation. A network failure must not undo a successful local logout.
       if (auth.currentSession == null) {
+        LocalUserSession.markOnlineSignedOut();
         debugPrint('Remote sign-out could not be completed: $error');
         return;
       }
@@ -991,6 +1134,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       );
     } catch (error) {
       if (auth.currentSession == null) {
+        LocalUserSession.markOnlineSignedOut();
         debugPrint('Remote sign-out could not be completed: $error');
         return;
       }
@@ -1121,7 +1265,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         builder: (dialogContext) => AlertDialog(
           title: Text('Add ${selected.length} images to Inbox?'),
           content: const Text(
-            'Every selected image will be uploaded directly to Inbox.',
+            'Images will be added to Inbox, or saved on this device until upload is available.',
           ),
           actions: [
             TextButton(
@@ -1139,27 +1283,66 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     }
 
     setState(() => _isIngesting = true);
-    var saved = 0;
+    var uploaded = 0;
+    var queued = 0;
     var failed = 0;
     try {
       for (final image in selected) {
         try {
-          await _imageAssetService.uploadImage(
-            await image.readAsBytes(),
-            inbox,
-          );
-          saved += 1;
+          final bytes = await image.readAsBytes();
+          if (_isReadOnly) {
+            final userId = LocalUserSession.effectiveUserId;
+            final userEmail = LocalUserSession.effectiveEmail;
+            if (userId == null || userEmail == null) {
+              throw StateError('No local user is available for this upload.');
+            }
+            await OfflineUploadQueue.instance.enqueue(
+              userId: userId,
+              userEmail: userEmail,
+              category: inbox,
+              imageBytes: bytes,
+              originalFilename: image.name,
+            );
+            queued += 1;
+          } else {
+            try {
+              await _imageAssetService.uploadImage(
+                bytes,
+                inbox,
+                originalFilename: image.name,
+              );
+              uploaded += 1;
+            } catch (error) {
+              _reportBackendFailure(error);
+              if (!NetworkAvailability.isNetworkFailure(error)) rethrow;
+              final userId = LocalUserSession.effectiveUserId;
+              final userEmail = LocalUserSession.effectiveEmail;
+              if (userId == null || userEmail == null) rethrow;
+              await OfflineUploadQueue.instance.enqueue(
+                userId: userId,
+                userEmail: userEmail,
+                category: inbox,
+                imageBytes: bytes,
+                originalFilename: image.name,
+              );
+              queued += 1;
+            }
+          }
         } catch (error) {
+          _reportBackendFailure(error);
           failed += 1;
           debugPrint('Unable to ingest ${image.name}: $error');
         }
       }
+      if (queued > 0 && !_isReadOnly) await _syncPendingUploads();
       if (mounted) await _loadCategories(showLoading: false);
       if (mounted) {
         _showCategoryMessage(
-          failed == 0
-              ? '$saved ${saved == 1 ? 'image' : 'images'} added to Inbox.'
-              : '$saved added to Inbox; $failed failed.',
+          [
+            if (uploaded > 0) '$uploaded uploaded',
+            if (queued > 0) '$queued waiting to upload',
+            if (failed > 0) '$failed failed',
+          ].join('; '),
         );
       }
     } finally {
@@ -1185,6 +1368,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       await _persistCategoryOrder();
       if (mounted) _showCategoryMessage('${category.displayName} added.');
     } catch (error) {
+      _reportBackendFailure(error);
       if (mounted) _showCategoryMessage('Unable to add category: $error');
     } finally {
       if (mounted) setState(() => _isAddingCategory = false);
@@ -1209,6 +1393,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       });
       _showCategoryMessage('Category renamed.');
     } catch (error) {
+      _reportBackendFailure(error);
       if (mounted) _showCategoryMessage('Unable to rename category: $error');
     }
   }
@@ -1247,6 +1432,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       await _persistCategoryOrder();
       if (mounted) _showCategoryMessage('Category deleted.');
     } catch (error) {
+      _reportBackendFailure(error);
       if (mounted) _showCategoryMessage('Unable to delete category: $error');
     }
   }
@@ -1267,6 +1453,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     try {
       await _persistCategoryOrder();
     } catch (error) {
+      _reportBackendFailure(error);
       if (!mounted) return;
       setState(() {
         _categories
@@ -1279,7 +1466,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
 
   Future<void> _persistCategoryOrder() async {
     await _categoryService.saveCategoryOrder(_categories);
-    final userId = Supabase.instance.client.auth.currentUser?.id;
+    final userId = LocalUserSession.effectiveUserId;
     if (userId != null) {
       await LibraryHomeCache.write(
         userId,
@@ -1309,6 +1496,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       });
       _showCategoryMessage('Category image updated.');
     } catch (error) {
+      _reportBackendFailure(error);
       if (mounted) {
         _showCategoryMessage('Unable to update category image: $error');
       }
@@ -1320,8 +1508,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   ).showSnackBar(SnackBar(content: Text(message)));
   @override
   Widget build(BuildContext context) {
-    final userEmail =
-        Supabase.instance.client.auth.currentUser?.email ?? 'Signed-in user';
+    final userEmail = LocalUserSession.effectiveEmail ?? 'Signed-in user';
 
     return Scaffold(
       appBar: AppBar(
@@ -1329,7 +1516,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         centerTitle: false,
         actions: [
           IconButton(
-            onPressed: _openMessages,
+            onPressed: _isReadOnly ? null : _openMessages,
             icon: Badge(
               label: Text('$_unreadMessageCount'),
               isLabelVisible: _unreadMessageCount > 0,
@@ -1340,14 +1527,16 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
                 : 'Messages',
           ),
           IconButton(
-            onPressed: _isLoading || _categories.isEmpty
+            onPressed: _isReadOnly || _isLoading || _categories.isEmpty
                 ? null
                 : _openKeywordSearch,
             icon: const Icon(Icons.search),
             tooltip: 'Search by keyword',
           ),
           IconButton(
-            onPressed: _isLoading || _isIngesting ? null : _refreshHome,
+            onPressed: _isReadOnly || _isLoading || _isIngesting
+                ? null
+                : _refreshHome,
             icon: const Icon(Icons.refresh),
             tooltip: 'Refresh categories',
           ),
@@ -1356,7 +1545,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
           // message. The count comes from a table an ordinary user is refused
           // by row level security, so this cannot be made to appear by anyone
           // it is not meant for.
-          if (_isAdmin && _openReportCount > 0)
+          if (!_isReadOnly && _isAdmin && _openReportCount > 0)
             IconButton(
               onPressed: _openReports,
               icon: Badge(
@@ -1368,7 +1557,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
                   ? '1 report waiting'
                   : '$_openReportCount reports waiting',
             ),
-          if (_isAdmin)
+          if (!_isReadOnly && _isAdmin)
             IconButton(
               onPressed: _openMaintenance,
               icon: const Icon(Icons.settings_outlined),
@@ -1423,8 +1612,9 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
                     title: Text('About'),
                   ),
                 ),
-                const PopupMenuItem<_AccountMenuAction>(
+                PopupMenuItem<_AccountMenuAction>(
                   value: _AccountMenuAction.feedback,
+                  enabled: !_isReadOnly,
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: Icon(Icons.feedback_outlined),
@@ -1432,8 +1622,9 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
                     subtitle: Text('Report a problem or share an idea'),
                   ),
                 ),
-                const PopupMenuItem<_AccountMenuAction>(
+                PopupMenuItem<_AccountMenuAction>(
                   value: _AccountMenuAction.privacy,
+                  enabled: !_isReadOnly,
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: Icon(Icons.privacy_tip_outlined),
@@ -1441,8 +1632,9 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
                     subtitle: Text('Manage who can find and message you'),
                   ),
                 ),
-                const PopupMenuItem<_AccountMenuAction>(
+                PopupMenuItem<_AccountMenuAction>(
                   value: _AccountMenuAction.account,
+                  enabled: !_isReadOnly,
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: Icon(Icons.manage_accounts_outlined),
@@ -1456,8 +1648,56 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
           ),
         ],
       ),
-      body: _buildBody(),
+      body: Column(
+        children: [
+          if (_isReadOnly) _buildOfflineBanner(),
+          Expanded(child: _buildBody()),
+        ],
+      ),
       floatingActionButton: _buildHomeActions(),
+    );
+  }
+
+  Widget _buildOfflineBanner() {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.secondaryContainer,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              Icon(
+                Icons.cloud_off_outlined,
+                color: scheme.onSecondaryContainer,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  _offlineMessage,
+                  style: TextStyle(color: scheme.onSecondaryContainer),
+                ),
+              ),
+              if (ConnectivityMonitor.instance.state ==
+                  BackendConnectivityState.backendUnavailable)
+                TextButton(
+                  onPressed: () {
+                    ConnectivityMonitor.instance.prepareBackendRetry();
+                  },
+                  child: const Text('Try again'),
+                ),
+              if (LocalUserSession.isOfflineActive &&
+                  ConnectivityMonitor.instance.state ==
+                      BackendConnectivityState.online)
+                TextButton(
+                  onPressed: LocalUserSession.deactivateOffline,
+                  child: const Text('Sign in'),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -1481,7 +1721,9 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       children: [
         FloatingActionButton.small(
           heroTag: 'addCategoryButton',
-          onPressed: _isAddingCategory ? null : _showAddCategoryDialog,
+          onPressed: _isReadOnly || _isAddingCategory
+              ? null
+              : _showAddCategoryDialog,
           tooltip: 'Add category',
           child: _isAddingCategory
               ? const Padding(
@@ -1581,25 +1823,26 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
                   imageCount:
                       _imageCountsByCategoryCode[category.databaseCode] ?? 0,
                   onTap: () => _openCategory(category),
-                  onRename: category.canRename
+                  onRename: !_isReadOnly && category.canRename
                       ? () => _renameCategory(category)
                       : null,
-                  onChangeImage: category.canChangeImage
+                  onChangeImage: !_isReadOnly && category.canChangeImage
                       ? () => _changeCategoryImage(category)
                       : null,
-                  onDelete: category.canDelete
+                  onDelete: !_isReadOnly && category.canDelete
                       ? () => _deleteCategory(category)
                       : null,
                 );
                 return DragTarget<int>(
-                  onWillAcceptWithDetails: (details) => details.data != index,
+                  onWillAcceptWithDetails: (details) =>
+                      !_isReadOnly && details.data != index,
                   onAcceptWithDetails: (details) {
                     unawaited(_moveCategory(details.data, index));
                   },
                   builder: (context, candidates, rejected) =>
                       LongPressDraggable<int>(
                         data: index,
-                        maxSimultaneousDrags: 1,
+                        maxSimultaneousDrags: _isReadOnly ? 0 : 1,
                         feedback: Material(
                           elevation: 10,
                           borderRadius: BorderRadius.circular(12),
@@ -1789,10 +2032,11 @@ class CollectionCard extends StatelessWidget {
     if (thumbnailAsset != null && thumbnailAsset.isNotEmpty) {
       if (thumbnailAsset.startsWith('http://') ||
           thumbnailAsset.startsWith('https://')) {
-        return Image.network(
-          thumbnailAsset,
+        return CachedImage(
+          url: thumbnailAsset,
+          cacheKey: AppImageCache.categoryCoverKey(category.databaseCode),
           fit: BoxFit.cover,
-          errorBuilder: (_, _, _) => _buildCustomCategoryBackground(context),
+          errorWidget: (_, _) => _buildCustomCategoryBackground(context),
         );
       }
       return Image.asset(

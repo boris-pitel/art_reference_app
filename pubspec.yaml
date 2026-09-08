@@ -2,7 +2,7 @@ name: art_reference_app
 description: "An app for collecting and organizing art reference images."
 publish_to: 'none'
 
-version: 1.2.0+92
+version: 1.2.0+93
 environment:
   sdk: ^3.12.2
 
@@ -32,6 +32,8 @@ dependencies:
   device_info_plus: ^13.2.0
   url_launcher: ^6.3.2
   crypto: ^3.0.7
+  connectivity_plus: ^7.3.1
+  idb_shim: ^2.9.8
 dev_dependencies:
   supabase: ^2.14.0
 
