@@ -1,3 +1,4 @@
+import 'network_availability.dart';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -104,6 +105,9 @@ class AiImageEditService {
         headers: {'x-user-id': _userId},
       );
     } on FunctionException catch (error) {
+      if (NetworkAvailability.isNetworkFailure(error)) {
+        ConnectivityMonitor.instance.reportBackendFailure(error);
+      }
       final quota = AiQuotaExceeded.fromDetails(error);
       if (quota != null) throw quota;
 

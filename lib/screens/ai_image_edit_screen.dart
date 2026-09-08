@@ -1,3 +1,4 @@
+import '../widgets/offline_editing_body.dart';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -41,7 +42,8 @@ class AiImageEditScreen extends StatefulWidget {
   State<AiImageEditScreen> createState() => _AiImageEditScreenState();
 }
 
-class _AiImageEditScreenState extends State<AiImageEditScreen> {
+class _AiImageEditScreenState extends State<AiImageEditScreen>
+    with OfflineEditorState<AiImageEditScreen> {
   final TextEditingController _promptController = TextEditingController();
   late final AiImageEditService _aiService = AiImageEditService(
     Supabase.instance.client,
@@ -100,7 +102,7 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
   }
 
   Future<void> _generate() async {
-    if (_isGenerating || _isAccepting) return;
+    if (editorOffline || _isGenerating || _isAccepting) return;
     final prompt = _promptController.text.trim();
     if (prompt.isEmpty) {
       setState(() => _error = 'Describe the change you want AI to make.');
@@ -152,6 +154,7 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
         await _showLimitReached(limit);
       }
     } catch (error) {
+      reportEditorFailure(error);
       UserActivityLogger.instance.record(
         operation: 'ai_image_edit_generate',
         status: 'failed',
@@ -247,6 +250,7 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
         ),
       );
     } catch (error) {
+      reportEditorFailure(error);
       messenger.showSnackBar(
         SnackBar(content: Text('Could not send the request: $error')),
       );
@@ -255,7 +259,7 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
 
   Future<void> _accept() async {
     final bytes = _previewBytes;
-    if (bytes == null || _isGenerating || _isAccepting) return;
+    if (editorOffline || bytes == null || _isGenerating || _isAccepting) return;
     setState(() {
       _isAccepting = true;
       _error = null;
@@ -279,6 +283,7 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
             .firstOrNull
             ?.imageUrl;
       } catch (error) {
+        reportEditorFailure(error);
         // Not fatal: the image is saved either way, and the screen behind can
         // reload without this. It only costs the smooth exit.
         debugPrint('Could not resolve the saved sketch URL: $error');
@@ -311,6 +316,7 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
         ),
       );
     } catch (error) {
+      reportEditorFailure(error);
       if (mounted) setState(() => _error = error.toString());
     } finally {
       if (mounted) setState(() => _isAccepting = false);
@@ -319,7 +325,7 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final busy = _isGenerating || _isAccepting;
+    final busy = editorOffline || _isGenerating || _isAccepting;
     return PopScope(
       // Intercepted so leaving carries back whatever was saved, whichever way
       // the user leaves — the back arrow, the system gesture, or the hardware
@@ -343,125 +349,128 @@ class _AiImageEditScreenState extends State<AiImageEditScreen> {
   Widget _buildScaffold(BuildContext context, bool busy) {
     return Scaffold(
       appBar: AppBar(title: const Text('Edit with AI')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _buildPreview(context),
-            // Directly under the image, where somebody waiting for a result is
-            // already looking, rather than under the prompt field where it
-            // could be scrolled off a phone screen entirely.
-            if (_error != null) ...[
-              const SizedBox(height: 12),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.errorContainer,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(
-                        Icons.error_outline,
-                        color: Theme.of(context).colorScheme.onErrorContainer,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          _error!,
-                          style: TextStyle(
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.onErrorContainer,
+      body: offlineEditorBody(
+        SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              _buildPreview(context),
+              // Directly under the image, where somebody waiting for a result is
+              // already looking, rather than under the prompt field where it
+              // could be scrolled off a phone screen entirely.
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.errorContainer,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.error_outline,
+                          color: Theme.of(context).colorScheme.onErrorContainer,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            _error!,
+                            style: TextStyle(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onErrorContainer,
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ],
-            const SizedBox(height: 16),
-            TextField(
-              controller: _promptController,
-              enabled: !busy,
-              minLines: 3,
-              maxLines: 6,
-              maxLength: 1000,
-              decoration: InputDecoration(
-                labelText: 'Describe the change',
-                hintText:
-                    'Example: Remove the objects from the table and preserve the lighting.',
-                border: const OutlineInputBorder(),
-                suffixIcon: _recentPrompts.isEmpty
-                    ? null
-                    : PopupMenuButton<String>(
-                        tooltip: 'Recent AI prompts',
-                        icon: const Icon(Icons.history),
-                        onSelected: (prompt) {
-                          _promptController.text = prompt;
-                          _promptController.selection = TextSelection.collapsed(
-                            offset: prompt.length,
-                          );
-                        },
-                        itemBuilder: (_) => _recentPrompts
-                            .map(
-                              (prompt) => PopupMenuItem(
-                                value: prompt,
-                                child: ConstrainedBox(
-                                  constraints: const BoxConstraints(
-                                    maxWidth: 320,
-                                  ),
-                                  child: Text(
-                                    prompt,
-                                    maxLines: 3,
-                                    overflow: TextOverflow.ellipsis,
+              ],
+              const SizedBox(height: 16),
+              TextField(
+                controller: _promptController,
+                enabled: !busy,
+                minLines: 3,
+                maxLines: 6,
+                maxLength: 1000,
+                decoration: InputDecoration(
+                  labelText: 'Describe the change',
+                  hintText:
+                      'Example: Remove the objects from the table and preserve the lighting.',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: _recentPrompts.isEmpty
+                      ? null
+                      : PopupMenuButton<String>(
+                          tooltip: 'Recent AI prompts',
+                          icon: const Icon(Icons.history),
+                          onSelected: (prompt) {
+                            _promptController.text = prompt;
+                            _promptController.selection =
+                                TextSelection.collapsed(offset: prompt.length);
+                          },
+                          itemBuilder: (_) => _recentPrompts
+                              .map(
+                                (prompt) => PopupMenuItem(
+                                  value: prompt,
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      maxWidth: 320,
+                                    ),
+                                    child: Text(
+                                      prompt,
+                                      maxLines: 3,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                   ),
                                 ),
-                              ),
-                            )
-                            .toList(growable: false),
+                              )
+                              .toList(growable: false),
+                        ),
+                ),
+              ),
+              // Directly under the prompt, where the hand already is. The
+              // quality picker and the notices below are read once and then
+              // ignored; the button is used on every attempt.
+              ..._buildActions(context, busy),
+              const SizedBox(height: 20),
+              DropdownButtonFormField<AiImageQuality>(
+                initialValue: _quality,
+                decoration: const InputDecoration(
+                  labelText: 'AI quality',
+                  border: OutlineInputBorder(),
+                ),
+                items: AiImageQuality.values
+                    .map(
+                      (quality) => DropdownMenuItem(
+                        value: quality,
+                        child: Text(
+                          '${quality.label} — ${quality.description}',
+                        ),
                       ),
+                    )
+                    .toList(growable: false),
+                onChanged: busy
+                    ? null
+                    : (quality) {
+                        if (quality != null) setState(() => _quality = quality);
+                      },
               ),
-            ),
-            // Directly under the prompt, where the hand already is. The
-            // quality picker and the notices below are read once and then
-            // ignored; the button is used on every attempt.
-            ..._buildActions(context, busy),
-            const SizedBox(height: 20),
-            DropdownButtonFormField<AiImageQuality>(
-              initialValue: _quality,
-              decoration: const InputDecoration(
-                labelText: 'AI quality',
-                border: OutlineInputBorder(),
+              const SizedBox(height: 8),
+              Text(
+                'Each generation uses AI credits, including previews you reject. '
+                'Medium is recommended; High costs substantially more.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
-              items: AiImageQuality.values
-                  .map(
-                    (quality) => DropdownMenuItem(
-                      value: quality,
-                      child: Text('${quality.label} — ${quality.description}'),
-                    ),
-                  )
-                  .toList(growable: false),
-              onChanged: busy
-                  ? null
-                  : (quality) {
-                      if (quality != null) setState(() => _quality = quality);
-                    },
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Each generation uses AI credits, including previews you reject. '
-              'Medium is recommended; High costs substantially more.',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 12),
-            const _ResolutionNotice(),
-          ],
+              const SizedBox(height: 12),
+              const _ResolutionNotice(),
+            ],
+          ),
         ),
       ),
     );

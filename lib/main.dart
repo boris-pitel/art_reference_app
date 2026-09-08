@@ -92,6 +92,7 @@ class _ArtReferenceAppState extends State<ArtReferenceApp>
 
   bool _shareScreenIsOpen = false;
   bool _authStateIsReady = false;
+  bool _isResumingSession = false;
 
   SupabaseClient get _supabase => Supabase.instance.client;
 
@@ -117,6 +118,7 @@ class _ArtReferenceAppState extends State<ArtReferenceApp>
     _session = _supabase.auth.currentSession;
     _authStateIsReady = true;
     LocalUserSession.changes.addListener(_handleLocalSessionChange);
+    ConnectivityMonitor.instance.addListener(_resumeSessionAfterReconnect);
 
     // Checked here as well as on the sign-in transition, because on web there
     // is no transition to catch: returning from Google reloads the page, and
@@ -164,8 +166,44 @@ class _ArtReferenceAppState extends State<ArtReferenceApp>
       },
       onError: (Object error, StackTrace stackTrace) {
         debugPrint('Supabase authentication stream error: $error');
+        if (NetworkAvailability.isNetworkFailure(error)) {
+          ConnectivityMonitor.instance.reportBackendFailure(error);
+        }
       },
     );
+  }
+
+  Future<void> _resumeSessionAfterReconnect() async {
+    if (_isResumingSession ||
+        ConnectivityMonitor.instance.state != BackendConnectivityState.online) {
+      return;
+    }
+    final session = _supabase.auth.currentSession;
+    // A remembered email after an explicit sign-out is not an authenticated
+    // session. Never recreate access from that local identity alone.
+    if (session == null) return;
+    _isResumingSession = true;
+    try {
+      final expiresAt = session.expiresAt;
+      if (expiresAt != null &&
+          expiresAt <= DateTime.now().millisecondsSinceEpoch ~/ 1000 + 60) {
+        await _supabase.auth.refreshSession();
+      }
+      final restored = _supabase.auth.currentSession;
+      if (restored == null || restored.user.id != session.user.id) return;
+      if (LocalUserSession.isOfflineActive ||
+          LocalUserSession.effectiveUserId != restored.user.id) {
+        await LocalUserSession.rememberOnlineUser(restored.user);
+      }
+      if (mounted) setState(() => _session = restored);
+    } catch (error) {
+      if (NetworkAvailability.isNetworkFailure(error)) {
+        ConnectivityMonitor.instance.reportBackendFailure(error);
+      }
+      debugPrint('Session recovery deferred: $error');
+    } finally {
+      _isResumingSession = false;
+    }
   }
 
   void _handleLocalSessionChange() {
@@ -326,6 +364,7 @@ class _ArtReferenceAppState extends State<ArtReferenceApp>
     _authSubscription?.cancel();
     _sharingSubscription?.cancel();
     LocalUserSession.changes.removeListener(_handleLocalSessionChange);
+    ConnectivityMonitor.instance.removeListener(_resumeSessionAfterReconnect);
     super.dispose();
   }
 

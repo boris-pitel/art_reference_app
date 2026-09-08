@@ -1,3 +1,4 @@
+import '../widgets/offline_editing_body.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -240,7 +241,7 @@ class ImageDetailsScreen extends StatefulWidget {
 }
 
 class _ImageDetailsScreenState extends State<ImageDetailsScreen>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, OfflineEditorState<ImageDetailsScreen> {
   final TextEditingController _titleController = TextEditingController();
 
   final TextEditingController _notesController = TextEditingController();
@@ -401,6 +402,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   }
 
   void _metadataChanged() {
+    if (editorOffline) return;
     if (_isLoadingMetadata || _isExiting) {
       return;
     }
@@ -504,6 +506,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         _isLoadingMetadata = false;
       });
     } catch (error) {
+      reportEditorFailure(error);
       if (!mounted) {
         return;
       }
@@ -537,6 +540,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       return Future<bool>.value(true);
     }
 
+    if (editorOffline) return Future<bool>.value(false);
     final operation = _performMetadataSave(
       _currentMetadata,
       showSuccessMessage: showSuccessMessage,
@@ -609,6 +613,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       }
       return true;
     } catch (error) {
+      reportEditorFailure(error);
       final errorMessage = error is FunctionException
           ? switch (error.details) {
               final Map details =>
@@ -662,7 +667,35 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     return true;
   }
 
+  Future<bool> _confirmOfflineExit() async {
+    if (!_hasUnsavedMetadata) return true;
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Leave without saving?'),
+            content: const Text(
+              'You are offline. Stay here to keep your unsaved details, or discard them and leave.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Stay'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Discard and leave'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
   Future<void> _goHome() async {
+    if (editorOffline) {
+      if (await _confirmOfflineExit() && mounted) goToCategoriesHome(context);
+      return;
+    }
     _metadataSaveDebounce?.cancel();
     if (!await _saveAllMetadata() || !mounted) return;
     goToCategoriesHome(context);
@@ -674,6 +707,10 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     }
 
     _metadataSaveDebounce?.cancel();
+    if (editorOffline) {
+      if (await _confirmOfflineExit() && mounted) _completePop(result);
+      return;
+    }
     if (_isLoadingMetadata) {
       _completePop(result);
       return;
@@ -713,6 +750,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   }
 
   Future<void> _analyzeImage() async {
+    if (editorOffline) return;
     if (_isAnalyzingImage) {
       return;
     }
@@ -768,6 +806,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         context,
       ).showSnackBar(const SnackBar(content: Text('AI analysis completed.')));
     } catch (error) {
+      reportEditorFailure(error);
       if (!mounted) {
         return;
       }
@@ -808,6 +847,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         _isLoadingAssociatedImages = false;
       });
     } catch (error) {
+      reportEditorFailure(error);
       if (!mounted) {
         return;
       }
@@ -820,6 +860,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   }
 
   Future<void> _pickAssociatedImage(ImageSource source) async {
+    if (editorOffline) return;
     if (_isUploadingAssociatedImage) {
       return;
     }
@@ -838,6 +879,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
 
       await _uploadAssociatedImage(imageBytes);
     } catch (error) {
+      reportEditorFailure(error);
       if (!mounted) {
         return;
       }
@@ -853,6 +895,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   }
 
   Future<void> _uploadAssociatedImage(Uint8List imageBytes) async {
+    if (editorOffline) return;
     if (_isUploadingAssociatedImage) {
       return;
     }
@@ -882,6 +925,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         context,
       ).showSnackBar(const SnackBar(content: Text('Associated image added.')));
     } catch (error) {
+      reportEditorFailure(error);
       if (!mounted) {
         return;
       }
@@ -1008,6 +1052,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     try {
       await _shareExportImage(context, image.imageUrl, image.id);
     } catch (error) {
+      reportEditorFailure(error);
       if (mounted) {
         _showAssociatedMessage('Unable to share image: $error');
       }
@@ -1025,6 +1070,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         _showAssociatedMessage(_saveResultMessage(result));
       }
     } catch (error) {
+      reportEditorFailure(error);
       if (mounted) {
         _showAssociatedMessage('Unable to save image: $error');
       }
@@ -1040,6 +1086,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   }
 
   Future<void> _confirmAndRemoveAssociatedImage(ImageAssetInfo image) async {
+    if (editorOffline) return;
     if (_deletingAssociatedImageIds.contains(image.id)) {
       return;
     }
@@ -1106,6 +1153,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         const SnackBar(content: Text('Associated image deleted.')),
       );
     } catch (error) {
+      reportEditorFailure(error);
       if (!mounted) {
         return;
       }
@@ -1337,6 +1385,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
             _shareExportImage(context, _currentImageUrl, _currentImageId),
       );
     } catch (error) {
+      reportEditorFailure(error);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Unable to share the reference: $error')),
@@ -1367,6 +1416,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         ).showSnackBar(SnackBar(content: Text(_saveResultMessage(result))));
       }
     } catch (error) {
+      reportEditorFailure(error);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Unable to save the reference: $error')),
@@ -1399,6 +1449,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         },
       );
     } catch (error) {
+      reportEditorFailure(error);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Unable to print the reference: $error')),
@@ -1425,6 +1476,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         ),
       );
     } catch (error) {
+      reportEditorFailure(error);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1449,6 +1501,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         documentName: 'Painter Reference Sketch ${image.id}',
       );
     } catch (error) {
+      reportEditorFailure(error);
       if (mounted) {
         _showAssociatedMessage('Unable to print sketch: $error');
       }
@@ -1460,6 +1513,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   }
 
   Future<void> _moveImage() async {
+    if (editorOffline) return;
     if (_isMovingImage) {
       return;
     }
@@ -1630,6 +1684,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
 
       Navigator.of(context).pop(true);
     } catch (error) {
+      reportEditorFailure(error);
       if (!mounted) {
         return;
       }
@@ -1659,6 +1714,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   }
 
   Future<void> _addAiKeyword(String keyword) async {
+    if (editorOffline) return;
     final normalizedKeyword = keyword.trim();
     final normalizedKey = normalizedKeyword.toLowerCase();
 
@@ -1702,6 +1758,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         _attachedKeywords.add(normalizedKey);
       });
     } catch (error) {
+      reportEditorFailure(error);
       if (!mounted) {
         return;
       }
@@ -1749,7 +1806,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
             ),
             if (widget.isAssociatedImage)
               TextButton.icon(
-                onPressed: _isLoadingMetadata || _isSavingMetadata
+                onPressed:
+                    editorOffline || _isLoadingMetadata || _isSavingMetadata
                     ? null
                     : _openMainImage,
                 icon: const Icon(Icons.crop_rotate),
@@ -1757,7 +1815,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
               ),
             if (!widget.isAssociatedImage)
               IconButton(
-                onPressed: _isLoadingMetadata || _isSavingMetadata
+                onPressed:
+                    editorOffline || _isLoadingMetadata || _isSavingMetadata
                     ? null
                     : () {
                         setState(() {
@@ -1774,46 +1833,48 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
               ),
           ],
         ),
-        body: GestureDetector(
-          behavior: HitTestBehavior.translucent,
-          onHorizontalDragEnd: _handleHorizontalDragEnd,
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final availableHeight = constraints.maxHeight;
+        body: offlineEditorBody(
+          GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onHorizontalDragEnd: _handleHorizontalDragEnd,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final availableHeight = constraints.maxHeight;
 
-              final calculatedImageHeight = availableHeight * 0.55;
+                final calculatedImageHeight = availableHeight * 0.55;
 
-              final imageHeight = math.min(
-                700.0,
-                math.max(320.0, calculatedImageHeight),
-              );
+                final imageHeight = math.min(
+                  700.0,
+                  math.max(320.0, calculatedImageHeight),
+                );
 
-              return ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  _buildImageViewer(context, imageHeight),
-                  const SizedBox(height: 24),
-                  _buildTechnicalSection(context),
-                  _buildMetadataSection(context),
-                  const SizedBox(height: 24),
+                return ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    _buildImageViewer(context, imageHeight),
+                    const SizedBox(height: 24),
+                    _buildTechnicalSection(context),
+                    _buildMetadataSection(context),
+                    const SizedBox(height: 24),
 
-                  if (!widget.isAssociatedImage) ...[
-                    ImageKeywordsSection(
-                      key: _keywordsSectionKey,
-                      imageId: _currentImageId,
-                      onKeywordsChanged: _handleKeywordsChanged,
-                    ),
+                    if (!widget.isAssociatedImage) ...[
+                      ImageKeywordsSection(
+                        key: _keywordsSectionKey,
+                        imageId: _currentImageId,
+                        onKeywordsChanged: _handleKeywordsChanged,
+                      ),
+                      const SizedBox(height: 24),
+                    ],
+                    _buildAiAnalysisSection(context),
+                    if (!widget.isAssociatedImage) ...[
+                      const SizedBox(height: 24),
+                      _buildAssociatedImagesSection(context),
+                    ],
                     const SizedBox(height: 24),
                   ],
-                  _buildAiAnalysisSection(context),
-                  if (!widget.isAssociatedImage) ...[
-                    const SizedBox(height: 24),
-                    _buildAssociatedImagesSection(context),
-                  ],
-                  const SizedBox(height: 24),
-                ],
-              );
-            },
+                );
+              },
+            ),
           ),
         ),
       ),
@@ -2993,7 +3054,8 @@ class _ZoomableImageScreen extends StatefulWidget {
   State<_ZoomableImageScreen> createState() => _ZoomableImageScreenState();
 }
 
-class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
+class _ZoomableImageScreenState extends State<_ZoomableImageScreen>
+    with OfflineEditorState<_ZoomableImageScreen> {
   static const double _minimumScale = 1;
   static const double _maximumScale = 8;
   static const double _doubleTapScale = 3;
@@ -3123,6 +3185,7 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
     try {
       await _shareExportImage(context, _imageUrl, imageId);
     } catch (error) {
+      reportEditorFailure(error);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Unable to share image: $error')),
@@ -3147,6 +3210,7 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
         ).showSnackBar(SnackBar(content: Text(_saveResultMessage(result))));
       }
     } catch (error) {
+      reportEditorFailure(error);
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -3209,6 +3273,7 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
   }
 
   Future<void> _startEditing() async {
+    if (editorOffline) return;
     if (_isLoadingEditor || _isApplyingEdit) return;
     setState(() => _isLoadingEditor = true);
     try {
@@ -3223,6 +3288,7 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
         try {
           image = await _downloadExportImage(_imageUrl);
         } on StateError catch (error) {
+          reportEditorFailure(error);
           final unauthorized =
               error.toString().contains('status 401') ||
               error.toString().contains('status 403');
@@ -3246,6 +3312,7 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
         setState(() => _editingBytes = image.bytes);
       }
     } catch (error) {
+      reportEditorFailure(error);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Unable to open the image editor: $error')),
@@ -3257,6 +3324,7 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
   }
 
   Future<void> _saveUnchangedSketch() async {
+    if (editorOffline) return;
     if (_isLoadingEditor || _isApplyingEdit) return;
     setState(() {
       _isLoadingEditor = true;
@@ -3292,6 +3360,7 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
         await _applyEditedSketch(output);
       }
     } catch (error) {
+      reportEditorFailure(error);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Unable to create the sketch: $error')),
@@ -3303,6 +3372,7 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
   }
 
   Future<void> _openAiEditor([Uint8List? adjustedSourceBytes]) async {
+    if (editorOffline) return;
     final sourceImageId = _imageId ?? widget.createSketchParentImageId;
     final parentImageId =
         widget.createSketchParentImageId ?? widget.editableParentImageId;
@@ -3344,6 +3414,7 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
   }
 
   Future<void> _applyEditedSketch(Uint8List bytes) async {
+    if (editorOffline) return;
     final isCreating = widget.createSketchParentImageId != null;
     final parentId =
         widget.createSketchParentImageId ?? widget.editableParentImageId;
@@ -3433,6 +3504,7 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
         _finishImageWindow();
       }
     } catch (error) {
+      reportEditorFailure(error);
       final alreadyAttached = isCreating && _isAlreadyAttachedError(error);
       UserActivityLogger.instance.record(
         operation: isCreating ? 'sketch_create' : 'sketch_edit',
@@ -3514,7 +3586,8 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
                     disabledForegroundColor: Colors.white38,
                   ),
                   onPressed:
-                      _isApplyingEdit ||
+                      editorOffline ||
+                          _isApplyingEdit ||
                           (!hasChanges &&
                               widget.createSketchParentImageId == null)
                       ? null
@@ -3602,223 +3675,231 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen> {
             ],
           ],
         ),
-        body: _editingBytes != null
-            ? Stack(
-                children: [
-                  Positioned.fill(
-                    child: ImageAdjustmentScreen(
-                      imageBytes: _editingBytes!,
-                      embedded: true,
-                      onDone: _applyEditedSketch,
-                      onEditWithAi: _openAiEditor,
-                      onProcessingChanged: (processing) {
-                        if (mounted) {
-                          setState(() {
-                            _isEditorProcessing = processing;
-                            if (processing && !_isApplyingEdit) {
-                              _saveProgressLabel = 'Processing image…';
-                            }
-                          });
-                        }
-                      },
-                      controller: _imageAdjustmentController,
-                    ),
-                  ),
-                  if (_isLoadingEditor ||
-                      _isEditorProcessing ||
-                      _isApplyingEdit)
-                    Positioned.fill(
-                      child: ColoredBox(
-                        color: const Color(0x99000000),
-                        child: Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const CircularProgressIndicator(
-                                color: Colors.white,
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                _isLoadingEditor &&
-                                        !_isEditorProcessing &&
-                                        !_isApplyingEdit
-                                    ? 'Preparing sketch…'
-                                    : _saveProgressLabel,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              )
-            : SafeArea(
-                child: Stack(
+        body: offlineEditorBody(
+          _editingBytes != null
+              ? Stack(
                   children: [
                     Positioned.fill(
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onDoubleTapDown: _handleDoubleTapDown,
-                        onDoubleTap: _handleDoubleTap,
-                        child: InteractiveViewer(
-                          transformationController: _transformationController,
-                          minScale: _minimumScale,
-                          maxScale: _maximumScale,
-                          boundaryMargin: const EdgeInsets.all(120),
-                          clipBehavior: Clip.none,
-                          child: SizedBox.expand(
-                            child: Stack(
+                      child: ImageAdjustmentScreen(
+                        imageBytes: _editingBytes!,
+                        embedded: true,
+                        onDone: _applyEditedSketch,
+                        onEditWithAi: _openAiEditor,
+                        onProcessingChanged: (processing) {
+                          if (mounted) {
+                            setState(() {
+                              _isEditorProcessing = processing;
+                              if (processing && !_isApplyingEdit) {
+                                _saveProgressLabel = 'Processing image…';
+                              }
+                            });
+                          }
+                        },
+                        controller: _imageAdjustmentController,
+                      ),
+                    ),
+                    if (_isLoadingEditor ||
+                        _isEditorProcessing ||
+                        _isApplyingEdit)
+                      Positioned.fill(
+                        child: ColoredBox(
+                          color: const Color(0x99000000),
+                          child: Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
-                                _MaybeMonochrome(
-                                  enabled: _monochrome,
-                                  child: Center(
-                                    child: Hero(
-                                      tag: widget.heroTag,
-                                      child: CachedImage(
-                                        url: _imageUrl,
-                                        // Null only for images opened without an id,
-                                        // which cannot be cached by id — those fall
-                                        // back to the URL and behave as before.
-                                        cacheKey: _imageId == null
-                                            ? _imageUrl
-                                            : AppImageCache.fullKey(_imageId!),
-                                        width: double.infinity,
-                                        height: double.infinity,
-                                        fit: BoxFit.contain,
-                                        // The reporting Image.network did through
-                                        // frameBuilder and errorBuilder. Carried
-                                        // across deliberately: it is the only thing
-                                        // that has ever identified a device where
-                                        // the image never arrives.
-                                        onRendered: () =>
-                                            _reportFullViewRender('succeeded'),
-                                        onFailed: (error) =>
-                                            _reportFullViewRender(
-                                              'failed',
-                                              error: error,
-                                            ),
-                                        placeholder: const Center(
-                                          child: CircularProgressIndicator(
-                                            color: Colors.white,
-                                          ),
-                                        ),
-                                        errorWidget: (context, error) {
-                                          return const Center(
-                                            child: Column(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Icon(
-                                                  Icons.broken_image_outlined,
-                                                  size: 64,
-                                                  color: Colors.white,
-                                                ),
-                                                SizedBox(height: 14),
-                                                Text(
-                                                  'Unable to load image.',
-                                                  style: TextStyle(
-                                                    color: Colors.white,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                    ),
+                                const CircularProgressIndicator(
+                                  color: Colors.white,
+                                ),
+                                const SizedBox(height: 16),
+                                Text(
+                                  _isLoadingEditor &&
+                                          !_isEditorProcessing &&
+                                          !_isApplyingEdit
+                                      ? 'Preparing sketch…'
+                                      : _saveProgressLabel,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
                                   ),
                                 ),
-                                if (_grid != CompositionGrid.none &&
-                                    _displayedImageSize != null)
-                                  Positioned.fill(
-                                    child: IgnorePointer(
-                                      child: LayoutBuilder(
-                                        builder: (context, constraints) {
-                                          return CustomPaint(
-                                            painter: CompositionGridPainter(
-                                              grid: _grid,
-                                              area: containedImageRect(
-                                                constraints.biggest,
-                                                _displayedImageSize!,
-                                              ),
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                    ),
-                                  ),
                               ],
                             ),
                           ),
                         ),
                       ),
-                    ),
-                    if (widget.editableParentImageId != null ||
-                        widget.createSketchParentImageId != null)
-                      Positioned(
-                        left: 16,
-                        right: 16,
-                        bottom: 16,
-                        child: Center(
-                          child: widget.createSketchParentImageId != null
-                              ? Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    OutlinedButton.icon(
-                                      // This screen is black and the button
-                                      // sits over the picture itself, so it
-                                      // cannot take its colours from the light
-                                      // theme: it was drawing dark on dark and
-                                      // all but disappearing. The scrim keeps
-                                      // it readable over a bright image too.
-                                      style: OutlinedButton.styleFrom(
-                                        foregroundColor: Colors.white,
-                                        backgroundColor: Colors.black54,
-                                        disabledForegroundColor: Colors.white38,
-                                        side: const BorderSide(
-                                          color: Colors.white70,
+                  ],
+                )
+              : SafeArea(
+                  child: Stack(
+                    children: [
+                      Positioned.fill(
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onDoubleTapDown: _handleDoubleTapDown,
+                          onDoubleTap: _handleDoubleTap,
+                          child: InteractiveViewer(
+                            transformationController: _transformationController,
+                            minScale: _minimumScale,
+                            maxScale: _maximumScale,
+                            boundaryMargin: const EdgeInsets.all(120),
+                            clipBehavior: Clip.none,
+                            child: SizedBox.expand(
+                              child: Stack(
+                                children: [
+                                  _MaybeMonochrome(
+                                    enabled: _monochrome,
+                                    child: Center(
+                                      child: Hero(
+                                        tag: widget.heroTag,
+                                        child: CachedImage(
+                                          url: _imageUrl,
+                                          // Null only for images opened without an id,
+                                          // which cannot be cached by id — those fall
+                                          // back to the URL and behave as before.
+                                          cacheKey: _imageId == null
+                                              ? _imageUrl
+                                              : AppImageCache.fullKey(
+                                                  _imageId!,
+                                                ),
+                                          width: double.infinity,
+                                          height: double.infinity,
+                                          fit: BoxFit.contain,
+                                          // The reporting Image.network did through
+                                          // frameBuilder and errorBuilder. Carried
+                                          // across deliberately: it is the only thing
+                                          // that has ever identified a device where
+                                          // the image never arrives.
+                                          onRendered: () =>
+                                              _reportFullViewRender(
+                                                'succeeded',
+                                              ),
+                                          onFailed: (error) =>
+                                              _reportFullViewRender(
+                                                'failed',
+                                                error: error,
+                                              ),
+                                          placeholder: const Center(
+                                            child: CircularProgressIndicator(
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                          errorWidget: (context, error) {
+                                            return const Center(
+                                              child: Column(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                    Icons.broken_image_outlined,
+                                                    size: 64,
+                                                    color: Colors.white,
+                                                  ),
+                                                  SizedBox(height: 14),
+                                                  Text(
+                                                    'Unable to load image.',
+                                                    style: TextStyle(
+                                                      color: Colors.white,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                          },
                                         ),
                                       ),
-                                      onPressed: _isLoadingEditor
-                                          ? null
-                                          : _startEditing,
-                                      icon: const Icon(Icons.crop_rotate),
-                                      label: const Text('Edit sketch'),
                                     ),
-                                    const SizedBox(width: 12),
-                                    FilledButton.icon(
-                                      onPressed: _isLoadingEditor
-                                          ? null
-                                          : _saveUnchangedSketch,
-                                      icon: _isLoadingEditor
-                                          ? const SizedBox.square(
-                                              dimension: 18,
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2,
+                                  ),
+                                  if (_grid != CompositionGrid.none &&
+                                      _displayedImageSize != null)
+                                    Positioned.fill(
+                                      child: IgnorePointer(
+                                        child: LayoutBuilder(
+                                          builder: (context, constraints) {
+                                            return CustomPaint(
+                                              painter: CompositionGridPainter(
+                                                grid: _grid,
+                                                area: containedImageRect(
+                                                  constraints.biggest,
+                                                  _displayedImageSize!,
+                                                ),
                                               ),
-                                            )
-                                          : const Icon(
-                                              Icons.add_photo_alternate,
-                                            ),
-                                      label: const Text('Save as sketch'),
+                                            );
+                                          },
+                                        ),
+                                      ),
                                     ),
-                                  ],
-                                )
-                              : FilledButton.icon(
-                                  onPressed: _isLoadingEditor
-                                      ? null
-                                      : _startEditing,
-                                  icon: const Icon(Icons.crop_rotate),
-                                  label: const Text('Edit sketch'),
-                                ),
+                                ],
+                              ),
+                            ),
+                          ),
                         ),
                       ),
-                  ],
+                      if (widget.editableParentImageId != null ||
+                          widget.createSketchParentImageId != null)
+                        Positioned(
+                          left: 16,
+                          right: 16,
+                          bottom: 16,
+                          child: Center(
+                            child: widget.createSketchParentImageId != null
+                                ? Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      OutlinedButton.icon(
+                                        // This screen is black and the button
+                                        // sits over the picture itself, so it
+                                        // cannot take its colours from the light
+                                        // theme: it was drawing dark on dark and
+                                        // all but disappearing. The scrim keeps
+                                        // it readable over a bright image too.
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: Colors.white,
+                                          backgroundColor: Colors.black54,
+                                          disabledForegroundColor:
+                                              Colors.white38,
+                                          side: const BorderSide(
+                                            color: Colors.white70,
+                                          ),
+                                        ),
+                                        onPressed: _isLoadingEditor
+                                            ? null
+                                            : _startEditing,
+                                        icon: const Icon(Icons.crop_rotate),
+                                        label: const Text('Edit sketch'),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      FilledButton.icon(
+                                        onPressed: _isLoadingEditor
+                                            ? null
+                                            : _saveUnchangedSketch,
+                                        icon: _isLoadingEditor
+                                            ? const SizedBox.square(
+                                                dimension: 18,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                    ),
+                                              )
+                                            : const Icon(
+                                                Icons.add_photo_alternate,
+                                              ),
+                                        label: const Text('Save as sketch'),
+                                      ),
+                                    ],
+                                  )
+                                : FilledButton.icon(
+                                    onPressed: _isLoadingEditor
+                                        ? null
+                                        : _startEditing,
+                                    icon: const Icon(Icons.crop_rotate),
+                                    label: const Text('Edit sketch'),
+                                  ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
-              ),
+        ),
       ),
     );
   }

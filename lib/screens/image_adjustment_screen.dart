@@ -1,3 +1,4 @@
+import '../widgets/offline_editing_body.dart';
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -127,7 +128,8 @@ class ImageAdjustmentScreen extends StatefulWidget {
   State<ImageAdjustmentScreen> createState() => _ImageAdjustmentScreenState();
 }
 
-class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
+class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen>
+    with OfflineEditorState<ImageAdjustmentScreen> {
   final TextEditingController _widthController = TextEditingController(
     text: '3',
   );
@@ -196,6 +198,7 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
         });
       }
     } catch (error) {
+      reportEditorFailure(error);
       debugPrint('Unable to load saved aspect ratios: $error');
     }
   }
@@ -231,6 +234,7 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
         });
       }
     } catch (error) {
+      reportEditorFailure(error);
       if (mounted) {
         setState(() {
           _loadError = 'This sketch could not be opened.\n$error';
@@ -597,13 +601,14 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
   }
 
   Future<void> _done() async {
-    if (_isApplying) return;
+    if (editorOffline || _isApplying) return;
     setState(() => _isApplying = true);
     widget.onProcessingChanged?.call(true);
     // Give Flutter a frame to display progress before expensive image work.
     await WidgetsBinding.instance.endOfFrame;
     try {
       final adjusted = await _applyAdjustments();
+      if (editorOffline) return;
       if (!mounted) return;
       final onDone = widget.onDone;
       if (onDone != null) {
@@ -612,6 +617,7 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
         Navigator.of(context).pop(adjusted);
       }
     } catch (error) {
+      reportEditorFailure(error);
       if (mounted) {
         setState(() => _isApplying = false);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -644,14 +650,16 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
 
   Future<void> _editWithAi() async {
     final onEditWithAi = widget.onEditWithAi;
-    if (onEditWithAi == null || _isApplying) return;
+    if (editorOffline || onEditWithAi == null || _isApplying) return;
     setState(() => _isApplying = true);
     widget.onProcessingChanged?.call(true);
     await WidgetsBinding.instance.endOfFrame;
     try {
       final adjusted = await _applyAdjustments();
+      if (editorOffline) return;
       if (mounted) await onEditWithAi(adjusted);
     } catch (error) {
+      reportEditorFailure(error);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Unable to prepare the AI edit: $error')),
@@ -707,7 +715,7 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
           actions: [
             HomeButton(enabled: !_isApplying),
             TextButton(
-              onPressed: _isApplying ? null : _done,
+              onPressed: editorOffline || _isApplying ? null : _done,
               child: _isApplying
                   ? const SizedBox.square(
                       dimension: 20,
@@ -717,7 +725,7 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen> {
             ),
           ],
         ),
-        body: body,
+        body: offlineEditorBody(body),
       ),
     );
   }

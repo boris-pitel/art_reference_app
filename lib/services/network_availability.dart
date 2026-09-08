@@ -134,7 +134,14 @@ class NetworkAvailability {
 
   static bool isNetworkFailure(Object error) {
     final text = error.toString().toLowerCase();
-    return text.contains('failed host lookup') ||
+    return text.contains('network is unreachable') ||
+        text.contains('network is down') ||
+        text.contains('internet connection appears to be offline') ||
+        text.contains('connection closed') ||
+        text.contains('connection aborted') ||
+        text.contains('network request failed') ||
+        text.contains('net::err_internet_disconnected') ||
+        text.contains('failed host lookup') ||
         text.contains('socketexception') ||
         text.contains('networkerror') ||
         text.contains('failed to fetch') ||
