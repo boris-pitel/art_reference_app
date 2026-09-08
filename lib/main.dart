@@ -126,6 +126,7 @@ class _ArtReferenceAppState extends State<ArtReferenceApp>
     _logGoogleSignInIfPending();
 
     _initializeAuthListener();
+    unawaited(_resumeSessionAfterReconnect());
 
     if (_sharingIsSupported) {
       _initializeSharingListener();
@@ -208,6 +209,7 @@ class _ArtReferenceAppState extends State<ArtReferenceApp>
 
   void _handleLocalSessionChange() {
     if (mounted) setState(() {});
+    unawaited(_resumeSessionAfterReconnect());
   }
 
   /// Records a web Google sign-in, which the login screen cannot log itself:
@@ -716,6 +718,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     _reportService = ReportService(supabase);
 
     ConnectivityMonitor.instance.addListener(_handleConnectivityChange);
+    LocalUserSession.changes.addListener(_handleConnectivityChange);
     unawaited(
       _restoreThenRefreshCategories().then((_) => _syncPendingUploads()),
     );
@@ -742,6 +745,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   @override
   void dispose() {
     ConnectivityMonitor.instance.removeListener(_handleConnectivityChange);
+    LocalUserSession.changes.removeListener(_handleConnectivityChange);
     ImpersonationController.instance.impersonatedEmail.removeListener(
       _refreshHome,
     );
@@ -1727,6 +1731,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
                   child: const Text('Try again'),
                 ),
               if (LocalUserSession.isOfflineActive &&
+                  !_hasOnlineSession &&
                   ConnectivityMonitor.instance.state ==
                       BackendConnectivityState.online)
                 TextButton(

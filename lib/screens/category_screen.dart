@@ -92,9 +92,10 @@ class _ImageActionEntry {
 }
 
 class CategoryScreen extends StatefulWidget {
-  const CategoryScreen({super.key, required this.category});
+  const CategoryScreen({super.key, required this.category, this.uploadQueue});
 
   final ReferenceCategory category;
+  final OfflineUploadQueue? uploadQueue;
 
   @override
   State<CategoryScreen> createState() => _CategoryScreenState();
@@ -103,6 +104,8 @@ class CategoryScreen extends StatefulWidget {
 class _CategoryScreenState extends State<CategoryScreen>
     with WidgetsBindingObserver {
   final ImagePicker _imagePicker = ImagePicker();
+  OfflineUploadQueue get _uploadQueue =>
+      widget.uploadQueue ?? OfflineUploadQueue.instance;
 
   late final ImageAssetService _imageAssetService;
 
@@ -150,7 +153,8 @@ class _CategoryScreenState extends State<CategoryScreen>
 
   bool get _isReadOnly =>
       ConnectivityMonitor.instance.isOffline ||
-      LocalUserSession.isOfflineActive;
+      LocalUserSession.isOfflineActive ||
+      Supabase.instance.client.auth.currentSession == null;
 
   void _reportBackendFailure(Object error) {
     if (NetworkAvailability.isNetworkFailure(error)) {
@@ -279,7 +283,8 @@ class _CategoryScreenState extends State<CategoryScreen>
     _imageAssetService = ImageAssetService(Supabase.instance.client);
 
     ConnectivityMonitor.instance.addListener(_handleConnectivityChange);
-    OfflineUploadQueue.instance.addListener(_handleQueueChange);
+    _uploadQueue.addListener(_handleQueueChange);
+    LocalUserSession.changes.addListener(_handleSessionChange);
     _handleQueueChange();
     _loadImages();
   }
@@ -288,11 +293,16 @@ class _CategoryScreenState extends State<CategoryScreen>
     unawaited(_loadPendingUploads());
   }
 
+  void _handleSessionChange() {
+    _handleQueueChange();
+    _handleConnectivityChange();
+  }
+
   Future<void> _loadPendingUploads() async {
     final userId = LocalUserSession.effectiveUserId;
     if (userId == null) return;
     try {
-      final pending = await OfflineUploadQueue.instance.listForUser(
+      final pending = await _uploadQueue.listForUser(
         userId,
         categoryCode: widget.category.databaseCode,
       );
@@ -313,7 +323,8 @@ class _CategoryScreenState extends State<CategoryScreen>
 
   @override
   void dispose() {
-    OfflineUploadQueue.instance.removeListener(_handleQueueChange);
+    _uploadQueue.removeListener(_handleQueueChange);
+    LocalUserSession.changes.removeListener(_handleSessionChange);
     WidgetsBinding.instance.removeObserver(this);
     ConnectivityMonitor.instance.removeListener(_handleConnectivityChange);
 
@@ -576,7 +587,7 @@ class _CategoryScreenState extends State<CategoryScreen>
           if (userId == null || email == null) {
             throw StateError('Sign in before adding images.');
           }
-          await OfflineUploadQueue.instance.enqueue(
+          final pending = await _uploadQueue.enqueue(
             userId: userId,
             userEmail: email,
             category: widget.category,
@@ -584,6 +595,15 @@ class _CategoryScreenState extends State<CategoryScreen>
             originalFilename: files[index].name,
           );
           queued++;
+          if (mounted && userId == LocalUserSession.effectiveUserId) {
+            setState(() {
+              _pendingUploads = [
+                pending,
+                ..._pendingUploads.where((item) => item.id != pending.id),
+              ];
+              _errorMessage = null;
+            });
+          }
         }
 
         if (_isReadOnly) {
@@ -632,14 +652,13 @@ class _CategoryScreenState extends State<CategoryScreen>
     });
     if (queued > 0 && !_isReadOnly) {
       try {
-        await OfflineUploadQueue.instance.syncForCurrentUser(
-          Supabase.instance.client,
-        );
+        await _uploadQueue.syncForCurrentUser(Supabase.instance.client);
       } catch (error) {
         debugPrint('Pending upload sync deferred: $error');
       }
     }
-    await _loadImages();
+    await _loadPendingUploads();
+    if (!_isReadOnly || saved > 0) await _loadImages();
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -1475,7 +1494,6 @@ class _CategoryScreenState extends State<CategoryScreen>
       body: Column(
         children: [
           if (_isReadOnly) _buildOfflineBanner(),
-          if (_pendingUploads.isNotEmpty) _buildPendingUploads(),
           Expanded(
             child: Stack(
               children: [
@@ -1495,66 +1513,72 @@ class _CategoryScreenState extends State<CategoryScreen>
     );
   }
 
-  Widget _buildPendingUploads() {
-    return SizedBox(
-      height: 120,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        itemCount: _pendingUploads.length,
-        itemBuilder: (context, index) {
-          final item = _pendingUploads[index];
-          return SizedBox(
-            width: 150,
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: Column(
-                  children: [
-                    Expanded(
-                      child: Image.memory(
-                        item.previewBytes,
-                        fit: BoxFit.contain,
-                        errorBuilder: (_, error, stack) =>
-                            const Icon(Icons.image),
-                      ),
-                    ),
-                    Tooltip(
-                      message:
-                          item.lastError ??
-                          'Uploads after reconnecting and signing in.',
-                      child: TextButton(
-                        onPressed: _isReadOnly
-                            ? null
-                            : () async {
-                                try {
-                                  await OfflineUploadQueue.instance
-                                      .syncForCurrentUser(
-                                        Supabase.instance.client,
-                                      );
-                                } catch (error) {
-                                  if (!context.mounted) return;
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        'Unable to retry upload: $error',
-                                      ),
-                                    ),
-                                  );
-                                }
-                              },
-                        child: Text(
-                          item.lastError == null
-                              ? 'Waiting to upload'
-                              : 'Retry upload',
+  Widget _buildPendingUpload(PendingImageUpload item) {
+    return Card(
+      key: ValueKey('pending-${item.id}'),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          Expanded(
+            child: InkWell(
+              onTap: () => showDialog<void>(
+                context: context,
+                builder: (context) => Dialog(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: InteractiveViewer(
+                          child: Image.memory(
+                            item.imageBytes,
+                            fit: BoxFit.contain,
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('Close'),
+                      ),
+                    ],
+                  ),
                 ),
               ),
+              child: Image.memory(
+                item.previewBytes,
+                width: double.infinity,
+                fit: BoxFit.contain,
+                errorBuilder: (_, error, stack) => const Icon(Icons.image),
+              ),
             ),
-          );
-        },
+          ),
+          Tooltip(
+            message:
+                item.lastError ??
+                'Saved on this device. Uploads when connected.',
+            child: TextButton.icon(
+              onPressed: _isReadOnly
+                  ? null
+                  : () async {
+                      try {
+                        await _uploadQueue.syncForCurrentUser(
+                          Supabase.instance.client,
+                        );
+                      } catch (error) {
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Unable to retry upload: $error'),
+                          ),
+                        );
+                      }
+                    },
+              icon: const Icon(Icons.cloud_upload_outlined),
+              label: Text(
+                item.lastError == null ? 'Saved offline' : 'Retry upload',
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1576,7 +1600,7 @@ class _CategoryScreenState extends State<CategoryScreen>
               child: Text(
                 backendUnavailable
                     ? 'Painter Reference service is unavailable. Read-only.'
-                    : LocalUserSession.isOfflineActive &&
+                    : Supabase.instance.client.auth.currentSession == null &&
                           !ConnectivityMonitor.instance.isOffline
                     ? 'Connection restored. Sign in online to make changes.'
                     : 'Offline. Existing images are read-only; new images wait here for upload.',
@@ -1591,6 +1615,7 @@ class _CategoryScreenState extends State<CategoryScreen>
                 child: const Text('Try again'),
               ),
             if (LocalUserSession.isOfflineActive &&
+                Supabase.instance.client.auth.currentSession == null &&
                 ConnectivityMonitor.instance.state ==
                     BackendConnectivityState.online)
               TextButton(
@@ -1722,7 +1747,7 @@ class _CategoryScreenState extends State<CategoryScreen>
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (_errorMessage != null) {
+    if (_errorMessage != null && _pendingUploads.isEmpty && _images.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -1749,7 +1774,7 @@ class _CategoryScreenState extends State<CategoryScreen>
       );
     }
 
-    if (_images.isEmpty) {
+    if (_images.isEmpty && _pendingUploads.isEmpty) {
       return const Center(
         child: Text('No photo references yet.', style: TextStyle(fontSize: 20)),
       );
@@ -1757,7 +1782,7 @@ class _CategoryScreenState extends State<CategoryScreen>
 
     return GridView.builder(
       padding: const EdgeInsets.all(16),
-      itemCount: _images.length,
+      itemCount: _pendingUploads.length + _images.length,
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
         maxCrossAxisExtent: 240,
         crossAxisSpacing: 12,
@@ -1765,7 +1790,10 @@ class _CategoryScreenState extends State<CategoryScreen>
         childAspectRatio: 1,
       ),
       itemBuilder: (context, index) {
-        final image = _images[index];
+        if (index < _pendingUploads.length) {
+          return _buildPendingUpload(_pendingUploads[index]);
+        }
+        final image = _images[index - _pendingUploads.length];
 
         final isOpening = _openingImageId == image.id;
         final isRemoving = _removingImageId == image.id;
