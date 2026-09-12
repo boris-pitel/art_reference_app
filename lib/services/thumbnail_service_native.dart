@@ -1,5 +1,5 @@
+import 'package:flutter/foundation.dart';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:image/image.dart' as img;
 
@@ -13,6 +13,15 @@ class ThumbnailService {
     int thumbnailMaxDimension = 500,
     int thumbnailJpegQuality = 80,
   }) async {
+    return compute(_create, (
+      originalBytes,
+      thumbnailMaxDimension,
+      thumbnailJpegQuality,
+    ));
+  }
+
+  static ImageDerivatives _create((Uint8List, int, int) args) {
+    final (originalBytes, thumbnailMaxDimension, thumbnailJpegQuality) = args;
     final originalImage = img.decodeImage(originalBytes);
 
     if (originalImage == null) {

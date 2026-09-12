@@ -130,4 +130,27 @@ void main() {
     );
     await tester.pumpWidget(const SizedBox());
   });
+  testWidgets('outline controls fill an editable prompt and clear it in one tap', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(900, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(MaterialApp(home: AiImageEditScreen(
+      sourceImageId: 'source', sourceImageUrl: 'https://example.com/image.png',
+      sourceImageBytes: pixel, parentImageId: 'parent')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Outline'));
+    await tester.tap(find.text('Outline'));
+    await tester.pump();
+    final field = tester.widget<TextField>(find.byType(TextField).first);
+    expect(field.controller!.text, contains('thin, clean black lines'));
+    await tester.tap(find.text('thin lines'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('thick lines').last);
+    await tester.pumpAndSettle();
+    expect(field.controller!.text, contains('thick, clean black lines'));
+    await tester.tap(find.text('Clear prompt'));
+    await tester.pump();
+    expect(field.controller!.text, isEmpty);
+    await tester.pumpWidget(const SizedBox());
+  });
+
 }

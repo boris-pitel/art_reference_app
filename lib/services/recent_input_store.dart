@@ -9,7 +9,7 @@ class RecentInputStore {
   static const _aiPromptsKey = 'recent_ai_edit_prompts';
 
   static const int _maxLoginEmails = 5;
-  static const int _maxAiPrompts = 10;
+  static const int _maxAiPrompts = 32;
 
   static Future<List<String>> loginEmails() => _read(_loginEmailsKey);
 

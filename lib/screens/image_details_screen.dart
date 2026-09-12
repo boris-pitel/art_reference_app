@@ -1,3 +1,5 @@
+import '../services/offline_upload_queue.dart';
+import 'continuous_camera_screen.dart';
 import '../widgets/offline_editing_body.dart';
 import 'dart:async';
 import 'dart:math' as math;
@@ -865,6 +867,26 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       return;
     }
 
+    if (source == ImageSource.camera) {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => ContinuousCameraScreen(
+            category: const ReferenceCategory(
+              id: 0,
+              databaseCode: 'inbox',
+              displayName: 'Inbox',
+              isBuiltIn: true,
+            ),
+            parentImageId: _currentImageId,
+          ),
+        ),
+      );
+      await OfflineUploadQueue.instance.syncForCurrentUser(
+        Supabase.instance.client,
+      );
+      if (mounted) await _loadAssociatedImages();
+      return;
+    }
     try {
       final pickedFile = await _imagePicker.pickImage(
         source: source,
@@ -976,22 +998,56 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     }
   }
 
-  /// Opens the sketch against the reference it belongs to.
-  ///
-  /// No picking: a sketch has exactly one parent, and the app already knows
-  /// which. That is the whole advantage of doing this here rather than in a
-  /// drawing app, where the reference would have to be found and imported
-  /// first — so the accuracy check is one tap and nothing else.
   Future<void> _compareWithReference(ImageAssetInfo image) async {
+    final candidates = _associatedImages
+        .where((other) => other.id != image.id)
+        .toList();
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Compare with'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, _currentImageId),
+            child: const Text('Main reference'),
+          ),
+          ...candidates.asMap().entries.map(
+            (entry) => SimpleDialogOption(
+              onPressed: () => Navigator.pop(context, entry.value.id),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 64,
+                    height: 64,
+                    child: CachedImage(
+                      url: entry.value.thumbnailUrl ?? entry.value.imageUrl,
+                      cacheKey: AppImageCache.thumbnailKey(entry.value.id),
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text('Attached image ${entry.key + 1}'),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (selected == null || !mounted) return;
+    final isReference = selected == _currentImageId;
+    final leftUrl = isReference
+        ? _currentImageUrl
+        : candidates.firstWhere((item) => item.id == selected).imageUrl;
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (context) => CompareImagesScreen(
-          leftImageId: _currentImageId,
-          leftImageUrl: _currentImageUrl,
-          leftLabel: 'Reference',
+          leftImageId: selected,
+          leftImageUrl: leftUrl,
+          leftLabel: isReference ? 'Reference' : 'Attached image',
           rightImageId: image.id,
           rightImageUrl: image.imageUrl,
-          rightLabel: 'Sketch',
+          rightLabel: 'Attached image',
         ),
       ),
     );
@@ -2941,7 +2997,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                         child: ListTile(
                           contentPadding: EdgeInsets.zero,
                           leading: Icon(Icons.compare_outlined),
-                          title: Text('Compare with the reference'),
+                          title: Text('Compare with…'),
                           subtitle: Text('Check the drawing against the photo'),
                         ),
                       ),

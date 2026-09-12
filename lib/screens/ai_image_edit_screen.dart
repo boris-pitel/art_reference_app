@@ -52,6 +52,82 @@ class _AiImageEditScreenState extends State<AiImageEditScreen>
     Supabase.instance.client,
   );
 
+  String _outlineThickness = 'thin';
+  String _outlineColor = 'black';
+  Future<void> _pickOutlineColor() async {
+    var red = 0.0, green = 0.0, blue = 0.0;
+    final color = await showDialog<Color>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, update) {
+          final color = Color.fromARGB(
+            255,
+            red.round(),
+            green.round(),
+            blue.round(),
+          );
+          return AlertDialog(
+            title: const Text('Outline color'),
+            content: SizedBox(
+              width: 300,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(height: 40, color: color),
+                  const Text('Red'),
+                  Slider(
+                    value: red,
+                    max: 255,
+                    onChanged: (v) => update(() => red = v),
+                  ),
+                  const Text('Green'),
+                  Slider(
+                    value: green,
+                    max: 255,
+                    onChanged: (v) => update(() => green = v),
+                  ),
+                  const Text('Blue'),
+                  Slider(
+                    value: blue,
+                    max: 255,
+                    onChanged: (v) => update(() => blue = v),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, color),
+                child: const Text('Use color'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    if (color == null || !mounted) return;
+    setState(
+      () => _outlineColor =
+          '#${(color.toARGB32() & 0xffffff).toRadixString(16).padLeft(6, '0')}',
+    );
+    _outlinePrompt();
+  }
+
+  void _outlinePrompt() {
+    _promptController.text =
+        'Create a simple outline drawing with '
+        '$_outlineThickness, clean $_outlineColor lines and minimal detail. '
+        'Preserve the main shapes and proportions. Use a white background '
+        'with no shading, textures, or color fills.';
+    _promptController.selection = TextSelection.collapsed(
+      offset: _promptController.text.length,
+    );
+  }
+
   AiImageQuality _quality = AiImageQuality.medium;
   Uint8List? _previewBytes;
   bool _isGenerating = false;
@@ -406,6 +482,7 @@ class _AiImageEditScreenState extends State<AiImageEditScreen>
                       ? null
                       : PopupMenuButton<String>(
                           tooltip: 'Recent AI prompts',
+                          enabled: !busy,
                           icon: const Icon(Icons.history),
                           onSelected: (prompt) {
                             _promptController.text = prompt;
@@ -430,6 +507,70 @@ class _AiImageEditScreenState extends State<AiImageEditScreen>
                               )
                               .toList(growable: false),
                         ),
+                ),
+              ),
+              Wrap(
+                spacing: 12,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  TextButton.icon(
+                    onPressed: busy ? null : _promptController.clear,
+                    icon: const Icon(Icons.clear),
+                    label: const Text('Clear prompt'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: busy ? null : _outlinePrompt,
+                    icon: const Icon(Icons.draw_outlined),
+                    label: const Text('Outline'),
+                  ),
+                  DropdownButton<String>(
+                    value: _outlineThickness,
+                    items: ['thin', 'medium', 'thick']
+                        .map(
+                          (v) => DropdownMenuItem(
+                            value: v,
+                            child: Text('$v lines'),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: busy
+                        ? null
+                        : (v) {
+                            setState(() => _outlineThickness = v!);
+                            _outlinePrompt();
+                          },
+                  ),
+                  DropdownButton<String>(
+                    value: _outlineColor,
+                    items:
+                        [
+                              'black',
+                              'gray',
+                              'brown',
+                              'blue',
+                              'red',
+                              'green',
+                              if (_outlineColor.startsWith('#')) _outlineColor,
+                            ]
+                            .map(
+                              (v) => DropdownMenuItem(value: v, child: Text(v)),
+                            )
+                            .toList(),
+                    onChanged: busy
+                        ? null
+                        : (v) {
+                            setState(() => _outlineColor = v!);
+                            _outlinePrompt();
+                          },
+                  ),
+                ],
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: busy ? null : _pickOutlineColor,
+                  icon: const Icon(Icons.palette_outlined),
+                  label: const Text('Custom outline color'),
                 ),
               ),
               // Directly under the prompt, where the hand already is. The

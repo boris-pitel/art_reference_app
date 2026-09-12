@@ -1,3 +1,5 @@
+import 'package:image/image.dart' as img;
+import 'dart:typed_data';
 import 'dart:convert';
 import 'package:art_reference_app/models/reference_category.dart';
 import 'package:art_reference_app/screens/category_screen.dart';
@@ -61,8 +63,8 @@ void main() {
           userId: 'a',
           userEmail: 'a@example.com',
           category: category,
-          imageBytes: base64Decode(
-            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aHZkAAAAASUVORK5CYII=',
+          imageBytes: Uint8List.fromList(
+            img.encodePng(img.Image(width: 2, height: 2)),
           ),
           originalFilename: 'new.png',
         );
@@ -72,7 +74,7 @@ void main() {
         () => Future<void>.delayed(const Duration(milliseconds: 50)),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Saved offline'), findsOneWidget);
+      expect(find.text('1 uploads pending'), findsOneWidget);
       expect(find.byType(GridView), findsOneWidget);
       expect(find.text('Unable to load photo references.'), findsNothing);
       await tester.pumpWidget(const SizedBox());
@@ -81,7 +83,7 @@ void main() {
         () => Future<void>.delayed(const Duration(milliseconds: 50)),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Saved offline'), findsOneWidget);
+      expect(find.text('1 uploads pending'), findsOneWidget);
       expect(find.text('Unable to load photo references.'), findsNothing);
       await tester.pumpWidget(const SizedBox());
       await tester.runAsync(() => queue.close());

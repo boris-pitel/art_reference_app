@@ -1,3 +1,4 @@
+import 'pending_original_store.dart';
 import 'package:flutter/foundation.dart';
 import 'package:idb_shim/idb.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -23,6 +24,8 @@ class PendingImageUpload {
     required this.previewBytes,
     required this.createdAt,
     this.originalFilename,
+    this.externalOriginal = false,
+    this.parentImageId,
     this.lastError,
   });
 
@@ -35,6 +38,8 @@ class PendingImageUpload {
   final Uint8List imageBytes;
   final Uint8List previewBytes;
   final DateTime createdAt;
+  final bool externalOriginal;
+  final String? parentImageId;
   final String? originalFilename;
   final String? lastError;
 
@@ -57,10 +62,14 @@ class PendingImageUpload {
     previewBytes: previewBytes,
     createdAt: createdAt,
     originalFilename: originalFilename,
+    externalOriginal: externalOriginal,
+    parentImageId: parentImageId,
     lastError: lastError,
   );
 
   Map<String, Object?> toRecord() => {
+    'external_original': externalOriginal,
+    'parent_image_id': parentImageId,
     'id': id,
     'user_id': userId,
     'user_email': userEmail,
@@ -87,6 +96,8 @@ class PendingImageUpload {
     }
 
     return PendingImageUpload(
+      externalOriginal: record['external_original'] == true,
+      parentImageId: record['parent_image_id'] as String?,
       id: record['id'] as String,
       userId: record['user_id'] as String,
       userEmail: record['user_email'] as String,
@@ -120,13 +131,18 @@ class OfflineUploadSyncResult {
 /// new immutable image, which avoids the cross-device merge problem that makes
 /// general offline editing unsafe.
 class OfflineUploadQueue extends ChangeNotifier {
-  OfflineUploadQueue({IdbFactory? factory, String? databaseName})
-    : _factoryOverride = factory,
-      _databaseName = databaseName ?? 'painter_reference_offline_uploads';
+  OfflineUploadQueue({
+    IdbFactory? factory,
+    String? databaseName,
+    this.originalDirectory,
+  }) : _factoryOverride = factory,
+       _databaseName = databaseName ?? 'painter_reference_offline_uploads';
 
   static final OfflineUploadQueue instance = OfflineUploadQueue();
 
   static const String _storeName = 'pending_uploads';
+  static const String _summaryStore = 'pending_summaries';
+  final String? originalDirectory;
   final IdbFactory? _factoryOverride;
   final String _databaseName;
   Future<Database>? _databaseFuture;
@@ -141,13 +157,61 @@ class OfflineUploadQueue extends ChangeNotifier {
         _factoryOverride ?? await createOfflineUploadDatabaseFactory();
     return factory.open(
       _databaseName,
-      version: 1,
+      version: 2,
       onUpgradeNeeded: (event) {
         if (!event.database.objectStoreNames.contains(_storeName)) {
           event.database.createObjectStore(_storeName, keyPath: 'id');
         }
+        if (!event.database.objectStoreNames.contains(_summaryStore)) {
+          final summaries = event.database.createObjectStore(
+            _summaryStore,
+            keyPath: 'id',
+          );
+          event.transaction
+              .objectStore(_storeName)
+              .openCursor(autoAdvance: true)
+              .listen((cursor) {
+                final record = Map<String, Object?>.from(cursor.value as Map);
+                summaries.put({...record, 'image_bytes': Uint8List(0)});
+              });
+        }
       },
     );
+  }
+
+  int _captureSessions = 0;
+  void pauseForCapture() {
+    _captureSessions++;
+  }
+
+  void resumeAfterCapture() {
+    if (_captureSessions > 0) _captureSessions--;
+    if (_captureSessions == 0) notifyListeners();
+  }
+
+  Future<OfflineUploadSyncResult> syncAfterCapture(
+    SupabaseClient supabase,
+  ) async {
+    final running = _activeSync;
+    if (running != null) {
+      try {
+        await running;
+      } catch (_) {}
+    }
+    return syncForCurrentUser(supabase);
+  }
+
+  Future<Uint8List> originalBytes(PendingImageUpload item) async {
+    if (item.externalOriginal) {
+      return readPendingOriginal(item.id, directoryPath: originalDirectory);
+    }
+    if (item.imageBytes.isNotEmpty) return item.imageBytes;
+    final db = await _database();
+    final tx = db.transaction(_storeName, idbModeReadOnly);
+    final record = await tx.objectStore(_storeName).getObject(item.id);
+    await tx.completed;
+    if (record == null) throw StateError('Image has finished uploading.');
+    return PendingImageUpload.fromRecord(record).imageBytes;
   }
 
   Future<PendingImageUpload> enqueue({
@@ -156,38 +220,61 @@ class OfflineUploadQueue extends ChangeNotifier {
     required ReferenceCategory category,
     required Uint8List imageBytes,
     String? originalFilename,
+    String? parentImageId,
+    bool deferPreview = false,
   }) async {
     if (imageBytes.isEmpty) {
       throw ArgumentError.value(imageBytes, 'imageBytes', 'Image is empty.');
     }
 
-    Uint8List previewBytes = imageBytes;
-    try {
-      final normalized = await ImageImportService.normalizeForUpload(
+    final id = const Uuid().v4();
+    final external =
+        !kIsWeb && (_factoryOverride == null || originalDirectory != null);
+    if (external) {
+      await savePendingOriginal(
+        id,
         imageBytes,
+        directoryPath: originalDirectory,
       );
-      previewBytes = (await ThumbnailService.createDerivatives(
-        normalized,
-      )).thumbnailBytes;
+    }
+    Uint8List previewBytes = Uint8List(0);
+    try {
+      if (!deferPreview) {
+        final normalized = await ImageImportService.normalizeForUpload(
+          imageBytes,
+        );
+        previewBytes = (await ThumbnailService.createDerivatives(
+          normalized,
+        )).thumbnailBytes;
+      }
     } catch (_) {
       // The original is retained for the real upload. A missing preview must
       // not turn an otherwise valid offline selection into lost work.
     }
 
     final pending = PendingImageUpload(
-      id: const Uuid().v4(),
+      id: id,
+      externalOriginal: external,
+      parentImageId: parentImageId,
       userId: userId,
       userEmail: userEmail.trim().toLowerCase(),
       categoryCode: category.databaseCode,
       categoryName: category.displayName,
       categoryIsBuiltIn: category.isBuiltIn,
-      imageBytes: imageBytes,
+      imageBytes: external ? Uint8List(0) : imageBytes,
       previewBytes: previewBytes,
       createdAt: DateTime.now().toUtc(),
       originalFilename: originalFilename,
     );
-    await _put(pending);
-    notifyListeners();
+    try {
+      await _put(pending);
+    } catch (_) {
+      if (external) {
+        await deletePendingOriginal(id, directoryPath: originalDirectory);
+      }
+      rethrow;
+    }
+    if (_captureSessions == 0) notifyListeners();
     UserActivityLogger.instance.record(
       operation: 'image_upload_queued',
       status: 'succeeded',
@@ -204,10 +291,11 @@ class OfflineUploadQueue extends ChangeNotifier {
   Future<List<PendingImageUpload>> listForUser(
     String userId, {
     String? categoryCode,
+    bool includeOriginals = true,
   }) async {
     final db = await _database();
-    final transaction = db.transaction(_storeName, idbModeReadOnly);
-    final records = await transaction.objectStore(_storeName).getAll();
+    final transaction = db.transaction(_summaryStore, idbModeReadOnly);
+    final records = await transaction.objectStore(_summaryStore).getAll();
     await transaction.completed;
     final pending = <PendingImageUpload>[];
     for (final record in records) {
@@ -215,7 +303,16 @@ class OfflineUploadQueue extends ChangeNotifier {
         final item = PendingImageUpload.fromRecord(record);
         if (item.userId == userId &&
             (categoryCode == null || item.categoryCode == categoryCode)) {
-          pending.add(item);
+          if (includeOriginals) {
+            pending.add(
+              PendingImageUpload.fromRecord({
+                ...item.toRecord(),
+                'image_bytes': await originalBytes(item),
+              }),
+            );
+          } else {
+            pending.add(item);
+          }
         }
       } catch (error) {
         debugPrint('Ignoring an invalid pending upload record: $error');
@@ -231,7 +328,7 @@ class OfflineUploadQueue extends ChangeNotifier {
   }
 
   Future<void> clearForUser(String userId) async {
-    for (final pending in await listForUser(userId)) {
+    for (final pending in await listForUser(userId, includeOriginals: false)) {
       await _delete(pending.id);
     }
     notifyListeners();
@@ -260,10 +357,11 @@ class OfflineUploadQueue extends ChangeNotifier {
       );
     }
 
-    final pending = await listForUser(user.id);
+    final pending = await listForUser(user.id, includeOriginals: false);
     var uploaded = 0;
     var failed = 0;
     for (final item in pending) {
+      if (_captureSessions > 0) break;
       if (supabase.auth.currentUser?.id != user.id ||
           supabase.auth.currentSession == null) {
         break;
@@ -273,13 +371,21 @@ class OfflineUploadQueue extends ChangeNotifier {
         break;
       }
       try {
-        await ImageAssetService(supabase).uploadImage(
-          item.imageBytes,
-          item.category,
-          originalFilename: item.originalFilename,
-        );
+        final bytes = await originalBytes(item);
+        if (item.parentImageId != null) {
+          await ImageAssetService(
+            supabase,
+          ).uploadAssociatedImage(bytes, item.parentImageId!);
+        } else {
+          await ImageAssetService(supabase).uploadImage(
+            bytes,
+            item.category,
+            originalFilename: item.originalFilename,
+          );
+        }
         await _delete(item.id);
         uploaded++;
+        if (_captureSessions == 0) notifyListeners();
       } catch (error) {
         if (ImageAssetService.isDuplicateRejection(error)) {
           await _delete(item.id);
@@ -295,7 +401,10 @@ class OfflineUploadQueue extends ChangeNotifier {
       }
     }
 
-    final remaining = (await listForUser(user.id)).length;
+    final remaining = (await listForUser(
+      user.id,
+      includeOriginals: false,
+    )).length;
     if (uploaded > 0 || failed > 0) notifyListeners();
     return OfflineUploadSyncResult(
       uploaded: uploaded,
@@ -306,16 +415,42 @@ class OfflineUploadQueue extends ChangeNotifier {
 
   Future<void> _put(PendingImageUpload pending) async {
     final db = await _database();
-    final transaction = db.transaction(_storeName, idbModeReadWrite);
-    await transaction.objectStore(_storeName).put(pending.toRecord());
+    final transaction = db.transactionList([
+      _storeName,
+      _summaryStore,
+    ], idbModeReadWrite);
+    final record = pending.toRecord();
+    if (!pending.externalOriginal && pending.imageBytes.isEmpty) {
+      final existing = await transaction
+          .objectStore(_storeName)
+          .getObject(pending.id);
+      if (existing == null) throw StateError('Pending original is missing');
+      record['image_bytes'] = (existing as Map)['image_bytes'];
+    }
+    await transaction.objectStore(_storeName).put(record);
+    await transaction.objectStore(_summaryStore).put({
+      ...record,
+      'image_bytes': Uint8List(0),
+    });
     await transaction.completed;
   }
 
   Future<void> _delete(String id) async {
     final db = await _database();
-    final transaction = db.transaction(_storeName, idbModeReadWrite);
+    final transaction = db.transactionList([
+      _storeName,
+      _summaryStore,
+    ], idbModeReadWrite);
     await transaction.objectStore(_storeName).delete(id);
+    await transaction.objectStore(_summaryStore).delete(id);
     await transaction.completed;
+    if (!kIsWeb && (_factoryOverride == null || originalDirectory != null)) {
+      try {
+        await deletePendingOriginal(id, directoryPath: originalDirectory);
+      } catch (error) {
+        debugPrint('Uploaded original cleanup deferred: $error');
+      }
+    }
   }
 
   @visibleForTesting

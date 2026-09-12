@@ -1,3 +1,5 @@
+import 'screens/upload_queue_screen.dart';
+import 'screens/continuous_camera_screen.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -1278,6 +1280,15 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       return;
     }
 
+    if (source == ImageSource.camera) {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => ContinuousCameraScreen(category: inbox!),
+        ),
+      );
+      if (mounted) unawaited(_syncPendingUploads());
+      return;
+    }
     final picker = ImagePicker();
     List<XFile> selected;
     try {
@@ -1558,6 +1569,13 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
         title: const Text('Painter Reference'),
         centerTitle: false,
         actions: [
+          IconButton(
+            tooltip: 'Upload queue',
+            icon: const Icon(Icons.cloud_upload_outlined),
+            onPressed: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(builder: (_) => const UploadQueueScreen()),
+            ),
+          ),
           IconButton(
             onPressed: _isReadOnly ? null : _openMessages,
             icon: Badge(

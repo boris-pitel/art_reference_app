@@ -1,3 +1,8 @@
+import 'reference_viewer_screen.dart';
+import 'continuous_camera_screen.dart';
+import 'upload_queue_screen.dart';
+import 'pending_image_screen.dart';
+import '../widgets/pending_thumbnail.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -133,6 +138,7 @@ class _CategoryScreenState extends State<CategoryScreen>
 
   bool _isLoading = true;
   List<PendingImageUpload> _pendingUploads = [];
+  int _pendingLoadGeneration = 0;
   bool _isUploading = false;
 
   String _uploadStatus = '';
@@ -299,14 +305,23 @@ class _CategoryScreenState extends State<CategoryScreen>
   }
 
   Future<void> _loadPendingUploads() async {
+    final generation = ++_pendingLoadGeneration;
     final userId = LocalUserSession.effectiveUserId;
     if (userId == null) return;
     try {
-      final pending = await _uploadQueue.listForUser(
+      final queued = await _uploadQueue.listForUser(
         userId,
         categoryCode: widget.category.databaseCode,
+        includeOriginals: false,
       );
-      if (!mounted || userId != LocalUserSession.effectiveUserId) return;
+      final pending = queued
+          .where((item) => item.parentImageId == null)
+          .toList();
+      if (!mounted ||
+          generation != _pendingLoadGeneration ||
+          userId != LocalUserSession.effectiveUserId) {
+        return;
+      }
       final completed = _pendingUploads.length > pending.length;
       setState(() => _pendingUploads = pending);
       if (completed && !_isReadOnly) await _loadImages();
@@ -460,6 +475,18 @@ class _CategoryScreenState extends State<CategoryScreen>
 
   Future<void> _addPhotoReference(ImageSource source) async {
     if (_rejectWhileBusy()) return;
+    if (source == ImageSource.camera) {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => ContinuousCameraScreen(category: widget.category),
+        ),
+      );
+      if (mounted) {
+        await _loadPendingUploads();
+        if (!_isReadOnly) await _loadImages();
+      }
+      return;
+    }
 
     final sourceDescription = source == ImageSource.camera
         ? 'Opening camera...'
@@ -766,39 +793,35 @@ class _CategoryScreenState extends State<CategoryScreen>
   }
 
   Future<void> _openOfflineImage(_LoadedImage image) async {
-    final imageId = widget.category.isMyArt
-        ? image.parentImageId ?? image.id
-        : image.id;
-    final imageUrl = widget.category.isMyArt
-        ? image.parentImageUrl ?? image.imageUrl
-        : image.displayUrl ?? image.imageUrl;
+    final images = List<_LoadedImage>.of(_images);
     await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (context) => Scaffold(
-          appBar: AppBar(title: const Text('View image')),
-          body: ColoredBox(
-            color: Colors.black,
-            child: Center(
-              child: InteractiveViewer(
-                minScale: 0.5,
-                maxScale: 6,
-                child: CachedImage(
-                  url: imageUrl,
-                  cacheKey: AppImageCache.fullKey(imageId),
-                  fit: BoxFit.contain,
-                  errorWidget: (_, _) => const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Text(
-                      'This full-size image has not been downloaded to this '
-                      'device.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.white),
-                    ),
-                  ),
+      MaterialPageRoute(
+        builder: (_) => ReferenceViewerScreen(
+          count: images.length,
+          initialIndex: images.indexOf(image),
+          imageBuilder: (context, index) {
+            final item = images[index];
+            final id = widget.category.isMyArt
+                ? item.parentImageId ?? item.id
+                : item.id;
+            final url = widget.category.isMyArt
+                ? item.parentImageUrl ?? item.imageUrl
+                : item.displayUrl ?? item.imageUrl;
+            return CachedImage(
+              key: ValueKey(id),
+              url: url,
+              cacheKey: AppImageCache.fullKey(id),
+              fit: BoxFit.contain,
+              errorWidget: (_, _) => const Padding(
+                padding: EdgeInsets.all(24),
+                child: Text(
+                  'This full-size image has not been downloaded to this device.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white),
                 ),
               ),
-            ),
-          ),
+            );
+          },
         ),
       ),
     );
@@ -1493,6 +1516,16 @@ class _CategoryScreenState extends State<CategoryScreen>
       ),
       body: Column(
         children: [
+          if (_pendingUploads.isNotEmpty)
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.cloud_upload_outlined),
+              title: Text('${_pendingUploads.length} uploads pending'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push<void>(
+                MaterialPageRoute(builder: (_) => const UploadQueueScreen()),
+              ),
+            ),
           if (_isReadOnly) _buildOfflineBanner(),
           Expanded(
             child: Stack(
@@ -1514,71 +1547,20 @@ class _CategoryScreenState extends State<CategoryScreen>
   }
 
   Widget _buildPendingUpload(PendingImageUpload item) {
-    return Card(
+    return Material(
       key: ValueKey('pending-${item.id}'),
+      borderRadius: BorderRadius.circular(12),
       clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          Expanded(
-            child: InkWell(
-              onTap: () => showDialog<void>(
-                context: context,
-                builder: (context) => Dialog(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Flexible(
-                        child: InteractiveViewer(
-                          child: Image.memory(
-                            item.imageBytes,
-                            fit: BoxFit.contain,
-                          ),
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: const Text('Close'),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              child: Image.memory(
-                item.previewBytes,
-                width: double.infinity,
-                fit: BoxFit.contain,
-                errorBuilder: (_, error, stack) => const Icon(Icons.image),
-              ),
+      child: InkWell(
+        onTap: () => Navigator.of(context).push<void>(
+          MaterialPageRoute(
+            builder: (_) => PendingImageScreen(
+              items: _pendingUploads,
+              initialIndex: _pendingUploads.indexOf(item),
             ),
           ),
-          Tooltip(
-            message:
-                item.lastError ??
-                'Saved on this device. Uploads when connected.',
-            child: TextButton.icon(
-              onPressed: _isReadOnly
-                  ? null
-                  : () async {
-                      try {
-                        await _uploadQueue.syncForCurrentUser(
-                          Supabase.instance.client,
-                        );
-                      } catch (error) {
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Unable to retry upload: $error'),
-                          ),
-                        );
-                      }
-                    },
-              icon: const Icon(Icons.cloud_upload_outlined),
-              label: Text(
-                item.lastError == null ? 'Saved offline' : 'Retry upload',
-              ),
-            ),
-          ),
-        ],
+        ),
+        child: PendingThumbnail(item: item, queue: _uploadQueue),
       ),
     );
   }
