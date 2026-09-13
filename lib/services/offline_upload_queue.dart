@@ -322,8 +322,25 @@ class OfflineUploadQueue extends ChangeNotifier {
     return pending;
   }
 
+  bool get isSyncing => _activeSync != null;
+  String? _uploadingId;
+  final Set<String> _removedIds = {};
+  bool isUploading(String id) => _uploadingId == id;
+
   Future<void> remove(String id) async {
-    await _delete(id);
+    if (isUploading(id)) {
+      throw StateError(
+        'This photo is uploading. Wait for it to finish before deleting.',
+      );
+    }
+    _removedIds.add(id);
+    try {
+      await _delete(id);
+    } catch (_) {
+      _removedIds.remove(id);
+      rethrow;
+    }
+    if (!isSyncing) _removedIds.remove(id);
     notifyListeners();
   }
 
@@ -340,7 +357,12 @@ class OfflineUploadQueue extends ChangeNotifier {
     final future = _syncForCurrentUser(supabase);
     _activeSync = future;
     return future.whenComplete(() {
-      if (identical(_activeSync, future)) _activeSync = null;
+      if (identical(_activeSync, future)) {
+        _activeSync = null;
+        _uploadingId = null;
+        _removedIds.clear();
+        notifyListeners();
+      }
     });
   }
 
@@ -361,6 +383,7 @@ class OfflineUploadQueue extends ChangeNotifier {
     var uploaded = 0;
     var failed = 0;
     for (final item in pending) {
+      if (_removedIds.contains(item.id)) continue;
       if (_captureSessions > 0) break;
       if (supabase.auth.currentUser?.id != user.id ||
           supabase.auth.currentSession == null) {
@@ -370,6 +393,7 @@ class OfflineUploadQueue extends ChangeNotifier {
           BackendConnectivityState.online) {
         break;
       }
+      _uploadingId = item.id;
       try {
         final bytes = await originalBytes(item);
         if (item.parentImageId != null) {
@@ -398,6 +422,8 @@ class OfflineUploadQueue extends ChangeNotifier {
         }
         failed++;
         await _put(item.copyWith(lastError: error.toString()));
+      } finally {
+        _uploadingId = null;
       }
     }
 

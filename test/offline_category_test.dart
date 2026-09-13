@@ -85,6 +85,14 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('1 uploads pending'), findsOneWidget);
       expect(find.text('Unable to load photo references.'), findsNothing);
+      expect(find.byTooltip('Delete image'), findsOneWidget);
+      await tester.runAsync(() => tester.tap(find.byTooltip('Delete image')));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('1 uploads pending'), findsNothing);
+      expect(await tester.runAsync(() => queue.listForUser('a')), isEmpty);
       await tester.pumpWidget(const SizedBox());
       await tester.runAsync(() => queue.close());
       UserActivityLogger.instance.sink = null;

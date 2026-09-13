@@ -112,9 +112,41 @@ class _UploadQueueScreenState extends State<UploadQueueScreen> {
                         leading: SizedBox(
                           width: 56,
                           height: 56,
-                          child: PendingThumbnail(
-                            key: ValueKey(item.id),
-                            item: item,
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              PendingThumbnail(
+                                key: ValueKey(item.id),
+                                item: item,
+                              ),
+                              Positioned(
+                                right: 0,
+                                top: 0,
+                                child: IconButton.filledTonal(
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(
+                                    minWidth: 32,
+                                    minHeight: 32,
+                                  ),
+                                  tooltip: 'Delete image',
+                                  icon: const Icon(
+                                    Icons.delete_outline,
+                                    size: 18,
+                                  ),
+                                  onPressed: () async {
+                                    try {
+                                      await OfflineUploadQueue.instance.remove(
+                                        item.id,
+                                      );
+                                    } catch (error) {
+                                      if (mounted) {
+                                        setState(() => _error = '$error');
+                                      }
+                                    }
+                                  },
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                         title: Text(

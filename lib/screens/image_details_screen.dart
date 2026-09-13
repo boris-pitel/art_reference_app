@@ -3048,6 +3048,17 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                 ),
               ),
             ),
+            Positioned(
+              left: 6,
+              top: 6,
+              child: IconButton.filledTonal(
+                tooltip: 'Delete image',
+                icon: const Icon(Icons.delete_outline, size: 20),
+                onPressed: isBusy || editorOffline
+                    ? null
+                    : () => _confirmAndRemoveAssociatedImage(image),
+              ),
+            ),
             if (!isBusy)
               Positioned(
                 right: 6,

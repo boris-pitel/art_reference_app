@@ -28,6 +28,36 @@ class _ContinuousCameraScreenState extends State<ContinuousCameraScreen>
   bool _initializing = false;
   bool _active = true;
   int _saved = 0;
+  double _minZoom = 1, _maxZoom = 1, _zoom = 1, _pinchStart = 1;
+  CameraController? _zoomWriter;
+
+  void _setZoom(double value) {
+    final camera = _camera;
+    if (camera == null) return;
+    setState(() => _zoom = value.clamp(_minZoom, _maxZoom).toDouble());
+    if (identical(_zoomWriter, camera)) return;
+    _zoomWriter = camera;
+    unawaited(_applyZoom(camera));
+  }
+
+  Future<void> _applyZoom(CameraController camera) async {
+    try {
+      while (mounted && identical(_camera, camera)) {
+        final requested = _zoom;
+        await camera.setZoomLevel(requested);
+        if (_zoom == requested) break;
+      }
+    } catch (error) {
+      if (mounted && identical(_camera, camera)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to change camera zoom.')),
+        );
+      }
+    } finally {
+      if (identical(_zoomWriter, camera)) _zoomWriter = null;
+    }
+  }
+
   String? _error;
   XFile? _unsaved;
   late final String? _userId = LocalUserSession.effectiveUserId;
@@ -58,12 +88,23 @@ class _ContinuousCameraScreenState extends State<ContinuousCameraScreen>
         enableAudio: false,
       );
       await controller.initialize();
+      var minZoom = 1.0;
+      var maxZoom = 1.0;
+      try {
+        minZoom = await controller.getMinZoomLevel();
+        maxZoom = await controller.getMaxZoomLevel();
+      } catch (_) {
+        // A camera without zoom support can still take photos.
+      }
       if (!mounted || !_active) {
         await controller.dispose();
         return;
       }
       setState(() {
         _camera = controller;
+        _minZoom = minZoom;
+        _maxZoom = maxZoom;
+        _zoom = 1.0.clamp(minZoom, maxZoom).toDouble();
         _error = null;
       });
     } catch (error) {
@@ -196,12 +237,36 @@ class _ContinuousCameraScreenState extends State<ContinuousCameraScreen>
           Expanded(
             child: Center(
               child: _camera?.value.isInitialized == true
-                  ? CameraPreview(_camera!)
+                  ? GestureDetector(
+                      onScaleStart: (_) => _pinchStart = _zoom,
+                      onScaleUpdate: (details) {
+                        if (details.pointerCount >= 2) {
+                          _setZoom(_pinchStart * details.scale);
+                        }
+                      },
+                      child: CameraPreview(_camera!),
+                    )
                   : _error == null
                   ? const CircularProgressIndicator()
                   : const Icon(Icons.no_photography),
             ),
           ),
+          if (_camera != null && _maxZoom > _minZoom)
+            Row(
+              children: [
+                const SizedBox(width: 16),
+                Text('${_zoom.toStringAsFixed(1)}×'),
+                Expanded(
+                  child: Slider(
+                    min: _minZoom,
+                    max: _maxZoom,
+                    value: _zoom,
+                    label: '${_zoom.toStringAsFixed(1)}×',
+                    onChanged: _setZoom,
+                  ),
+                ),
+              ],
+            ),
           if (_error != null)
             Padding(padding: const EdgeInsets.all(12), child: Text(_error!)),
           SafeArea(

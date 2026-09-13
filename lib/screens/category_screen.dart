@@ -139,6 +139,7 @@ class _CategoryScreenState extends State<CategoryScreen>
   bool _isLoading = true;
   List<PendingImageUpload> _pendingUploads = [];
   int _pendingLoadGeneration = 0;
+  bool? _lastReadOnly;
   bool _isUploading = false;
 
   String _uploadStatus = '';
@@ -288,6 +289,7 @@ class _CategoryScreenState extends State<CategoryScreen>
 
     _imageAssetService = ImageAssetService(Supabase.instance.client);
 
+    _lastReadOnly = _isReadOnly;
     ConnectivityMonitor.instance.addListener(_handleConnectivityChange);
     _uploadQueue.addListener(_handleQueueChange);
     LocalUserSession.changes.addListener(_handleSessionChange);
@@ -296,6 +298,7 @@ class _CategoryScreenState extends State<CategoryScreen>
   }
 
   void _handleQueueChange() {
+    if (_uploadQueue.isSyncing) return;
     unawaited(_loadPendingUploads());
   }
 
@@ -323,8 +326,10 @@ class _CategoryScreenState extends State<CategoryScreen>
         return;
       }
       final completed = _pendingUploads.length > pending.length;
-      setState(() => _pendingUploads = pending);
-      if (completed && !_isReadOnly) await _loadImages();
+      if (completed && !_isReadOnly) await _loadImages(showLoading: false);
+      if (mounted && generation == _pendingLoadGeneration) {
+        setState(() => _pendingUploads = pending);
+      }
     } catch (error) {
       debugPrint('Unable to read pending uploads: $error');
     }
@@ -332,8 +337,14 @@ class _CategoryScreenState extends State<CategoryScreen>
 
   void _handleConnectivityChange() {
     if (!mounted) return;
+    final readOnly = _isReadOnly;
+    final wasReadOnly = _lastReadOnly;
+    _lastReadOnly = readOnly;
+    if (wasReadOnly == readOnly) return;
     setState(() {});
-    if (!_isReadOnly) unawaited(_loadImages());
+    if (wasReadOnly == true && !readOnly) {
+      unawaited(_loadImages(showLoading: false));
+    }
   }
 
   @override
@@ -430,9 +441,9 @@ class _CategoryScreenState extends State<CategoryScreen>
         .toList();
   }
 
-  Future<void> _loadImages() async {
+  Future<void> _loadImages({bool showLoading = true}) async {
     setState(() {
-      _isLoading = true;
+      if (showLoading) _isLoading = true;
       _errorMessage = null;
     });
 
@@ -483,7 +494,6 @@ class _CategoryScreenState extends State<CategoryScreen>
       );
       if (mounted) {
         await _loadPendingUploads();
-        if (!_isReadOnly) await _loadImages();
       }
       return;
     }
@@ -1560,7 +1570,34 @@ class _CategoryScreenState extends State<CategoryScreen>
             ),
           ),
         ),
-        child: PendingThumbnail(item: item, queue: _uploadQueue),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            PendingThumbnail(item: item, queue: _uploadQueue),
+            Positioned(
+              top: 4,
+              right: 4,
+              child: IconButton.filledTonal(
+                tooltip: 'Delete image',
+                icon: const Icon(Icons.delete_outline, size: 20),
+                onPressed: () async {
+                  try {
+                    await _uploadQueue.remove(item.id);
+                    if (mounted) {
+                      setState(
+                        () => _pendingUploads.removeWhere(
+                          (photo) => photo.id == item.id,
+                        ),
+                      );
+                    }
+                  } catch (error) {
+                    if (mounted) _showMessage('$error');
+                  }
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1816,6 +1853,17 @@ class _CategoryScreenState extends State<CategoryScreen>
                 fit: StackFit.expand,
                 children: [
                   _buildThumbnail(image),
+                  Positioned(
+                    top: 4,
+                    right: 4,
+                    child: IconButton.filledTonal(
+                      tooltip: 'Delete image',
+                      icon: const Icon(Icons.delete_outline, size: 20),
+                      onPressed: _isReadOnly || isWorking
+                          ? null
+                          : () => _removeFromCategory(image),
+                    ),
+                  ),
                   if (_isSelecting)
                     Positioned(
                       top: 8,
