@@ -1,5 +1,6 @@
 import '../services/pending_original_store.dart';
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -23,6 +24,8 @@ class ContinuousCameraScreen extends StatefulWidget {
 
 class _ContinuousCameraScreenState extends State<ContinuousCameraScreen>
     with WidgetsBindingObserver {
+  static const double _zoomLimit = 20;
+  static const double _pinchSensitivity = 0.45;
   CameraController? _camera;
   bool _busy = false;
   bool _initializing = false;
@@ -30,6 +33,15 @@ class _ContinuousCameraScreenState extends State<ContinuousCameraScreen>
   int _saved = 0;
   double _minZoom = 1, _maxZoom = 1, _zoom = 1, _pinchStart = 1;
   CameraController? _zoomWriter;
+
+  double get _zoomSliderValue {
+    if (_maxZoom <= _minZoom) return 0;
+    return math.log(_zoom / _minZoom) / math.log(_maxZoom / _minZoom);
+  }
+
+  double _zoomFromSlider(double value) {
+    return _minZoom * math.pow(_maxZoom / _minZoom, value).toDouble();
+  }
 
   void _setZoom(double value) {
     final camera = _camera;
@@ -92,7 +104,7 @@ class _ContinuousCameraScreenState extends State<ContinuousCameraScreen>
       var maxZoom = 1.0;
       try {
         minZoom = await controller.getMinZoomLevel();
-        maxZoom = await controller.getMaxZoomLevel();
+        maxZoom = math.min(await controller.getMaxZoomLevel(), _zoomLimit);
       } catch (_) {
         // A camera without zoom support can still take photos.
       }
@@ -241,7 +253,13 @@ class _ContinuousCameraScreenState extends State<ContinuousCameraScreen>
                       onScaleStart: (_) => _pinchStart = _zoom,
                       onScaleUpdate: (details) {
                         if (details.pointerCount >= 2) {
-                          _setZoom(_pinchStart * details.scale);
+                          // Camera zoom ranges can be very wide. Damp the raw
+                          // gesture so a small pinch makes a precise change.
+                          _setZoom(
+                            (_pinchStart *
+                                    math.pow(details.scale, _pinchSensitivity))
+                                .toDouble(),
+                          );
                         }
                       },
                       child: CameraPreview(_camera!),
@@ -258,11 +276,12 @@ class _ContinuousCameraScreenState extends State<ContinuousCameraScreen>
                 Text('${_zoom.toStringAsFixed(1)}×'),
                 Expanded(
                   child: Slider(
-                    min: _minZoom,
-                    max: _maxZoom,
-                    value: _zoom,
+                    min: 0,
+                    max: 1,
+                    divisions: 100,
+                    value: _zoomSliderValue.clamp(0, 1),
                     label: '${_zoom.toStringAsFixed(1)}×',
-                    onChanged: _setZoom,
+                    onChanged: (value) => _setZoom(_zoomFromSlider(value)),
                   ),
                 ),
               ],

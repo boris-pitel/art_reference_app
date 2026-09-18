@@ -634,6 +634,15 @@ class _AiImageEditScreenState extends State<AiImageEditScreen>
     // being to judge them in the same frame at the same size, where a small
     // change is visible and a missing one is obvious.
     final showingOriginal = !hasResult || _isComparing;
+    final previewImage = showingOriginal
+        ? widget.sourceImageBytes != null
+              ? Image.memory(widget.sourceImageBytes!, fit: BoxFit.contain)
+              : CachedImage(
+                  url: widget.sourceImageUrl,
+                  cacheKey: AppImageCache.fullKey(widget.sourceImageId),
+                  fit: BoxFit.contain,
+                )
+        : Image.memory(_previewBytes!, fit: BoxFit.contain);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -650,17 +659,15 @@ class _AiImageEditScreenState extends State<AiImageEditScreen>
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  if (showingOriginal)
-                    if (widget.sourceImageBytes case final bytes?)
-                      Image.memory(bytes, fit: BoxFit.contain)
-                    else
-                      CachedImage(
-                        url: widget.sourceImageUrl,
-                        cacheKey: AppImageCache.fullKey(widget.sourceImageId),
-                        fit: BoxFit.contain,
-                      )
-                  else
-                    Image.memory(_previewBytes!, fit: BoxFit.contain),
+                  InteractiveViewer(
+                    key: ValueKey(
+                      showingOriginal ? 'ai-edit-original' : 'ai-edit-result',
+                    ),
+                    minScale: 1,
+                    maxScale: 8,
+                    boundaryMargin: const EdgeInsets.all(80),
+                    child: Center(child: previewImage),
+                  ),
 
                   // Over the image rather than under the prompt. A minute-long
                   // wait whose only indication is off the bottom of the screen

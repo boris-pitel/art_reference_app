@@ -3059,21 +3059,6 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                     : () => _confirmAndRemoveAssociatedImage(image),
               ),
             ),
-            if (!isBusy)
-              Positioned(
-                right: 6,
-                bottom: 6,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Padding(
-                    padding: EdgeInsets.all(6),
-                    child: Icon(Icons.zoom_in, size: 20, color: Colors.white),
-                  ),
-                ),
-              ),
             if (isBusy)
               const Positioned.fill(
                 child: ColoredBox(
