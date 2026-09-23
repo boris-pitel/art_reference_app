@@ -517,20 +517,30 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen>
       _crop.width * area.width,
       _crop.height * area.height,
     );
-    final tolerance = switch (kind) {
-      PointerDeviceKind.touch || PointerDeviceKind.stylus => 40.0,
-      _ => 14.0,
+    // Keep the grab area substantially larger than the painted border. A
+    // precise hit on a thin line is difficult with a finger and unnecessarily
+    // fiddly with a mouse. Some browsers report touch input as unknown, so
+    // that kind must receive the touch-sized target too.
+    final baseTolerance = switch (kind) {
+      PointerDeviceKind.mouse || PointerDeviceKind.trackpad => 24.0,
+      PointerDeviceKind.stylus => 36.0,
+      PointerDeviceKind.touch || PointerDeviceKind.unknown => 52.0,
+      _ => 36.0,
     };
-    final nearLeft = (position.dx - rect.left).abs() <= tolerance;
-    final nearRight = (position.dx - rect.right).abs() <= tolerance;
-    final nearTop = (position.dy - rect.top).abs() <= tolerance;
-    final nearBottom = (position.dy - rect.bottom).abs() <= tolerance;
+    // Preserve a useful move area when the crop becomes small instead of
+    // letting the resize targets consume its entire interior.
+    final horizontalTolerance = math.min(baseTolerance, rect.width / 3);
+    final verticalTolerance = math.min(baseTolerance, rect.height / 3);
+    final nearLeft = (position.dx - rect.left).abs() <= horizontalTolerance;
+    final nearRight = (position.dx - rect.right).abs() <= horizontalTolerance;
+    final nearTop = (position.dy - rect.top).abs() <= verticalTolerance;
+    final nearBottom = (position.dy - rect.bottom).abs() <= verticalTolerance;
     final withinHorizontal =
-        position.dx >= rect.left - tolerance &&
-        position.dx <= rect.right + tolerance;
+        position.dx >= rect.left - horizontalTolerance &&
+        position.dx <= rect.right + horizontalTolerance;
     final withinVertical =
-        position.dy >= rect.top - tolerance &&
-        position.dy <= rect.bottom + tolerance;
+        position.dy >= rect.top - verticalTolerance &&
+        position.dy <= rect.bottom + verticalTolerance;
 
     if (nearLeft && nearTop) return _CropDragTarget.topLeft;
     if (nearRight && nearTop) return _CropDragTarget.topRight;
@@ -797,6 +807,7 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen>
                         }
                       },
                       child: Listener(
+                        key: const ValueKey('crop-interaction-surface'),
                         behavior: HitTestBehavior.opaque,
                         onPointerDown: (event) => _startCropDrag(event, fitted),
                         onPointerMove: (event) =>
@@ -1116,8 +1127,19 @@ class _CropOverlayPainter extends CustomPainter {
       rect.bottomLeft,
       rect.bottomRight,
     ]) {
-      canvas.drawCircle(point, 15, handleFill);
-      canvas.drawCircle(point, 15, handleStroke);
+      canvas.drawCircle(point, 18, handleFill);
+      canvas.drawCircle(point, 18, handleStroke);
+    }
+    // The sides are draggable too. Showing their targets makes that behavior
+    // discoverable and gives users an easier alternative to a corner handle.
+    for (final point in [
+      rect.topCenter,
+      rect.centerLeft,
+      rect.centerRight,
+      rect.bottomCenter,
+    ]) {
+      canvas.drawCircle(point, 10, handleFill);
+      canvas.drawCircle(point, 10, handleStroke);
     }
     // Inside the crop, not over the whole image: the crop is the picture the
     // artist is going to end up with, so a third has to be a third of that.

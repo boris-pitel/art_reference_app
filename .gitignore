@@ -64,3 +64,6 @@ painter-admin.exe
 
 # Local storage backups
 /storage-backup/
+
+# Locally built Windows installers
+/dist/

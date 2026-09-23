@@ -149,7 +149,7 @@ Wherever you live, you can ask us to:
   the one thing you can ask us to stop.
 
 Email support@painterreference.com and we will act within 3 days. Account deletion
-will also be available directly in the app.
+is also available directly in the app.
 
 If you are in the UK or EU and think we have handled your data badly, you may
 complain to your national data-protection authority. We would rather you told us

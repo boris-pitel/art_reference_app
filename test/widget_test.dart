@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:art_reference_app/screens/image_adjustment_screen.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
@@ -166,5 +167,59 @@ void main() {
     expect(appliedCrop!.width * 90, closeTo(appliedCrop!.height * 120, 0.01));
     expect(appliedCrop!.width, closeTo(1, 0.001));
     expect(appliedCrop!.height, closeTo(0.75, 0.001));
+  });
+
+  testWidgets('crop corner has a practical mouse grab area', (tester) async {
+    final controller = ImageAdjustmentController();
+    Rect? appliedCrop;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ImageAdjustmentScreen(
+            imageBytes: _testImageBytes(),
+            embedded: true,
+            controller: controller,
+            onDone: (_) {},
+            imageProcessor:
+                ({
+                  required bytes,
+                  required angle,
+                  required crop,
+                  monochrome = false,
+                  gridDivisions = 0,
+                }) async {
+                  appliedCrop = crop;
+                  return bytes;
+                },
+          ),
+        ),
+      ),
+    );
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pump();
+
+    final surface = find.byKey(
+      const ValueKey<String>('crop-interaction-surface'),
+    );
+    expect(surface, findsOneWidget);
+    final start = tester.getTopLeft(surface) + const Offset(20, 20);
+    final gesture = await tester.startGesture(
+      start,
+      kind: PointerDeviceKind.mouse,
+    );
+    await gesture.moveBy(const Offset(30, 25));
+    await gesture.up();
+    await tester.pump();
+
+    final applying = controller.apply();
+    await tester.pump();
+    await applying;
+
+    expect(appliedCrop, isNotNull);
+    expect(appliedCrop!.left, greaterThan(0));
+    expect(appliedCrop!.top, greaterThan(0));
   });
 }
