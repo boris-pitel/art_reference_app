@@ -8,6 +8,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'models/reference_category.dart';
 import 'navigation.dart';
@@ -657,7 +658,8 @@ class CollectionsScreen extends StatefulWidget {
   State<CollectionsScreen> createState() => _CollectionsScreenState();
 }
 
-class _CollectionsScreenState extends State<CollectionsScreen> {
+class _CollectionsScreenState extends State<CollectionsScreen>
+    with WidgetsBindingObserver {
   late final CategoryService _categoryService;
   late final ImageAssetService _imageAssetService;
   late final MessagingService _messagingService;
@@ -672,6 +674,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   bool _isAdmin = false;
   int _unreadMessageCount = 0;
   int _openReportCount = 0;
+  AppAnnouncement? _announcement;
   String? _errorMessage;
 
   bool get _hasOnlineSession =>
@@ -712,6 +715,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final supabase = Supabase.instance.client;
 
     _categoryService = CategoryService(supabase);
@@ -733,6 +737,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
     // happened to pull to refresh, which is not how anyone finds out that
     // something needs attention.
     if (!_isReadOnly) _refreshOpenReportCount();
+    if (!_isReadOnly) _refreshAnnouncement();
 
     // This screen's State is never recreated by an impersonation switch
     // (Navigator.popUntil reuses the existing root route rather than
@@ -746,12 +751,20 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     ConnectivityMonitor.instance.removeListener(_handleConnectivityChange);
     LocalUserSession.changes.removeListener(_handleConnectivityChange);
     ImpersonationController.instance.impersonatedEmail.removeListener(
       _refreshHome,
     );
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !_isReadOnly) {
+      unawaited(_refreshAnnouncement());
+    }
   }
 
   void _handleConnectivityChange() {
@@ -856,7 +869,40 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       _refreshAdminStatus(),
       _refreshUnreadMessageCount(),
       _refreshOpenReportCount(),
+      _refreshAnnouncement(),
     ]);
+  }
+
+  Future<void> _refreshAnnouncement() async {
+    try {
+      final status = await AppStatusService(Supabase.instance.client).load();
+      final announcement = status.announcement;
+      final prefs = await SharedPreferences.getInstance();
+      final userId = LocalUserSession.effectiveUserId;
+      final dismissedId = userId == null
+          ? null
+          : prefs.getString('dismissed_announcement_$userId');
+      if (mounted) {
+        setState(
+          () => _announcement = announcement?.id == dismissedId
+              ? null
+              : announcement,
+        );
+      }
+    } catch (error) {
+      debugPrint('Unable to refresh announcement: $error');
+    }
+  }
+
+  Future<void> _dismissAnnouncement() async {
+    final announcement = _announcement;
+    final userId = LocalUserSession.effectiveUserId;
+    if (announcement == null) return;
+    setState(() => _announcement = null);
+    if (userId != null) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('dismissed_announcement_$userId', announcement.id);
+    }
   }
 
   Future<void> _openMaintenance() async {
@@ -864,6 +910,7 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       MaterialPageRoute<void>(builder: (_) => const MaintenanceScreen()),
     );
     await _refreshAdminStatus();
+    await _refreshAnnouncement();
   }
 
   Future<void> _restoreThenRefreshCategories() async {
@@ -1712,10 +1759,69 @@ class _CollectionsScreenState extends State<CollectionsScreen> {
       body: Column(
         children: [
           if (_isReadOnly) _buildOfflineBanner(),
+          if (_announcement != null) _buildAnnouncementBanner(_announcement!),
           Expanded(child: _buildBody()),
         ],
       ),
       floatingActionButton: _buildHomeActions(),
+    );
+  }
+
+  Widget _buildAnnouncementBanner(AppAnnouncement announcement) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.primaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: [
+            Icon(Icons.campaign_outlined, color: scheme.onPrimaryContainer),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    announcement.title,
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: scheme.onPrimaryContainer,
+                    ),
+                  ),
+                  InkWell(
+                    onTap: () => showDialog<void>(
+                      context: context,
+                      builder: (context) => AlertDialog(
+                        title: Text(announcement.title),
+                        content: SingleChildScrollView(
+                          child: Text(announcement.message),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('Close'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    child: Text(
+                      announcement.message,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: scheme.onPrimaryContainer),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Dismiss announcement',
+              onPressed: _dismissAnnouncement,
+              icon: const Icon(Icons.close),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

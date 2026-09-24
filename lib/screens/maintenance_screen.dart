@@ -145,6 +145,100 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
     }
   }
 
+  Future<void> _showAnnouncementDialog() async {
+    final titleController = TextEditingController(
+      text: _appStatus.announcement?.title ?? '',
+    );
+    final messageController = TextEditingController(
+      text: _appStatus.announcement?.message ?? '',
+    );
+    final action = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Announcement'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Shown to users when they open or refresh Painter Reference.',
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: titleController,
+                maxLength: 100,
+                decoration: const InputDecoration(
+                  labelText: 'Title',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: messageController,
+                maxLines: 4,
+                maxLength: 1000,
+                decoration: const InputDecoration(
+                  labelText: 'Message',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          if (_appStatus.announcement != null)
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, 'clear'),
+              child: const Text('Clear'),
+            ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, 'publish'),
+            child: const Text('Publish'),
+          ),
+        ],
+      ),
+    );
+    final title = titleController.text.trim();
+    final message = messageController.text.trim();
+    titleController.dispose();
+    messageController.dispose();
+    if (!mounted || action == null) return;
+    if (action == 'publish' && (title.isEmpty || message.isEmpty)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter both a title and a message.')),
+      );
+      return;
+    }
+    try {
+      await _service.setAnnouncement(
+        title: action == 'clear' ? '' : title,
+        message: action == 'clear' ? '' : message,
+      );
+      final status = await _statusService.load();
+      if (!mounted) return;
+      setState(() => _appStatus = status);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            action == 'clear'
+                ? 'Announcement cleared.'
+                : 'Announcement published.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to update announcement: $error')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
@@ -153,6 +247,11 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
         appBar: AppBar(
           title: const Text('Maintenance'),
           actions: [
+            IconButton(
+              onPressed: _loading ? null : _showAnnouncementDialog,
+              tooltip: 'Announcement',
+              icon: const Icon(Icons.campaign_outlined),
+            ),
             IconButton(
               onPressed: _loading ? null : _showServiceStatusDialog,
               tooltip: _appStatus.maintenanceEnabled

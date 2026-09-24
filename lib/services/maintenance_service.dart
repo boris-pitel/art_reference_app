@@ -40,7 +40,9 @@ class MaintenanceService {
     );
     final data = response.data;
     if (data is! Map || data['user'] is! Map) {
-      throw StateError('The maintenance service returned invalid user details.');
+      throw StateError(
+        'The maintenance service returned invalid user details.',
+      );
     }
     return Map<String, dynamic>.from(data['user'] as Map);
   }
@@ -138,6 +140,21 @@ class MaintenanceService {
     }
   }
 
+  Future<void> setAnnouncement({
+    required String title,
+    required String message,
+  }) async {
+    final response = await _client.functions.invoke(
+      'admin-maintenance',
+      body: {'action': 'set_announcement', 'title': title, 'message': message},
+    );
+    if (response.data is! Map || !(response.data as Map).containsKey('id')) {
+      throw StateError(
+        'The maintenance service returned an invalid announcement response.',
+      );
+    }
+  }
+
   Future<Map<String, dynamic>> impersonate(String userId) async {
     final response = await _client.functions.invoke(
       'admin-maintenance',
@@ -155,7 +172,10 @@ class MaintenanceService {
     return Map<String, dynamic>.from(data);
   }
 
-  Future<void> removeUser({required String userId, required String email}) async {
+  Future<void> removeUser({
+    required String userId,
+    required String email,
+  }) async {
     final response = await _client.functions.invoke(
       'admin-maintenance',
       method: HttpMethod.delete,

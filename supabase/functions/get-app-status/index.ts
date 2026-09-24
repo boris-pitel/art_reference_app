@@ -43,7 +43,7 @@ Deno.serve(async (request) => {
 
     const { data, error } = await supabase
       .from("app_status")
-      .select("maintenance_enabled,message")
+      .select("maintenance_enabled,message,announcement_title,announcement_message,announcement_id")
       .eq("id", true)
       .maybeSingle();
 
@@ -57,6 +57,9 @@ Deno.serve(async (request) => {
       message: typeof data?.message === "string" && data.message.trim().length > 0
         ? data.message.trim()
         : null,
+      announcement_title: data?.announcement_title ?? null,
+      announcement_message: data?.announcement_message ?? null,
+      announcement_id: data?.announcement_id ?? null,
     });
   } catch (error) {
     console.error("get-app-status failed", error);

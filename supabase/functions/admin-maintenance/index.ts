@@ -469,6 +469,27 @@ Deno.serve(async (request) => {
         return jsonResponse({ maintenance_enabled: enabled, message });
       }
 
+      if (action === 'set_announcement') {
+        const title = typeof body?.title === 'string' ? body.title.trim() : '';
+        const message = typeof body?.message === 'string' ? body.message.trim() : '';
+        if ((title.length === 0) !== (message.length === 0) ||
+            title.length > 100 || message.length > 1000) {
+          return jsonResponse({ error: 'Provide both a title (up to 100 characters) and a message (up to 1000 characters), or leave both empty to clear the announcement.' }, 400);
+        }
+        const announcementId = title ? crypto.randomUUID() : null;
+        const { error } = await adminClient.from('app_status').update({
+          announcement_title: title || null,
+          announcement_message: message || null,
+          announcement_id: announcementId,
+          updated_at: new Date().toISOString(),
+          updated_by: admin.email ?? admin.id,
+        }).eq('id', true);
+        if (error) return jsonResponse({ error: `Unable to update announcement: ${error.message}` }, 500);
+        await logAdminAction(admin.id, admin.email ?? '', 'admin_set_announcement', null,
+          { title: title || null, announcement_id: announcementId }, 'system');
+        return jsonResponse({ title: title || null, message: message || null, id: announcementId });
+      }
+
       const userId = body?.user_id;
       if (typeof userId !== 'string' || userId.trim().length === 0) {
         return jsonResponse({ error: 'User ID is required' }, 400);
