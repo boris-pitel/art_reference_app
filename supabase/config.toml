@@ -40,6 +40,10 @@ verify_jwt = false
 verify_jwt = false
 [functions.get-app-status]
 verify_jwt = false
+[functions.announcement-email]
+verify_jwt = false
+[functions.unsubscribe-announcement]
+verify_jwt = false
 [functions.delete-category]
 verify_jwt = false
 [functions.search-users]

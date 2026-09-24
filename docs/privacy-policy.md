@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Version 1.0 — effective 21 August 2026**
+**Version 1.1 — effective 23 September 2026**
 
 Painter Reference is a reference-image library for artists. This policy explains
 what the service stores, why, who else is involved, and what you can do about it.
@@ -47,6 +47,13 @@ you have chosen to be discoverable in user search.
 you were on, and the app version.
 *Why: to reproduce and fix what you reported.*
 
+**App update emails** — we may send neutral notices about new versions and
+important changes to the email address on your account. This is on by default.
+You can turn it off in Account settings or use the unsubscribe link in any
+update email. We store your preference and a token for the unsubscribe link.
+*Why: to tell you when the app you use has changed.* These emails are not used
+for offers or advertising.
+
 **Activity records** — what the app did and whether it worked: the operation
 (for example uploading an image), whether it succeeded or failed, how long it
 took, any error message, the platform, and the app version. Each record also
@@ -86,6 +93,7 @@ permitted to use it for their own purposes.
 | **Supabase** | Database, file storage, authentication | Stores your account, images and all other records |
 | **Google Firebase Hosting** | Delivery of the web app | Serves painterreference.com to your browser |
 | **Google** | Optional Sign in with Google | Only if you choose that sign-in method |
+| **Resend** | Account email address and update notice | Delivers app update emails and handles delivery status |
 | **OpenAI** | Optional AI image analysis and AI image editing | Only when you ask for it — see below |
 
 **About the AI features.** There are two, both optional, and neither ever runs

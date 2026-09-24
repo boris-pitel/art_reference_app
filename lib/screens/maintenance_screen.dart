@@ -22,6 +22,7 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
   List<Map<String, dynamic>> _aiLevels = const [];
   String? _error;
   bool _loading = true;
+  bool _sendingEmail = false;
 
   @override
   void initState() {
@@ -239,6 +240,100 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
     }
   }
 
+  Future<void> _showEmailAnnouncementDialog() async {
+    Map<String, dynamic> preview;
+    try {
+      preview = await _service.previewAnnouncementEmail();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to preview email recipients: $error')),
+      );
+      return;
+    }
+    if (!mounted) return;
+    final pending = preview['pending'] as int? ?? 0;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Email announcement'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480, maxHeight: 400),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(preview['title']?.toString() ?? ''),
+                const SizedBox(height: 8),
+                Text(preview['message']?.toString() ?? ''),
+                const SizedBox(height: 16),
+                Text('Eligible accounts: ${preview['eligible']}'),
+                Text('Already emailed: ${preview['already_sent']}'),
+                Text('Still to email: $pending'),
+                const SizedBox(height: 12),
+                const Text(
+                  'Use this for neutral Painter Reference version and service updates only. Do not send promotions.',
+                ),
+                if (preview['configured'] != true) ...[
+                  const SizedBox(height: 12),
+                  const Text('Email sending is not configured yet.'),
+                ],
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: pending == 0 || preview['configured'] != true
+                ? null
+                : () => Navigator.pop(dialogContext, true),
+            child: Text('Email $pending ${pending == 1 ? 'user' : 'users'}'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _sendingEmail = true);
+    var sent = 0;
+    var remaining = pending;
+    final failures = <String>[];
+    try {
+      // The server sends at most 25 per call to stay within function limits.
+      // A failed address is reported and left for a later retry.
+      for (var batch = 0; batch < 20 && remaining > 0; batch++) {
+        final result = await _service.sendAnnouncementEmailBatch();
+        sent += result['sent'] as int? ?? 0;
+        remaining = result['remaining'] as int? ?? 0;
+        final batchFailures = result['failures'];
+        if (batchFailures is List && batchFailures.isNotEmpty) {
+          failures.addAll(batchFailures.map((value) => value.toString()));
+          break;
+        }
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Email accepted for $sent users. '
+            '${failures.isEmpty ? (remaining > 0 ? '$remaining remain; run this again.' : 'Done.') : '${failures.length} failed; check server logs.'}',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Email stopped after $sent accepted: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => _sendingEmail = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
@@ -247,6 +342,14 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
         appBar: AppBar(
           title: const Text('Maintenance'),
           actions: [
+            IconButton(
+              onPressed:
+                  _loading || _sendingEmail || _appStatus.announcement == null
+                  ? null
+                  : _showEmailAnnouncementDialog,
+              tooltip: 'Email announcement',
+              icon: const Icon(Icons.outgoing_mail),
+            ),
             IconButton(
               onPressed: _loading ? null : _showAnnouncementDialog,
               tooltip: 'Announcement',

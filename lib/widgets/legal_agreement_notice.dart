@@ -9,7 +9,7 @@ import '../services/user_activity_logger.dart';
 /// Recorded alongside each acceptance, so that when the documents change it is
 /// possible to tell who agreed to which version and who still needs to see the
 /// new one. Bump this whenever either document changes materially.
-const String legalDocumentVersion = '1.0';
+const String legalDocumentVersion = '1.1';
 
 const String _privacyUrl = 'https://painterreference.com/privacy';
 const String _termsUrl = 'https://painterreference.com/terms';

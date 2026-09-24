@@ -155,6 +155,32 @@ class MaintenanceService {
     }
   }
 
+  Future<Map<String, dynamic>> previewAnnouncementEmail() async {
+    final response = await _client.functions.invoke(
+      'announcement-email',
+      body: {'action': 'preview'},
+    );
+    if (response.data is! Map) {
+      throw StateError('Unable to preview announcement email.');
+    }
+    final data = Map<String, dynamic>.from(response.data as Map);
+    if (data['error'] != null) throw StateError(data['error'].toString());
+    return data;
+  }
+
+  Future<Map<String, dynamic>> sendAnnouncementEmailBatch() async {
+    final response = await _client.functions.invoke(
+      'announcement-email',
+      body: {'action': 'send'},
+    );
+    if (response.data is! Map) {
+      throw StateError('Unable to send announcement email.');
+    }
+    final data = Map<String, dynamic>.from(response.data as Map);
+    if (data['error'] != null) throw StateError(data['error'].toString());
+    return data;
+  }
+
   Future<Map<String, dynamic>> impersonate(String userId) async {
     final response = await _client.functions.invoke(
       'admin-maintenance',

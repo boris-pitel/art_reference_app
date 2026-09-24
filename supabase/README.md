@@ -51,3 +51,25 @@ npx.cmd --yes supabase@latest functions list --project-ref bbcgcrbvxmertipdjczu 
 ```
 
 Configuration rows should be refreshed separately so no user data is committed.
+
+## App update announcements
+
+Apply migrations before deploying `get-app-status`, `admin-maintenance`,
+`announcement-email`, and `unsubscribe-announcement`. Administrators can
+publish an in-app notice in Maintenance and preview the account-email audience
+before sending the same notice by email. Only confirmed account emails are
+eligible; the absence of a preference row means update emails are enabled.
+Users can turn them off in Account settings or through the email's unsubscribe
+link. Firebase App Distribution testers are not part of this audience unless
+they also have a confirmed app account.
+
+Email delivery uses Resend. Set `RESEND_API_KEY`, a verified
+`ANNOUNCEMENT_FROM_EMAIL` (normally `Painter Reference <support@painterreference.com>`),
+and `ANNOUNCEMENT_POSTAL_ADDRESS` as Supabase Edge
+Function secrets before sending. The admin preview reports whether the key
+and postal address are present, but a test delivery is still needed to verify
+the sending domain. No email is sent merely by publishing an in-app notice.
+The email action sends at most 25 recipients per server request, records each
+accepted delivery, and skips recipients already sent the same announcement.
+Update notices must remain neutral service/version messages; use a separate
+consent-based audience for promotions.

@@ -27,10 +27,78 @@ class AccountScreen extends StatefulWidget {
 
 class _AccountScreenState extends State<AccountScreen> {
   bool _isDeleting = false;
+  bool _receiveUpdateEmails = true;
+  bool _emailPreferenceLoaded = false;
+  bool _emailPreferenceFailed = false;
+  bool _savingEmailPreference = false;
 
   SupabaseClient get _supabase => Supabase.instance.client;
 
   String get _email => _supabase.auth.currentUser?.email?.trim() ?? '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadEmailPreference();
+  }
+
+  Future<void> _loadEmailPreference() async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) return;
+    try {
+      final row = await _supabase
+          .from('announcement_email_preferences')
+          .select('user_id,updates_enabled')
+          .eq('user_id', userId)
+          .maybeSingle();
+      if (mounted) {
+        setState(() {
+          _receiveUpdateEmails = row?['updates_enabled'] != false;
+          _emailPreferenceLoaded = true;
+          _emailPreferenceFailed = false;
+        });
+      }
+    } catch (error) {
+      debugPrint('Unable to load email preference: $error');
+      if (mounted) setState(() => _emailPreferenceFailed = true);
+    }
+  }
+
+  Future<void> _setEmailPreference(bool enabled) async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null || _savingEmailPreference) return;
+    setState(() => _savingEmailPreference = true);
+    try {
+      final existing = await _supabase
+          .from('announcement_email_preferences')
+          .select('user_id')
+          .eq('user_id', userId)
+          .maybeSingle();
+      if (existing == null) {
+        await _supabase.from('announcement_email_preferences').insert({
+          'user_id': userId,
+          'updates_enabled': enabled,
+        });
+      } else {
+        await _supabase
+            .from('announcement_email_preferences')
+            .update({
+              'updates_enabled': enabled,
+              'updated_at': DateTime.now().toUtc().toIso8601String(),
+            })
+            .eq('user_id', userId);
+      }
+      if (mounted) setState(() => _receiveUpdateEmails = enabled);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to save email preference: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingEmailPreference = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -50,6 +118,29 @@ class _AccountScreenState extends State<AccountScreen> {
             title: const Text('Signed in as'),
             subtitle: Text(_email.isEmpty ? 'Unknown' : _email),
           ),
+          const Divider(height: 32),
+          Text('Email updates', style: theme.textTheme.titleSmall),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            secondary: const Icon(Icons.mark_email_unread_outlined),
+            title: const Text('Email me app updates'),
+            subtitle: Text(
+              _emailPreferenceLoaded
+                  ? 'New versions and important Painter Reference changes. You can turn this off at any time.'
+                  : _emailPreferenceFailed
+                  ? 'Unable to load email preference.'
+                  : 'Loading email preference…',
+            ),
+            value: _receiveUpdateEmails,
+            onChanged: !_emailPreferenceLoaded || _savingEmailPreference
+                ? null
+                : _setEmailPreference,
+          ),
+          if (_emailPreferenceFailed)
+            TextButton(
+              onPressed: _loadEmailPreference,
+              child: const Text('Try again'),
+            ),
           const Divider(height: 32),
           Text('Security', style: theme.textTheme.titleSmall),
           const SizedBox(height: 4),
