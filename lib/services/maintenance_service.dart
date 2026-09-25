@@ -143,10 +143,20 @@ class MaintenanceService {
   Future<void> setAnnouncement({
     required String title,
     required String message,
+    required String audienceKind,
+    required List<String> targetUserIds,
+    required List<String> targetPlatforms,
   }) async {
     final response = await _client.functions.invoke(
       'admin-maintenance',
-      body: {'action': 'set_announcement', 'title': title, 'message': message},
+      body: {
+        'action': 'set_announcement',
+        'title': title,
+        'message': message,
+        'audience_kind': audienceKind,
+        'target_user_ids': targetUserIds,
+        'target_platforms': targetPlatforms,
+      },
     );
     if (response.data is! Map || !(response.data as Map).containsKey('id')) {
       throw StateError(

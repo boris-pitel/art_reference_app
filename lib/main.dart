@@ -23,6 +23,7 @@ import 'widgets/legal_agreement_notice.dart';
 import 'widgets/cached_image.dart';
 import 'screens/keyword_search_screen.dart';
 import 'screens/messages_screen.dart';
+import 'screens/notifications_screen.dart';
 import 'screens/messaging_settings_screen.dart';
 import 'screens/reports_screen.dart';
 import 'screens/shared_image_import_screen.dart';
@@ -1297,6 +1298,12 @@ class _CollectionsScreenState extends State<CollectionsScreen>
     if (mounted) await _refreshUnreadMessageCount();
   }
 
+  Future<void> _openNotifications() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
+    );
+  }
+
   Future<void> _openKeywordSearch() async {
     if (_isLoading || _categories.isEmpty) {
       return;
@@ -1633,6 +1640,11 @@ class _CollectionsScreenState extends State<CollectionsScreen>
             tooltip: _unreadMessageCount > 0
                 ? 'Messages ($_unreadMessageCount unread)'
                 : 'Messages',
+          ),
+          IconButton(
+            onPressed: _isReadOnly ? null : _openNotifications,
+            icon: const Icon(Icons.notifications_outlined),
+            tooltip: 'Notifications',
           ),
           IconButton(
             onPressed: _isReadOnly || _isLoading || _categories.isEmpty

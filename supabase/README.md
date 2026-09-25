@@ -55,13 +55,18 @@ Configuration rows should be refreshed separately so no user data is committed.
 ## App update announcements
 
 Apply migrations before deploying `get-app-status`, `admin-maintenance`,
-`announcement-email`, and `unsubscribe-announcement`. Administrators can
-publish an in-app notice in Maintenance and preview the account-email audience
-before sending the same notice by email. Only confirmed account emails are
-eligible; the absence of a preference row means update emails are enabled.
-Users can turn them off in Account settings or through the email's unsubscribe
-link. Firebase App Distribution testers are not part of this audience unless
-they also have a confirmed app account.
+`list-app-announcements`, `announcement-email`, and
+`unsubscribe-announcement`. Administrators can publish an in-app notice in
+Maintenance and preview its email audience before sending. Notices remain in a
+recent-notifications list after dismissal. The publisher can choose all users,
+specific accounts, or iOS, Android, web, and Windows platforms. The active
+banner and history use that audience. Specific-account email uses the same
+accounts. Platform-targeted email is disabled until account-device membership
+can be verified. Only confirmed account emails are eligible; the absence of a
+preference row means update emails are enabled. Users can turn them off in
+Account settings or through the email's unsubscribe link. Firebase App
+Distribution testers are not included unless they also have a confirmed app
+account.
 
 Email delivery uses Resend. Set `RESEND_API_KEY`, a verified
 `ANNOUNCEMENT_FROM_EMAIL` (normally `Painter Reference <support@painterreference.com>`),

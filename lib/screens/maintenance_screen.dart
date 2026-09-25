@@ -127,6 +127,7 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
         _appStatus = AppStatus(
           maintenanceEnabled: enabled,
           message: message.isEmpty ? null : message,
+          announcement: _appStatus.announcement,
         );
       });
       ScaffoldMessenger.of(context).showSnackBar(
@@ -147,71 +148,171 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
   }
 
   Future<void> _showAnnouncementDialog() async {
-    final titleController = TextEditingController(
-      text: _appStatus.announcement?.title ?? '',
-    );
+    final current = _appStatus.announcement;
+    final titleController = TextEditingController(text: current?.title ?? '');
     final messageController = TextEditingController(
-      text: _appStatus.announcement?.message ?? '',
+      text: current?.message ?? '',
     );
+    final searchController = TextEditingController();
+    var audienceKind = current?.audienceKind ?? 'all';
+    final selectedUsers = current?.targetUserIds.toSet() ?? <String>{};
+    final selectedPlatforms = current?.targetPlatforms.toSet() ?? <String>{};
+    var search = '';
+    final users = _snapshot?.users ?? const <Map<String, dynamic>>[];
     final action = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Announcement'),
-        content: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 480),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Shown to users when they open or refresh Painter Reference.',
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: titleController,
-                maxLength: 100,
-                decoration: const InputDecoration(
-                  labelText: 'Title',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: messageController,
-                maxLines: 4,
-                maxLength: 1000,
-                decoration: const InputDecoration(
-                  labelText: 'Message',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          if (_appStatus.announcement != null)
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, 'clear'),
-              child: const Text('Clear'),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Announcement'),
+          content: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 500,
+              maxHeight: MediaQuery.sizeOf(dialogContext).height * 0.65,
             ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, 'publish'),
-            child: const Text('Publish'),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Shown to the selected audience when they open or refresh Painter Reference. It also appears in their notification history.',
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: titleController,
+                    maxLength: 100,
+                    decoration: const InputDecoration(
+                      labelText: 'Title',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  TextField(
+                    controller: messageController,
+                    maxLines: 4,
+                    maxLength: 1000,
+                    decoration: const InputDecoration(
+                      labelText: 'Message',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    initialValue: audienceKind,
+                    decoration: const InputDecoration(
+                      labelText: 'Audience',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'all', child: Text('All users')),
+                      DropdownMenuItem(
+                        value: 'users',
+                        child: Text('Specific users'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'platforms',
+                        child: Text('By platform'),
+                      ),
+                    ],
+                    onChanged: (value) =>
+                        setDialogState(() => audienceKind = value ?? 'all'),
+                  ),
+                  if (audienceKind == 'users') ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: searchController,
+                      decoration: const InputDecoration(
+                        labelText: 'Find an account',
+                        prefixIcon: Icon(Icons.search),
+                      ),
+                      onChanged: (value) => setDialogState(
+                        () => search = value.toLowerCase().trim(),
+                      ),
+                    ),
+                    Text('${selectedUsers.length} selected'),
+                    ...users
+                        .where(
+                          (user) =>
+                              (user['email']?.toString().toLowerCase() ?? '')
+                                  .contains(search),
+                        )
+                        .take(100)
+                        .map((user) {
+                          final id = user['id']?.toString() ?? '';
+                          return CheckboxListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            value: selectedUsers.contains(id),
+                            title: Text(user['email']?.toString() ?? id),
+                            onChanged: (checked) => setDialogState(() {
+                              if (checked == true) {
+                                selectedUsers.add(id);
+                              } else {
+                                selectedUsers.remove(id);
+                              }
+                            }),
+                          );
+                        }),
+                  ],
+                  if (audienceKind == 'platforms') ...[
+                    const SizedBox(height: 12),
+                    for (final entry in const {
+                      'ios': 'iPhone / iPad',
+                      'android': 'Android',
+                      'web': 'Web',
+                      'windows': 'Windows',
+                    }.entries)
+                      CheckboxListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        value: selectedPlatforms.contains(entry.key),
+                        title: Text(entry.value),
+                        onChanged: (checked) => setDialogState(() {
+                          if (checked == true) {
+                            selectedPlatforms.add(entry.key);
+                          } else {
+                            selectedPlatforms.remove(entry.key);
+                          }
+                        }),
+                      ),
+                  ],
+                ],
+              ),
+            ),
           ),
-        ],
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            if (current != null)
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, 'clear'),
+                child: const Text('Clear'),
+              ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, 'publish'),
+              child: const Text('Announce'),
+            ),
+          ],
+        ),
       ),
     );
     final title = titleController.text.trim();
     final message = messageController.text.trim();
     titleController.dispose();
     messageController.dispose();
+    searchController.dispose();
     if (!mounted || action == null) return;
-    if (action == 'publish' && (title.isEmpty || message.isEmpty)) {
+    if (action == 'publish' &&
+        (title.isEmpty ||
+            message.isEmpty ||
+            (audienceKind == 'users' && selectedUsers.isEmpty) ||
+            (audienceKind == 'platforms' && selectedPlatforms.isEmpty))) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter both a title and a message.')),
+        const SnackBar(
+          content: Text(
+            'Enter a title and message, and select at least one user or platform for a targeted notice.',
+          ),
+        ),
       );
       return;
     }
@@ -219,6 +320,9 @@ class _MaintenanceScreenState extends State<MaintenanceScreen> {
       await _service.setAnnouncement(
         title: action == 'clear' ? '' : title,
         message: action == 'clear' ? '' : message,
+        audienceKind: action == 'clear' ? 'all' : audienceKind,
+        targetUserIds: selectedUsers.toList(),
+        targetPlatforms: selectedPlatforms.toList(),
       );
       final status = await _statusService.load();
       if (!mounted) return;

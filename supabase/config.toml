@@ -70,3 +70,6 @@ verify_jwt = false
 verify_jwt = false
 [functions.report-content]
 verify_jwt = false
+
+[functions.list-app-announcements]
+verify_jwt = false

@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'app_platform.dart';
 import 'network_availability.dart';
 
 /// Whether the app is currently withheld from normal use.
@@ -40,6 +41,13 @@ class AppStatus {
               id: announcementId,
               title: announcementTitle.trim(),
               message: announcementMessage.trim(),
+              audienceKind: data['audience_kind'] as String? ?? 'all',
+              targetUserIds:
+                  (data['target_user_ids'] as List?)?.cast<String>() ??
+                  const [],
+              targetPlatforms:
+                  (data['target_platforms'] as List?)?.cast<String>() ??
+                  const [],
             )
           : null,
     );
@@ -51,11 +59,19 @@ class AppAnnouncement {
     required this.id,
     required this.title,
     required this.message,
+    this.publishedAt,
+    this.audienceKind = 'all',
+    this.targetUserIds = const [],
+    this.targetPlatforms = const [],
   });
 
   final String id;
   final String title;
   final String message;
+  final DateTime? publishedAt;
+  final String audienceKind;
+  final List<String> targetUserIds;
+  final List<String> targetPlatforms;
 }
 
 class AppStatusService {
@@ -67,10 +83,34 @@ class AppStatusService {
   /// not become a slow app.
   static const _timeout = Duration(seconds: 4);
 
+  Future<List<AppAnnouncement>> recentAnnouncements() async {
+    final response = await _client.functions.invoke(
+      'list-app-announcements',
+      body: {'platform': currentAppPlatform},
+    );
+    final data = response.data;
+    if (data is! Map || data['announcements'] is! List) {
+      throw StateError('Unable to load notifications.');
+    }
+    final rows = (data['announcements'] as List).cast<Map<String, dynamic>>();
+    return rows
+        .map(
+          (row) => AppAnnouncement(
+            id: row['id'] as String,
+            title: row['title'] as String,
+            message: row['message'] as String,
+            publishedAt: DateTime.tryParse(
+              row['published_at'] as String,
+            )?.toLocal(),
+          ),
+        )
+        .toList(growable: false);
+  }
+
   Future<AppStatus> load() async {
     try {
       final response = await _client.functions
-          .invoke('get-app-status')
+          .invoke('get-app-status', body: {'platform': currentAppPlatform})
           .timeout(_timeout);
 
       ConnectivityMonitor.instance.reportBackendSuccess();

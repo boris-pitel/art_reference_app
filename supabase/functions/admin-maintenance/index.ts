@@ -476,7 +476,35 @@ Deno.serve(async (request) => {
             title.length > 100 || message.length > 1000) {
           return jsonResponse({ error: 'Provide both a title (up to 100 characters) and a message (up to 1000 characters), or leave both empty to clear the announcement.' }, 400);
         }
+        const audienceKind = body?.audience_kind ?? 'all';
+        const targetUserIds = body?.target_user_ids ?? [];
+        const targetPlatforms = body?.target_platforms ?? [];
+        const validPlatforms = ['ios', 'android', 'web', 'windows'];
+        if (!['all', 'users', 'platforms'].includes(audienceKind) ||
+            !Array.isArray(targetUserIds) || !Array.isArray(targetPlatforms) ||
+            (audienceKind === 'users' &&
+              (targetUserIds.length === 0 || targetUserIds.some((id) =>
+                typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(id)))) ||
+            (audienceKind === 'platforms' &&
+              (targetPlatforms.length === 0 || targetPlatforms.some((platform) =>
+                !validPlatforms.includes(platform))))) {
+          return jsonResponse({ error: 'Choose a valid audience with at least one user or platform.' }, 400);
+        }
         const announcementId = title ? crypto.randomUUID() : null;
+        if (announcementId) {
+          const { error: insertError } = await adminClient.from('app_announcements').insert({
+            id: announcementId,
+            title,
+            message,
+            audience_kind: audienceKind,
+            target_user_ids: audienceKind === 'users' ? targetUserIds : [],
+            target_platforms: audienceKind === 'platforms' ? targetPlatforms : [],
+            published_by: admin.email ?? admin.id,
+          });
+          if (insertError) {
+            return jsonResponse({ error: `Unable to save announcement: ${insertError.message}` }, 500);
+          }
+        }
         const { error } = await adminClient.from('app_status').update({
           announcement_title: title || null,
           announcement_message: message || null,
@@ -484,9 +512,14 @@ Deno.serve(async (request) => {
           updated_at: new Date().toISOString(),
           updated_by: admin.email ?? admin.id,
         }).eq('id', true);
-        if (error) return jsonResponse({ error: `Unable to update announcement: ${error.message}` }, 500);
+        if (error) {
+          if (announcementId) await adminClient.from('app_announcements').delete().eq('id', announcementId);
+          return jsonResponse({ error: `Unable to update announcement: ${error.message}` }, 500);
+        }
         await logAdminAction(admin.id, admin.email ?? '', 'admin_set_announcement', null,
-          { title: title || null, announcement_id: announcementId }, 'system');
+          { title: title || null, announcement_id: announcementId, audience_kind: audienceKind,
+            target_user_ids: audienceKind === 'users' ? targetUserIds : [],
+            target_platforms: audienceKind === 'platforms' ? targetPlatforms : [] }, 'system');
         return jsonResponse({ title: title || null, message: message || null, id: announcementId });
       }
 

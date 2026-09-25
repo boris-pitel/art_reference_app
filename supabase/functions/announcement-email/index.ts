@@ -86,7 +86,17 @@ Deno.serve(async (request) => {
       return json({ error: 'Publish an announcement before emailing it.' }, 400);
     }
 
-    const users = await allUsers();
+    const { data: audience, error: audienceError } = await client
+      .from('app_announcements')
+      .select('audience_kind,target_user_ids')
+      .eq('id', announcement.announcement_id).single();
+    if (audienceError || !audience) throw audienceError ?? new Error('Announcement audience missing');
+    if (audience.audience_kind === 'platforms') {
+      return json({ error: 'Platform-targeted email needs verified account-device data and is unavailable.' }, 400);
+    }
+    const users = (await allUsers()).filter((user) =>
+      audience.audience_kind === 'all' ||
+      (audience.audience_kind === 'users' && audience.target_user_ids.includes(user.id)));
     const preferences = await allRows('announcement_email_preferences', 'user_id,updates_enabled');
     const deliveries = await allRows('announcement_email_deliveries',
       'user_id,status', announcement.announcement_id);
