@@ -66,6 +66,9 @@ type ImageRow = {
   date_added: string;
   storage_path: string;
   thumbnail_storage_path: string | null;
+  featured_image_id: string | null;
+  featured_storage_path: string | null;
+  featured_thumbnail_storage_path: string | null;
 };
 
 Deno.serve(async (request) => {
@@ -138,10 +141,19 @@ Deno.serve(async (request) => {
         ia.id,
         ia.date_added,
         ia.storage_path,
-        ia.thumbnail_storage_path
+        ia.thumbnail_storage_path,
+        featured.id as featured_image_id,
+        featured.storage_path as featured_storage_path,
+        featured.thumbnail_storage_path as featured_thumbnail_storage_path
       from public.image_assets ia
       inner join public.image_categories ic
         on ic.image_id = ia.id
+      left join public.image_relationships featured_relation
+        on featured_relation.parent_image_id = ia.id
+        and featured_relation.child_image_id = ia.featured_child_image_id
+      left join public.image_assets featured
+        on featured.id = featured_relation.child_image_id
+        and featured.user_id = ia.user_id
       where ia.user_id = ${userId}
         and ic.category_code = ${categoryCode}
       order by ia.date_added desc
@@ -154,6 +166,10 @@ Deno.serve(async (request) => {
 
       if (row.thumbnail_storage_path) {
         allPaths.push(row.thumbnail_storage_path);
+      }
+      if (row.featured_storage_path) allPaths.push(row.featured_storage_path);
+      if (row.featured_thumbnail_storage_path) {
+        allPaths.push(row.featured_thumbnail_storage_path);
       }
     }
 
@@ -205,6 +221,13 @@ Deno.serve(async (request) => {
         date_added: row.date_added,
         image_url: imageUrl,
         thumbnail_url: thumbnailUrl,
+        featured_image_id: row.featured_image_id,
+        featured_image_url: row.featured_storage_path
+          ? signedUrlByPath.get(row.featured_storage_path) ?? null
+          : null,
+        featured_thumbnail_url: row.featured_thumbnail_storage_path
+          ? signedUrlByPath.get(row.featured_thumbnail_storage_path) ?? null
+          : null,
       };
     });
 

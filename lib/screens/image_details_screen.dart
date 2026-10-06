@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/reference_category.dart';
 import '../services/category_service.dart';
@@ -116,6 +117,7 @@ String _saveResultMessage(ImageSaveResult result) {
 
 enum _AssociatedImageAction {
   open,
+  feature,
   compare,
   editImage,
   share,
@@ -189,6 +191,7 @@ typedef _MetadataDraft = ({
   String? title,
   String? notes,
   String? author,
+  String? shotLocation,
   bool isFavorite,
   bool isFinishedArtwork,
 });
@@ -200,6 +203,8 @@ class ImageDetailsNavigationItem {
     this.displayUrl,
     this.dateAdded,
     this.parentImageId,
+    this.featuredImageId,
+    this.featuredImageUrl,
   });
 
   final String imageId;
@@ -207,6 +212,8 @@ class ImageDetailsNavigationItem {
   final String? displayUrl;
   final DateTime? dateAdded;
   final String? parentImageId;
+  final String? featuredImageId;
+  final String? featuredImageUrl;
 }
 
 class ImageDetailsScreen extends StatefulWidget {
@@ -217,11 +224,15 @@ class ImageDetailsScreen extends StatefulWidget {
     this.displayUrl,
     this.isAssociatedImage = false,
     this.parentImageId,
+    this.featuredImageId,
+    this.featuredImageUrl,
     this.dateAdded,
     this.navigationItems = const <ImageDetailsNavigationItem>[],
     this.navigationIndex = 0,
     this.startImageEditing = false,
     this.hasPriorChanges = false,
+    this.featuredAssociatedImageId,
+    this.onFrontImageChanged,
   });
 
   final String imageId;
@@ -232,11 +243,15 @@ class ImageDetailsScreen extends StatefulWidget {
   final String? displayUrl;
   final bool isAssociatedImage;
   final String? parentImageId;
+  final String? featuredImageId;
+  final String? featuredImageUrl;
   final DateTime? dateAdded;
   final List<ImageDetailsNavigationItem> navigationItems;
   final int navigationIndex;
   final bool startImageEditing;
   final bool hasPriorChanges;
+  final String? featuredAssociatedImageId;
+  final void Function(String imageId, String imageUrl)? onFrontImageChanged;
 
   @override
   State<ImageDetailsScreen> createState() => _ImageDetailsScreenState();
@@ -249,6 +264,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   final TextEditingController _notesController = TextEditingController();
 
   final TextEditingController _authorController = TextEditingController();
+  final TextEditingController _shotLocationController = TextEditingController();
 
   final ImagePicker _imagePicker = ImagePicker();
 
@@ -290,6 +306,15 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
 
   late String _currentImageId;
   late String _currentImageUrl;
+  String? _featuredImageId;
+  String? _featuredImageUrl;
+  bool _showOriginal = false;
+  bool get _hasFrontImage =>
+      !_showOriginal && _featuredImageId != null && _featuredImageUrl != null;
+  String get _frontImageId =>
+      _hasFrontImage ? _featuredImageId! : _currentImageId;
+  String get _frontImageUrl =>
+      _hasFrontImage ? _featuredImageUrl! : _currentImageUrl;
   late DateTime? _currentDateAdded;
   late String? _currentParentImageId;
   late int _currentNavigationIndex;
@@ -344,6 +369,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     title: _normalizedNullableText(_titleController.text),
     notes: _normalizedNullableText(_notesController.text),
     author: _normalizedNullableText(_authorController.text),
+    shotLocation: _normalizedNullableText(_shotLocationController.text),
     isFavorite: _isFavorite,
     isFinishedArtwork: _isFinishedArtwork,
   );
@@ -356,6 +382,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     super.initState();
     _currentImageId = widget.imageId;
     _currentImageUrl = widget.imageUrl;
+    _featuredImageId = widget.featuredImageId;
+    _featuredImageUrl = widget.featuredImageUrl;
     _currentDateAdded = widget.dateAdded;
     _currentParentImageId = widget.parentImageId;
     _currentNavigationIndex = widget.navigationIndex;
@@ -366,6 +394,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     _titleController.addListener(_metadataChanged);
     _notesController.addListener(_metadataChanged);
     _authorController.addListener(_metadataChanged);
+    _shotLocationController.addListener(_metadataChanged);
 
     _loadMetadata();
     if (!widget.isAssociatedImage) {
@@ -387,6 +416,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     _titleController.dispose();
     _notesController.dispose();
     _authorController.dispose();
+    _shotLocationController.dispose();
 
     super.dispose();
   }
@@ -465,6 +495,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       _notesController.text = data['notes'] as String? ?? '';
 
       _authorController.text = data['source_url'] as String? ?? '';
+      _shotLocationController.text = data['shot_location'] as String? ?? '';
 
       setState(() {
         _isFavorite = data['is_favorite'] == true;
@@ -572,6 +603,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
           'title': draft.title,
           'notes': draft.notes,
           'source_url': draft.author,
+          'shot_location': draft.shotLocation,
           'is_favorite': draft.isFavorite,
           'is_finished_artwork': draft.isFinishedArtwork,
         },
@@ -603,6 +635,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
             'title',
             'notes',
             'author',
+            'shot_location',
             'favorite',
             'finished_artwork',
           ],
@@ -846,6 +879,13 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
 
       setState(() {
         _associatedImages = images;
+        if (_featuredImageId != null) {
+          final front = images
+              .where((image) => image.id == _featuredImageId)
+              .firstOrNull;
+          _featuredImageId = front?.id;
+          _featuredImageUrl = front?.imageUrl;
+        }
         _isLoadingAssociatedImages = false;
       });
     } catch (error) {
@@ -972,6 +1012,10 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         await _openAssociatedImage(image);
         break;
 
+      case _AssociatedImageAction.feature:
+        await _setFrontImage(image);
+        break;
+
       case _AssociatedImageAction.compare:
         await _compareWithReference(image);
         break;
@@ -995,6 +1039,38 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       case _AssociatedImageAction.delete:
         await _confirmAndRemoveAssociatedImage(image);
         break;
+    }
+  }
+
+  Future<void> _setFrontImage(ImageAssetInfo? image) async {
+    if (editorOffline || widget.isAssociatedImage) return;
+    try {
+      await _imageAssetService.setFeaturedImage(
+        parentImageId: _currentImageId,
+        childImageId: image?.id,
+      );
+      if (!mounted) return;
+      setState(() {
+        _featuredImageId = image?.id;
+        _featuredImageUrl = image?.imageUrl;
+        _showOriginal = false;
+        _hasSavedMetadataChanges = true;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            image == null
+                ? 'Original restored to the category tile.'
+                : 'This image now appears on the category tile.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to change the front image: $error')),
+        );
+      }
     }
   }
 
@@ -1085,6 +1161,16 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
           displayUrl: image.displayUrl,
           isAssociatedImage: true,
           parentImageId: _currentImageId,
+          featuredAssociatedImageId: _featuredImageId,
+          onFrontImageChanged: (id, url) {
+            if (mounted) {
+              setState(() {
+                _featuredImageId = id;
+                _featuredImageUrl = url;
+                _hasSavedMetadataChanges = true;
+              });
+            }
+          },
           dateAdded: image.dateAdded,
           startImageEditing: true,
           navigationItems: navigationItems,
@@ -1201,6 +1287,12 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         _associatedImages.removeWhere(
           (existingImage) => existingImage.id == image.id,
         );
+        if (_featuredImageId == image.id) {
+          _featuredImageId = null;
+          _featuredImageUrl = null;
+          _showOriginal = false;
+          _hasSavedMetadataChanges = true;
+        }
 
         _deletingAssociatedImageIds.remove(image.id);
       });
@@ -1259,6 +1351,16 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
           displayUrl: image.displayUrl,
           isAssociatedImage: true,
           parentImageId: _currentImageId,
+          featuredAssociatedImageId: _featuredImageId,
+          onFrontImageChanged: (id, url) {
+            if (mounted) {
+              setState(() {
+                _featuredImageId = id;
+                _featuredImageUrl = url;
+                _hasSavedMetadataChanges = true;
+              });
+            }
+          },
           dateAdded: image.dateAdded,
           navigationItems: navigationItems,
           navigationIndex: navigationIndex,
@@ -1301,6 +1403,9 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     setState(() {
       _currentImageId = target.imageId;
       _currentImageUrl = target.imageUrl;
+      _featuredImageId = target.featuredImageId;
+      _featuredImageUrl = target.featuredImageUrl;
+      _showOriginal = false;
       _currentDateAdded = target.dateAdded;
       _currentParentImageId = target.parentImageId ?? widget.parentImageId;
       _currentNavigationIndex = targetIndex;
@@ -1320,6 +1425,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       _titleController.clear();
       _notesController.clear();
       _authorController.clear();
+      _shotLocationController.clear();
       _isFavorite = false;
       _isFinishedArtwork = false;
       _originalOwnerName = null;
@@ -1350,19 +1456,79 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     _metadataSaveDebounce?.cancel();
     if (!await _saveAllMetadata() || !mounted) return;
     final metadataBeforeEdit = _currentMetadata;
+    final editingFeatured = !widget.isAssociatedImage && _hasFrontImage;
     final result = await _openZoomableImage(
-      imageUrl: _currentImageUrl,
-      heroTag: 'main-image-$_currentImageId',
-      exportImageId: _currentImageId,
+      imageUrl: _frontImageUrl,
+      heroTag: 'main-image-$_frontImageId',
+      exportImageId: _frontImageId,
       editableParentImageId: widget.isAssociatedImage
           ? _currentParentImageId
+          : editingFeatured
+          ? _currentImageId
           : null,
       createSketchParentImageId: widget.isAssociatedImage
+          ? null
+          : editingFeatured
           ? null
           : _currentImageId,
       startEditing: startEditing,
     );
     if (result != null && mounted) {
+      if (!widget.isAssociatedImage) {
+        try {
+          final chosenId = await _imageAssetService.setFeaturedImage(
+            parentImageId: _currentImageId,
+            childImageId: result.imageId,
+            onlyIfUnset: !editingFeatured,
+          );
+          if (mounted && chosenId == result.imageId) {
+            await _loadAssociatedImages();
+            final savedUrl = _associatedImages
+                .where((image) => image.id == result.imageId)
+                .firstOrNull
+                ?.imageUrl;
+            setState(() {
+              _featuredImageId = result.imageId;
+              _featuredImageUrl =
+                  savedUrl ?? (editingFeatured ? result.imageUrl : null);
+              _showOriginal = false;
+              _hasSavedMetadataChanges = true;
+            });
+          }
+        } catch (error) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Edit saved, but the front image could not be updated: $error',
+                ),
+              ),
+            );
+          }
+        }
+        if (mounted) await _loadAssociatedImages();
+        return;
+      }
+      if (_currentImageId == widget.featuredAssociatedImageId &&
+          _currentParentImageId != null) {
+        try {
+          await _imageAssetService.setFeaturedImage(
+            parentImageId: _currentParentImageId!,
+            childImageId: result.imageId,
+          );
+          widget.onFrontImageChanged?.call(result.imageId, result.imageUrl);
+        } catch (error) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Edit saved, but the front image could not be updated: $error',
+                ),
+              ),
+            );
+          }
+        }
+      }
       if (!result.replacesCurrentImage) {
         await _loadAssociatedImages();
         return;
@@ -1391,6 +1557,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       _titleController.text = metadataBeforeEdit.title ?? '';
       _notesController.text = metadataBeforeEdit.notes ?? '';
       _authorController.text = metadataBeforeEdit.author ?? '';
+      _shotLocationController.text = metadataBeforeEdit.shotLocation ?? '';
       setState(() {
         _isFavorite = metadataBeforeEdit.isFavorite;
         _isFinishedArtwork = metadataBeforeEdit.isFinishedArtwork;
@@ -1436,9 +1603,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       await UserActivityLogger.instance.trace<void>(
         operation: 'image_share',
         targetType: 'image',
-        targetId: _currentImageId,
-        action: () =>
-            _shareExportImage(context, _currentImageUrl, _currentImageId),
+        targetId: _frontImageId,
+        action: () => _shareExportImage(context, _frontImageUrl, _frontImageId),
       );
     } catch (error) {
       reportEditorFailure(error);
@@ -1460,10 +1626,9 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       final result = await UserActivityLogger.instance.trace(
         operation: 'image_save',
         targetType: 'image',
-        targetId: _currentImageId,
+        targetId: _frontImageId,
         outcome: (result) => result.wasCancelled ? 'cancelled' : 'succeeded',
-        action: () =>
-            _saveExportImage(context, _currentImageUrl, _currentImageId),
+        action: () => _saveExportImage(context, _frontImageUrl, _frontImageId),
       );
 
       if (mounted && !result.wasCancelled) {
@@ -1491,16 +1656,16 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       await UserActivityLogger.instance.trace<void>(
         operation: 'image_print',
         targetType: 'image',
-        targetId: _currentImageId,
+        targetId: _frontImageId,
         action: () async {
-          final image = await _downloadExportImage(_currentImageUrl);
+          final image = await _downloadExportImage(_frontImageUrl);
 
           if (!mounted) throw StateError('The screen closed before printing.');
 
           await ImageDelivery.printImage(
             context,
             image.bytes,
-            documentName: 'Painter Reference $_currentImageId',
+            documentName: 'Painter Reference $_frontImageId',
           );
         },
       );
@@ -1521,7 +1686,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
 
     setState(() => _isSendingToFriend = true);
     try {
-      final image = await _downloadExportImage(_currentImageUrl);
+      final image = await _downloadExportImage(_frontImageUrl);
       if (!mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
@@ -1938,7 +2103,7 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   }
 
   Widget _buildImageViewer(BuildContext context, double imageHeight) {
-    final heroTag = 'main-image-$_currentImageId';
+    final heroTag = 'main-image-$_frontImageId';
 
     return Material(
       color: Colors.transparent,
@@ -1963,8 +2128,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
               Hero(
                 tag: heroTag,
                 child: CachedImage(
-                  url: _currentImageUrl,
-                  cacheKey: AppImageCache.fullKey(_currentImageId),
+                  url: _frontImageUrl,
+                  cacheKey: AppImageCache.fullKey(_frontImageId),
                   width: double.infinity,
                   height: imageHeight,
                   fit: BoxFit.contain,
@@ -2004,6 +2169,27 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                 right: 12,
                 child: _buildImageActionsMenu(context),
               ),
+              if (!widget.isAssociatedImage && _featuredImageId != null)
+                Positioned(
+                  top: 12,
+                  left: 12,
+                  child: Material(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(20),
+                    child: TextButton.icon(
+                      onPressed: () =>
+                          setState(() => _showOriginal = !_showOriginal),
+                      icon: Icon(
+                        _showOriginal ? Icons.auto_fix_high : Icons.history,
+                        color: Colors.white,
+                      ),
+                      label: Text(
+                        _showOriginal ? 'Show edited' : 'Show original',
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ),
+                  ),
+                ),
               ..._buildNavigationControls(context),
             ],
           ),
@@ -2314,6 +2500,75 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     );
   }
 
+  Future<void> _openShotLocationOnMap() async {
+    final metadata = _photoMetadata;
+    final place = _shotLocationController.text.trim();
+    final query = metadata?.hasLocation == true
+        ? '${metadata!.latitude!.toStringAsFixed(6)},${metadata.longitude!.toStringAsFixed(6)}'
+        : place;
+    if (query.isEmpty) return;
+    final uri = Uri.https('www.google.com', '/maps/search/', {
+      'api': '1',
+      'query': query,
+    });
+    try {
+      if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+        throw StateError('No maps app or browser is available.');
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unable to open the location: $error')),
+        );
+      }
+    }
+  }
+
+  Widget _buildShotLocationSection() {
+    final metadata = _photoMetadata;
+    return Column(
+      children: [
+        TextField(
+          controller: _shotLocationController,
+          maxLength: 200,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(
+            labelText: 'Where was this photo taken?',
+            hintText: 'City, park, studio, or another place',
+            border: OutlineInputBorder(),
+            prefixIcon: Icon(Icons.place_outlined),
+          ),
+        ),
+        if (metadata?.hasLocation == true)
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.my_location_outlined),
+            title: const Text('Photo GPS location'),
+            subtitle: Text(
+              '${metadata!.latitude!.toStringAsFixed(5)}, '
+              '${metadata.longitude!.toStringAsFixed(5)}',
+            ),
+            trailing: const Icon(Icons.open_in_new),
+            onTap: _openShotLocationOnMap,
+          )
+        else
+          ValueListenableBuilder<TextEditingValue>(
+            valueListenable: _shotLocationController,
+            builder: (context, value, _) => value.text.trim().isEmpty
+                ? const SizedBox.shrink()
+                : Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: _openShotLocationOnMap,
+                      icon: const Icon(Icons.map_outlined),
+                      label: const Text('Find on map'),
+                    ),
+                  ),
+          ),
+      ],
+    );
+  }
+
   Widget _buildMetadataSection(BuildContext context) {
     final dateAdded = _currentDateAdded;
 
@@ -2410,6 +2665,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
             ),
             const SizedBox(height: 16),
           ],
+          _buildShotLocationSection(),
+          const SizedBox(height: 16),
           TextField(
             controller: _notesController,
             minLines: 4,
@@ -2800,6 +3057,11 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                 '${_associatedImages.length}',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
+            if (_featuredImageId != null)
+              TextButton(
+                onPressed: editorOffline ? null : () => _setFrontImage(null),
+                child: const Text('Use original'),
+              ),
           ],
         ),
         const SizedBox(height: 8),
@@ -2992,6 +3254,18 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                           title: Text('Open'),
                         ),
                       ),
+                      PopupMenuItem<_AssociatedImageAction>(
+                        value: _AssociatedImageAction.feature,
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(
+                            image.id == _featuredImageId
+                                ? Icons.star
+                                : Icons.star_outline,
+                          ),
+                          title: const Text('Show on category tile'),
+                        ),
+                      ),
                       const PopupMenuItem<_AssociatedImageAction>(
                         value: _AssociatedImageAction.compare,
                         child: ListTile(
@@ -3059,6 +3333,12 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
                     : () => _confirmAndRemoveAssociatedImage(image),
               ),
             ),
+            if (image.id == _featuredImageId)
+              const Positioned(
+                left: 8,
+                bottom: 8,
+                child: Chip(label: Text('Front image')),
+              ),
             if (isBusy)
               const Positioned.fill(
                 child: ColoredBox(

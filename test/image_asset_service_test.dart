@@ -88,6 +88,9 @@ void main() {
           'display_url': 'https://example.test/display',
           'parent_image_id': 'parent-id',
           'parent_image_url': 'https://example.test/parent',
+          'featured_image_id': 'edited-id',
+          'featured_image_url': 'https://example.test/edited',
+          'featured_thumbnail_url': 'https://example.test/edited-thumb',
         },
       ], responseName: 'test-list');
 
@@ -97,6 +100,9 @@ void main() {
       expect(result.single.thumbnailUrl, contains('/thumb'));
       expect(result.single.displayUrl, contains('/display'));
       expect(result.single.parentImageId, 'parent-id');
+      expect(result.single.featuredImageId, 'edited-id');
+      expect(result.single.featuredImageUrl, contains('/edited'));
+      expect(result.single.featuredThumbnailUrl, contains('/edited-thumb'));
     });
 
     test('rejects malformed rows instead of leaking partial data', () {

@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Version 1.1 — effective 23 September 2026**
+**Version 1.2 — effective 6 October 2026**
 
 Painter Reference is a reference-image library for artists. This policy explains
 what the service stores, why, who else is involved, and what you can do about it.
@@ -32,11 +32,14 @@ organise them into.
 
 **Photo details taken from your images** — when a photograph carries camera
 information, the app reads and stores the camera make and model, the lens, the
-ISO setting, the capture date, and the image dimensions.
-**The app does not read or store location data.** If your camera recorded where
-a photograph was taken, that information is not extracted and is not stored in
-our database.
-*Why: so the Technical panel can show you how a reference was shot.*
+ISO setting, the capture date, the image dimensions, and any GPS coordinates
+embedded in the photo. You can also enter a place name for an image. When you
+take a photo with the app's Camera button, the app asks for permission to use
+your phone's location and, if you allow it and a recent fix is available,
+stores the coordinates with that photo in your private library. You can deny
+location access and still take photos. The app does not track your location in
+the background. It does not add phone coordinates to the JPEG file itself.
+*Why: to show you how and where a reference was shot.*
 
 **Messages** — if you use the messaging feature: your conversations, the
 messages in them, any images you send, and who you have blocked. Also whether
@@ -66,7 +69,6 @@ inspect.*
 ## What is never stored
 
 - **Your password**, in any readable form.
-- **Photograph location data.** Not extracted, not stored.
 - **Payment details.** The service does not currently take payment.
 - **Advertising or tracking identifiers.** There is no advertising, no
   third-party analytics, and no cross-site tracking of any kind.

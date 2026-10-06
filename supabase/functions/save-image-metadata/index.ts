@@ -103,6 +103,11 @@ Deno.serve(async (request) => {
   const title = nullableText(body.title);
   const notes = nullableText(body.notes);
   const sourceUrl = nullableText(body.source_url);
+  const hasShotLocation = Object.prototype.hasOwnProperty.call(body, 'shot_location');
+  const shotLocation = nullableText(body.shot_location);
+  if (shotLocation && shotLocation.length > 200) {
+    return jsonResponse({ error: 'Location is too long' }, 400);
+  }
   const isFavorite = body.is_favorite === true;
   const isFinishedArtwork = body.is_finished_artwork === true;
 
@@ -140,6 +145,7 @@ Deno.serve(async (request) => {
       title: string | null;
       notes: string | null;
       source_url: string | null;
+      shot_location: string | null;
       is_favorite: boolean;
       is_finished_artwork: boolean;
     }>`
@@ -148,6 +154,10 @@ Deno.serve(async (request) => {
         title = ${title},
         notes = ${notes},
         source_url = ${sourceUrl},
+        shot_location = case
+          when ${hasShotLocation} then ${shotLocation}
+          else shot_location
+        end,
         is_favorite = ${isFavorite},
         is_finished_artwork = ${isFinishedArtwork}
       where id = ${imageId}::uuid
@@ -157,6 +167,7 @@ Deno.serve(async (request) => {
         title,
         notes,
         source_url,
+        shot_location,
         is_favorite,
         is_finished_artwork
     `;
@@ -178,6 +189,7 @@ Deno.serve(async (request) => {
       title: row.title,
       notes: row.notes,
       source_url: row.source_url,
+      shot_location: row.shot_location,
       is_favorite: row.is_favorite,
       is_finished_artwork: row.is_finished_artwork,
     });

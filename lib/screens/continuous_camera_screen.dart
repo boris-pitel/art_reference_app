@@ -2,7 +2,10 @@ import '../services/pending_original_store.dart';
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/reference_category.dart';
 import '../services/local_user_session.dart';
@@ -33,6 +36,37 @@ class _ContinuousCameraScreenState extends State<ContinuousCameraScreen>
   int _saved = 0;
   double _minZoom = 1, _maxZoom = 1, _zoom = 1, _pinchStart = 1;
   CameraController? _zoomWriter;
+  Future<Position?>? _locationRequest;
+  Position? _unsavedPosition;
+  bool _permissionPrompted = false;
+
+  Future<Position?> _requestLocation() async {
+    if (defaultTargetPlatform != TargetPlatform.android &&
+        defaultTargetPlatform != TargetPlatform.iOS) {
+      return null;
+    }
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) return null;
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied && !_permissionPrompted) {
+        _permissionPrompted = true;
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission != LocationPermission.whileInUse &&
+          permission != LocationPermission.always) {
+        return null;
+      }
+      return await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.medium,
+          timeLimit: Duration(seconds: 6),
+        ),
+      );
+    } catch (error) {
+      debugPrint('Camera location unavailable: $error');
+      return null;
+    }
+  }
 
   double get _zoomSliderValue {
     if (_maxZoom <= _minZoom) return 0;
@@ -119,6 +153,7 @@ class _ContinuousCameraScreenState extends State<ContinuousCameraScreen>
         _zoom = 1.0.clamp(minZoom, maxZoom).toDouble();
         _error = null;
       });
+      _locationRequest ??= _requestLocation();
     } catch (error) {
       await controller?.dispose();
       if (mounted) setState(() => _error = 'Unable to open camera: $error');
@@ -138,6 +173,8 @@ class _ContinuousCameraScreenState extends State<ContinuousCameraScreen>
       _camera = null;
       if (camera != null) unawaited(camera.dispose());
     } else {
+      _permissionPrompted = false;
+      _locationRequest = _requestLocation();
       unawaited(_initialize());
     }
   }
@@ -154,18 +191,39 @@ class _ContinuousCameraScreenState extends State<ContinuousCameraScreen>
           LocalUserSession.effectiveUserId != _userId) {
         throw StateError('Sign in before taking photos.');
       }
+      final newShot = _unsaved == null;
+      final locationRequest = newShot
+          ? (_locationRequest ??= _requestLocation())
+          : null;
       _unsaved ??= await _camera!.takePicture();
       final shot = _unsaved!;
+      final bytes = await shot.readAsBytes();
+      if (newShot) {
+        final position = await locationRequest!.timeout(
+          const Duration(seconds: 2),
+          onTimeout: () => null,
+        );
+        _unsavedPosition =
+            position != null &&
+                DateTime.now().difference(position.timestamp).abs() <
+                    const Duration(minutes: 2)
+            ? position
+            : null;
+      }
       await OfflineUploadQueue.instance.enqueue(
         userId: _userId,
         userEmail: _email,
         category: widget.category,
-        imageBytes: await shot.readAsBytes(),
+        imageBytes: bytes,
         originalFilename: shot.name,
         parentImageId: widget.parentImageId,
+        captureLatitude: _unsavedPosition?.latitude,
+        captureLongitude: _unsavedPosition?.longitude,
         deferPreview: true,
       );
       _unsaved = null;
+      _unsavedPosition = null;
+      _locationRequest = _requestLocation();
       unawaited(releaseCapturedTemporaryFile(shot.path));
       if (mounted) setState(() => _saved++);
     } catch (error) {
@@ -228,6 +286,7 @@ class _ContinuousCameraScreenState extends State<ContinuousCameraScreen>
       if (discard == true && mounted) {
         setState(() {
           _unsaved = null;
+          _unsavedPosition = null;
           _error = null;
         });
       }
@@ -247,27 +306,55 @@ class _ContinuousCameraScreenState extends State<ContinuousCameraScreen>
       body: Column(
         children: [
           Expanded(
-            child: Center(
-              child: _camera?.value.isInitialized == true
-                  ? GestureDetector(
-                      onScaleStart: (_) => _pinchStart = _zoom,
-                      onScaleUpdate: (details) {
-                        if (details.pointerCount >= 2) {
-                          // Camera zoom ranges can be very wide. Damp the raw
-                          // gesture so a small pinch makes a precise change.
-                          _setZoom(
-                            (_pinchStart *
-                                    math.pow(details.scale, _pinchSensitivity))
-                                .toDouble(),
-                          );
-                        }
-                      },
-                      child: CameraPreview(_camera!),
-                    )
-                  : _error == null
-                  ? const CircularProgressIndicator()
-                  : const Icon(Icons.no_photography),
-            ),
+            child: _camera?.value.isInitialized == true
+                ? ValueListenableBuilder<CameraValue>(
+                    valueListenable: _camera!,
+                    builder: (context, value, _) {
+                      final orientation = value.isCaptureOrientationLocked
+                          ? value.lockedCaptureOrientation
+                          : value.deviceOrientation;
+                      final landscape =
+                          orientation == DeviceOrientation.landscapeLeft ||
+                          orientation == DeviceOrientation.landscapeRight;
+                      final aspectRatio = landscape
+                          ? value.aspectRatio
+                          : 1 / value.aspectRatio;
+                      return ClipRect(
+                        child: SizedBox.expand(
+                          child: GestureDetector(
+                            onScaleStart: (_) => _pinchStart = _zoom,
+                            onScaleUpdate: (details) {
+                              if (details.pointerCount >= 2) {
+                                // Camera zoom ranges can be very wide. Damp the
+                                // gesture so a small pinch makes a precise change.
+                                _setZoom(
+                                  (_pinchStart *
+                                          math.pow(
+                                            details.scale,
+                                            _pinchSensitivity,
+                                          ))
+                                      .toDouble(),
+                                );
+                              }
+                            },
+                            child: FittedBox(
+                              fit: BoxFit.cover,
+                              child: SizedBox(
+                                width: aspectRatio * 1000,
+                                height: 1000,
+                                child: CameraPreview(_camera!),
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  )
+                : Center(
+                    child: _error == null
+                        ? const CircularProgressIndicator()
+                        : const Icon(Icons.no_photography),
+                  ),
           ),
           if (_camera != null && _maxZoom > _minZoom)
             Row(
@@ -296,6 +383,11 @@ class _ContinuousCameraScreenState extends State<ContinuousCameraScreen>
                 children: [
                   const Text(
                     'Photos are saved on this device. Uploads resume when you finish.',
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Allow location to save where each photo was taken. Photos still work without it.',
+                    textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 12),
                   FilledButton.icon(

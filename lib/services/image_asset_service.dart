@@ -28,6 +28,9 @@ class ImageAssetInfo {
     this.displayUrl,
     this.parentImageId,
     this.parentImageUrl,
+    this.featuredImageId,
+    this.featuredImageUrl,
+    this.featuredThumbnailUrl,
   });
 
   final String id;
@@ -42,6 +45,9 @@ class ImageAssetInfo {
   final String? displayUrl;
   final String? parentImageId;
   final String? parentImageUrl;
+  final String? featuredImageId;
+  final String? featuredImageUrl;
+  final String? featuredThumbnailUrl;
 }
 
 /// How many images sit in each category.
@@ -234,6 +240,8 @@ class ImageAssetService {
     ReferenceCategory category, {
     String? originalOwnerName,
     String? originalFilename,
+    double? captureLatitude,
+    double? captureLongitude,
   }) async {
     final stopwatch = Stopwatch()..start();
     try {
@@ -242,6 +250,8 @@ class ImageAssetService {
         category: category,
         originalOwnerName: originalOwnerName,
         originalFilename: originalFilename,
+        captureLatitude: captureLatitude,
+        captureLongitude: captureLongitude,
       );
       UserActivityLogger.instance.record(
         operation: 'image_upload',
@@ -290,8 +300,10 @@ class ImageAssetService {
 
   Future<String> uploadAssociatedImage(
     Uint8List imageBytes,
-    String parentImageId,
-  ) async {
+    String parentImageId, {
+    double? captureLatitude,
+    double? captureLongitude,
+  }) async {
     final normalizedParentImageId = parentImageId.trim();
 
     if (normalizedParentImageId.isEmpty) {
@@ -307,6 +319,8 @@ class ImageAssetService {
       final id = await _uploadImage(
         imageBytes: imageBytes,
         parentImageId: normalizedParentImageId,
+        captureLatitude: captureLatitude,
+        captureLongitude: captureLongitude,
       );
       UserActivityLogger.instance.record(
         operation: 'associated_image_upload',
@@ -347,6 +361,8 @@ class ImageAssetService {
     String? parentImageId,
     String? originalOwnerName,
     String? originalFilename,
+    double? captureLatitude,
+    double? captureLongitude,
   }) async {
     if ((category == null) == (parentImageId == null)) {
       throw ArgumentError(
@@ -543,6 +559,11 @@ class ImageAssetService {
       );
 
       final photoMetadata = await photoMetadataFuture;
+      final metadataWithLocation = PhotoMetadata.useCapturedLocation(
+        photoMetadata.metadata,
+        captureLatitude,
+        captureLongitude,
+      );
       profiler.checkpoint(
         'Photo metadata extraction result: '
         'captureTimestamp=${photoMetadata.captureTimestamp != null}, '
@@ -566,7 +587,7 @@ class ImageAssetService {
           'original_filename': ?originalFilename,
           'capture_timestamp': ?photoMetadata.captureTimestamp
               ?.toIso8601String(),
-          'photo_metadata': ?photoMetadata.metadata?.toJson(),
+          'photo_metadata': ?metadataWithLocation?.toJson(),
           'width': ?imageWidth,
           'height': ?imageHeight,
         },
@@ -810,6 +831,36 @@ class ImageAssetService {
       targetId: normalizedChildImageId,
       parentImageId: normalizedParentImageId,
     );
+  }
+
+  /// Chooses the image shown on a reference's category tile. A null child
+  /// restores the untouched original; [onlyIfUnset] preserves an existing
+  /// manual choice when the first edit finishes on another device.
+  Future<String?> setFeaturedImage({
+    required String parentImageId,
+    String? childImageId,
+    bool onlyIfUnset = false,
+  }) async {
+    final response = await _supabase.functions.invoke(
+      'set-featured-image',
+      method: HttpMethod.post,
+      headers: {'x-user-id': _userId},
+      body: {
+        'parentImageId': parentImageId,
+        'childImageId': childImageId,
+        'onlyIfUnset': onlyIfUnset,
+      },
+    );
+    final data = response.data;
+    if (data is! Map || !data.containsKey('featured_image_id')) {
+      throw StateError(
+        data is Map
+            ? data['error']?.toString() ??
+                  'Unable to choose the featured image.'
+            : 'Unexpected response while choosing the featured image.',
+      );
+    }
+    return data['featured_image_id'] as String?;
   }
 
   /// How many images each category holds, in a single request.
@@ -1070,6 +1121,9 @@ class ImageAssetService {
         displayUrl: row['display_url'] as String?,
         parentImageId: row['parent_image_id'] as String?,
         parentImageUrl: row['parent_image_url'] as String?,
+        featuredImageId: row['featured_image_id'] as String?,
+        featuredImageUrl: row['featured_image_url'] as String?,
+        featuredThumbnailUrl: row['featured_thumbnail_url'] as String?,
       );
     }).toList();
   }

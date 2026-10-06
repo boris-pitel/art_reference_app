@@ -41,6 +41,8 @@ void main() {
         category: inbox,
         imageBytes: bytes,
         originalFilename: 'original.heic',
+        captureLatitude: 40.7128,
+        captureLongitude: -74.006,
       );
       await queue.enqueue(
         userId: 'b',
@@ -59,6 +61,8 @@ void main() {
       expect(restored.single.id, first.id);
       expect(restored.single.imageBytes, orderedEquals(bytes));
       expect(restored.single.originalFilename, 'original.heic');
+      expect(restored.single.captureLatitude, 40.7128);
+      expect(restored.single.captureLongitude, -74.006);
       expect(restored.single.userEmail, 'a@example.com');
       expect(await queue.listForUser('a', categoryCode: 'other'), isEmpty);
       await queue.clearForUser('a');

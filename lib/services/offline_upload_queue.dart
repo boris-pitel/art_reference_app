@@ -26,6 +26,8 @@ class PendingImageUpload {
     this.originalFilename,
     this.externalOriginal = false,
     this.parentImageId,
+    this.captureLatitude,
+    this.captureLongitude,
     this.lastError,
   });
 
@@ -40,6 +42,8 @@ class PendingImageUpload {
   final DateTime createdAt;
   final bool externalOriginal;
   final String? parentImageId;
+  final double? captureLatitude;
+  final double? captureLongitude;
   final String? originalFilename;
   final String? lastError;
 
@@ -64,12 +68,16 @@ class PendingImageUpload {
     originalFilename: originalFilename,
     externalOriginal: externalOriginal,
     parentImageId: parentImageId,
+    captureLatitude: captureLatitude,
+    captureLongitude: captureLongitude,
     lastError: lastError,
   );
 
   Map<String, Object?> toRecord() => {
     'external_original': externalOriginal,
     'parent_image_id': parentImageId,
+    'capture_latitude': captureLatitude,
+    'capture_longitude': captureLongitude,
     'id': id,
     'user_id': userId,
     'user_email': userEmail,
@@ -98,6 +106,8 @@ class PendingImageUpload {
     return PendingImageUpload(
       externalOriginal: record['external_original'] == true,
       parentImageId: record['parent_image_id'] as String?,
+      captureLatitude: (record['capture_latitude'] as num?)?.toDouble(),
+      captureLongitude: (record['capture_longitude'] as num?)?.toDouble(),
       id: record['id'] as String,
       userId: record['user_id'] as String,
       userEmail: record['user_email'] as String,
@@ -221,6 +231,8 @@ class OfflineUploadQueue extends ChangeNotifier {
     required Uint8List imageBytes,
     String? originalFilename,
     String? parentImageId,
+    double? captureLatitude,
+    double? captureLongitude,
     bool deferPreview = false,
   }) async {
     if (imageBytes.isEmpty) {
@@ -256,6 +268,8 @@ class OfflineUploadQueue extends ChangeNotifier {
       id: id,
       externalOriginal: external,
       parentImageId: parentImageId,
+      captureLatitude: captureLatitude,
+      captureLongitude: captureLongitude,
       userId: userId,
       userEmail: userEmail.trim().toLowerCase(),
       categoryCode: category.databaseCode,
@@ -397,14 +411,19 @@ class OfflineUploadQueue extends ChangeNotifier {
       try {
         final bytes = await originalBytes(item);
         if (item.parentImageId != null) {
-          await ImageAssetService(
-            supabase,
-          ).uploadAssociatedImage(bytes, item.parentImageId!);
+          await ImageAssetService(supabase).uploadAssociatedImage(
+            bytes,
+            item.parentImageId!,
+            captureLatitude: item.captureLatitude,
+            captureLongitude: item.captureLongitude,
+          );
         } else {
           await ImageAssetService(supabase).uploadImage(
             bytes,
             item.category,
             originalFilename: item.originalFilename,
+            captureLatitude: item.captureLatitude,
+            captureLongitude: item.captureLongitude,
           );
         }
         await _delete(item.id);

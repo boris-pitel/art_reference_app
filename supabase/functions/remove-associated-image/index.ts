@@ -294,6 +294,13 @@ Deno.serve(async (request) => {
     }
 
     await connection.queryArray`
+      update public.image_assets
+      set featured_child_image_id = null
+      where id = ${parentImageId}
+        and featured_child_image_id = ${childImageId}
+    `;
+
+    await connection.queryArray`
       delete from public.image_relationships
       where parent_image_id = ${parentImageId}
         and child_image_id = ${childImageId}

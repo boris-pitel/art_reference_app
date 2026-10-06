@@ -38,6 +38,9 @@ class _LoadedImage {
     this.displayUrl,
     this.parentImageId,
     this.parentImageUrl,
+    this.featuredImageId,
+    this.featuredImageUrl,
+    this.featuredThumbnailUrl,
   });
 
   final String id;
@@ -46,6 +49,9 @@ class _LoadedImage {
   final String? displayUrl;
   final String? parentImageId;
   final String? parentImageUrl;
+  final String? featuredImageId;
+  final String? featuredImageUrl;
+  final String? featuredThumbnailUrl;
 }
 
 class _DownloadedImage {
@@ -436,6 +442,9 @@ class _CategoryScreenState extends State<CategoryScreen>
             displayUrl: imageInfo.displayUrl,
             parentImageId: imageInfo.parentImageId,
             parentImageUrl: imageInfo.parentImageUrl,
+            featuredImageId: imageInfo.featuredImageId,
+            featuredImageUrl: imageInfo.featuredImageUrl,
+            featuredThumbnailUrl: imageInfo.featuredThumbnailUrl,
           ),
         )
         .toList();
@@ -770,6 +779,12 @@ class _CategoryScreenState extends State<CategoryScreen>
             imageId: detailsImageId,
             imageUrl: detailsImageUrl,
             displayUrl: detailsDisplayUrl,
+            featuredImageId: widget.category.isMyArt
+                ? null
+                : image.featuredImageId,
+            featuredImageUrl: widget.category.isMyArt
+                ? null
+                : image.featuredImageUrl,
             navigationItems: _images
                 .map(
                   (item) => ImageDetailsNavigationItem(
@@ -782,6 +797,12 @@ class _CategoryScreenState extends State<CategoryScreen>
                     displayUrl: widget.category.isMyArt
                         ? null
                         : item.displayUrl,
+                    featuredImageId: widget.category.isMyArt
+                        ? null
+                        : item.featuredImageId,
+                    featuredImageUrl: widget.category.isMyArt
+                        ? null
+                        : item.featuredImageUrl,
                   ),
                 )
                 .toList(growable: false),
@@ -811,12 +832,18 @@ class _CategoryScreenState extends State<CategoryScreen>
           initialIndex: images.indexOf(image),
           imageBuilder: (context, index) {
             final item = images[index];
-            final id = widget.category.isMyArt
+            final originalId = widget.category.isMyArt
                 ? item.parentImageId ?? item.id
                 : item.id;
-            final url = widget.category.isMyArt
+            final originalUrl = widget.category.isMyArt
                 ? item.parentImageUrl ?? item.imageUrl
                 : item.displayUrl ?? item.imageUrl;
+            final hasFront =
+                !widget.category.isMyArt &&
+                item.featuredImageId != null &&
+                item.featuredImageUrl != null;
+            final id = hasFront ? item.featuredImageId! : originalId;
+            final url = hasFront ? item.featuredImageUrl! : originalUrl;
             return CachedImage(
               key: ValueKey(id),
               url: url,
@@ -1853,6 +1880,17 @@ class _CategoryScreenState extends State<CategoryScreen>
                 fit: StackFit.expand,
                 children: [
                   _buildThumbnail(image),
+                  if (image.featuredImageId != null &&
+                      image.featuredImageUrl != null)
+                    const Positioned(
+                      left: 8,
+                      bottom: 8,
+                      child: Chip(
+                        avatar: Icon(Icons.star, size: 16),
+                        label: Text('Front image'),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
                   Positioned(
                     top: 4,
                     right: 4,
@@ -1943,7 +1981,11 @@ class _CategoryScreenState extends State<CategoryScreen>
   }
 
   Widget _buildThumbnail(_LoadedImage image) {
-    final thumbnailUrl = image.thumbnailUrl;
+    final featured =
+        image.featuredImageId != null && image.featuredImageUrl != null;
+    final thumbnailUrl = featured
+        ? image.featuredThumbnailUrl ?? image.featuredImageUrl
+        : image.thumbnailUrl;
 
     if (thumbnailUrl == null || thumbnailUrl.isEmpty) {
       return _buildThumbnailPlaceholder();
@@ -1951,7 +1993,9 @@ class _CategoryScreenState extends State<CategoryScreen>
 
     return CachedImage(
       url: thumbnailUrl,
-      cacheKey: AppImageCache.thumbnailKey(image.id),
+      cacheKey: AppImageCache.thumbnailKey(
+        featured ? image.featuredImageId! : image.id,
+      ),
       fit: BoxFit.cover,
       placeholder: const Center(
         child: CircularProgressIndicator(strokeWidth: 2),

@@ -76,6 +76,7 @@ Deno.serve(async (request) => {
       title: string | null;
       notes: string | null;
       source_url: string | null;
+      shot_location: string | null;
       original_owner_name: string | null;
       original_filename: string | null;
       capture_timestamp: Date | null;
@@ -104,6 +105,7 @@ Deno.serve(async (request) => {
         title,
         notes,
         source_url,
+        shot_location,
         original_owner_name,
         original_filename,
         capture_timestamp,
@@ -148,6 +150,7 @@ Deno.serve(async (request) => {
       title: row.title,
       notes: row.notes,
       source_url: row.source_url,
+      shot_location: row.shot_location,
       original_owner_name: row.original_owner_name,
       original_filename: row.original_filename,
       capture_timestamp: row.capture_timestamp?.toISOString() ?? null,
