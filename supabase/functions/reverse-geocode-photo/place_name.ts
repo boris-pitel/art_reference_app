@@ -1,13 +1,34 @@
 export function placeName(result: Record<string, unknown>): string | null {
   const text = (value: unknown): string =>
     typeof value === 'string' ? value.trim() : '';
-  // Preserve the provider's local address ordering when a street is known.
+  const countryName = text(result.country);
+  const countryCode = text(result.country_code).toUpperCase();
+  const country = countryCode === 'US' || /^(united states( of america)?|usa)$/i.test(countryName)
+    ? 'USA'
+    : countryCode === 'GB' || /^(united kingdom|united kingdom of great britain and northern ireland)$/i.test(countryName)
+    ? 'UK'
+    : countryCode === 'AE' || /^united arab emirates$/i.test(countryName)
+    ? 'UAE'
+    : countryName || countryCode;
+  const stateName = text(result.state);
+  // Use the provider's regional abbreviation; retain the name if unavailable.
+  const rawStateCode = text(result.state_code);
+  const state = (countryCode && rawStateCode.toUpperCase().startsWith(`${countryCode}-`)
+    ? rawStateCode.slice(countryCode.length + 1)
+    : rawStateCode) || stateName;
+  // Keep the provider's local street/house-number order, but compose the
+  // locality ourselves so a full formatted address cannot bypass abbreviations.
   const street = text(result.street);
   const formatted = text(result.formatted);
-  if (street && formatted) return formatted.slice(0, 200);
+  const addressLine = text(result.address_line1);
+  const formattedStreet = formatted.split(',')[0].trim();
   const address = street
-    ? [text(result.housenumber), street].filter(Boolean).join(' ')
-    : text(result.address_line1);
+    ? addressLine.toLowerCase().includes(street.toLowerCase())
+      ? addressLine
+      : formattedStreet.toLowerCase().includes(street.toLowerCase())
+      ? formattedStreet
+      : [text(result.housenumber), street].filter(Boolean).join(' ')
+    : addressLine;
   const locality = [
     result.city,
     result.town,
@@ -15,7 +36,7 @@ export function placeName(result: Record<string, unknown>): string | null {
     result.municipality,
     result.county,
   ].find((value) => typeof value === 'string' && value.trim() !== '');
-  const parts = [address, locality, result.state, result.country]
+  const parts = [address, locality, state, result.postcode, country]
     .filter((value): value is string => typeof value === 'string')
     .map((value) => value.trim())
     .filter((value) => value !== '');
