@@ -68,6 +68,8 @@
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Painter Reference uses the camera to add reference and associated images.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Painter Reference uses your location when you take a photo with its Camera button to save where the photo was taken and help you find that place later. Photos still work without location access. The app does not track your location in the background.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Painter Reference can save where you took a photo with its Camera button so you can find that place later. Photos still work without location access.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
