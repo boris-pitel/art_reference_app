@@ -11,6 +11,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:url_launcher/link.dart';
 
 import '../models/reference_category.dart';
 import '../services/category_service.dart';
@@ -298,6 +299,9 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
   String? _originalFilename;
   DateTime? _captureTimestamp;
   PhotoMetadata? _photoMetadata;
+  String? _lookingUpLocationForImageId;
+  String? _shotLocationLookupError;
+  final Set<String> _attemptedLocationLookups = <String>{};
   String? _storagePath;
   String? _thumbnailStoragePath;
   String? _imageHash;
@@ -538,6 +542,10 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
 
         _isLoadingMetadata = false;
       });
+      if (_photoMetadata?.hasLocation == true &&
+          _shotLocationController.text.trim().isEmpty) {
+        unawaited(_lookupShotLocation());
+      }
     } catch (error) {
       reportEditorFailure(error);
       if (!mounted) {
@@ -1432,6 +1440,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
       _originalFilename = null;
       _captureTimestamp = null;
       _photoMetadata = null;
+      _lookingUpLocationForImageId = null;
+      _shotLocationLookupError = null;
       _storagePath = null;
       _thumbnailStoragePath = null;
       _imageHash = null;
@@ -1542,6 +1552,8 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
         _metadataError = null;
         _lastSavedMetadata = null;
         _isLoadingMetadata = true;
+        _lookingUpLocationForImageId = null;
+        _shotLocationLookupError = null;
         if (replacementIndex >= 0 &&
             replacementIndex < _navigationItems.length) {
           _navigationItems[replacementIndex] = ImageDetailsNavigationItem(
@@ -2524,6 +2536,55 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
     }
   }
 
+  Future<void> _lookupShotLocation({bool retry = false}) async {
+    final imageId = _currentImageId;
+    if (editorOffline ||
+        _isLoadingMetadata ||
+        _photoMetadata?.hasLocation != true ||
+        _shotLocationController.text.trim().isNotEmpty ||
+        _lookingUpLocationForImageId == imageId ||
+        (!retry && _attemptedLocationLookups.contains(imageId))) {
+      return;
+    }
+    _attemptedLocationLookups.add(imageId);
+    setState(() {
+      _lookingUpLocationForImageId = imageId;
+      _shotLocationLookupError = null;
+    });
+
+    try {
+      final response = await _supabase.functions.invoke(
+        'reverse-geocode-photo',
+        body: {'image_id': imageId},
+      );
+      final data = response.data;
+      if (data is! Map || data['error'] != null) {
+        throw StateError('Place lookup failed.');
+      }
+      final place = (data['place'] as String?)?.trim();
+      if (!mounted || _currentImageId != imageId) return;
+      if (place != null &&
+          place.isNotEmpty &&
+          _shotLocationController.text.trim().isEmpty) {
+        // The existing metadata debounce persists the suggestion, while a
+        // place name entered by the user always takes precedence.
+        _shotLocationController.text = place;
+      }
+      setState(() {
+        _lookingUpLocationForImageId = null;
+        _shotLocationLookupError = place == null || place.isEmpty
+            ? 'No nearby place found'
+            : null;
+      });
+    } catch (_) {
+      if (!mounted || _currentImageId != imageId) return;
+      setState(() {
+        _lookingUpLocationForImageId = null;
+        _shotLocationLookupError = 'Place lookup unavailable';
+      });
+    }
+  }
+
   Widget _buildShotLocationSection() {
     final metadata = _photoMetadata;
     return Column(
@@ -2544,9 +2605,48 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
             contentPadding: EdgeInsets.zero,
             leading: const Icon(Icons.my_location_outlined),
             title: const Text('Photo GPS location'),
-            subtitle: Text(
-              '${metadata!.latitude!.toStringAsFixed(5)}, '
-              '${metadata.longitude!.toStringAsFixed(5)}',
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${metadata!.latitude!.toStringAsFixed(5)}, '
+                  '${metadata.longitude!.toStringAsFixed(5)}',
+                ),
+                const Text(
+                  'Nearby place names are approximate; edit above if needed.',
+                ),
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Link(
+                      uri: Uri.parse('https://www.geoapify.com/'),
+                      target: LinkTarget.blank,
+                      builder: (context, followLink) => TextButton(
+                        onPressed: followLink,
+                        child: const Text('Powered by Geoapify'),
+                      ),
+                    ),
+                    Link(
+                      uri: Uri.parse('https://www.openstreetmap.org/copyright'),
+                      target: LinkTarget.blank,
+                      builder: (context, followLink) => TextButton(
+                        onPressed: followLink,
+                        child: const Text('© OpenStreetMap contributors'),
+                      ),
+                    ),
+                  ],
+                ),
+                if (_lookingUpLocationForImageId == _currentImageId)
+                  const Text('Looking up nearby place...'),
+                if (_shotLocationLookupError != null &&
+                    _shotLocationController.text.trim().isEmpty) ...[
+                  Text(_shotLocationLookupError!),
+                  TextButton(
+                    onPressed: () => _lookupShotLocation(retry: true),
+                    child: const Text('Retry place lookup'),
+                  ),
+                ],
+              ],
             ),
             trailing: const Icon(Icons.open_in_new),
             onTap: _openShotLocationOnMap,

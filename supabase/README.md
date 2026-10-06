@@ -78,3 +78,13 @@ The email action sends at most 25 recipients per server request, records each
 accepted delivery, and skips recipients already sent the same announcement.
 Update notices must remain neutral service/version messages; use a separate
 consent-based audience for promotions.
+
+## Photo place names
+
+`reverse-geocode-photo` reads GPS coordinates from a signed-in user's own
+image and asks Geoapify for an approximate city, region, and country. Set
+`GEOAPIFY_API_KEY` as a Supabase Edge Function secret before deploying it.
+The key must not be bundled into the Flutter app. The app only requests a
+suggestion when the image's place-name field is empty; the result is editable
+and saved as ordinary image metadata. Keep the Geoapify and OpenStreetMap
+attribution links beside the location in the app.

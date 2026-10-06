@@ -66,7 +66,7 @@
 <h2>What is stored, and why</h2>
 <p><strong>Your account</strong> — your email address, and a display name if you set one. Your password is stored only as a cryptographic hash by our authentication provider; it is never visible to us. If you sign in with Google we receive your email address and name from Google, and no password exists. <em>Why: to identify your library and let you sign back into it.</em></p>
 <p><strong>Your images</strong> — the reference photographs and artwork you upload, together with the smaller preview copies the app generates. Also the titles, notes, author names, keywords and favourites you attach to them, and the categories you organise them into. <em>Why: this is the service. Without it there is no library.</em></p>
-<p><strong>Photo details taken from your images</strong> — when a photograph carries camera information, the app reads and stores the camera make and model, the lens, the ISO setting, the capture date, the image dimensions, and any GPS coordinates embedded in the photo. You can also enter a place name for an image. When you take a photo with the app's Camera button, the app asks for permission to use your phone's location and, if you allow it and a recent fix is available, stores the coordinates with that photo in your private library. You can deny location access and still take photos. The app does not track your location in the background. It does not add phone coordinates to the JPEG file itself. <em>Why: to show you how and where a reference was shot.</em></p>
+<p><strong>Photo details taken from your images</strong> — when a photograph carries camera information, the app reads and stores the camera make and model, the lens, the ISO setting, the capture date, the image dimensions, and any GPS coordinates embedded in the photo. You can also enter a place name for an image. When you take a photo with the app's Camera button, the app asks for permission to use your phone's location and, if you allow it and a recent fix is available, stores the coordinates with that photo in your private library. You can deny location access and still take photos. The app does not track your location in the background. It does not add phone coordinates to the JPEG file itself. If a photo has GPS coordinates and its place-name field is empty, opening its details sends those coordinates to Geoapify to suggest an approximate city, region and country. The suggestion is saved with the photo and can be edited or replaced by you. The image itself and your account details are not sent to Geoapify. <em>Why: to show you how and where a reference was shot.</em></p>
 <p><strong>Messages</strong> — if you use the messaging feature: your conversations, the messages in them, any images you send, and who you have blocked. Also whether you have chosen to be discoverable in user search. <em>Why: to deliver messages and respect your blocking and visibility choices.</em></p>
 <p><strong>Feedback you send</strong> — your comment, any screenshot you attach, which screen you were on, and the app version. <em>Why: to reproduce and fix what you reported.</em></p>
 <p><strong>App update emails</strong> — we may send neutral notices about new versions and important changes to the email address on your account. This is on by default. You can turn it off in Account settings or use the unsubscribe link in any update email. We store your preference and a token for the unsubscribe link. <em>Why: to tell you when the app you use has changed.</em> These emails are not used for offers or advertising.</p>
@@ -82,7 +82,7 @@
 <p>For your account, library and messages, the legal basis is <strong>performance of a contract</strong> — you asked for a reference library, and it cannot exist without storing your images.</p>
 <p>For activity records and feedback, the basis is <strong>legitimate interest</strong> in keeping the service working and fixing what breaks. This is limited to what diagnosis requires, and those records are never used to build a profile of you or sold to anyone.</p>
 <h2>Who else handles your data</h2>
-<p>Painter Reference is a small service built on other companies' infrastructure. These are our processors — each handles data on our instructions and is not permitted to use it for their own purposes.</p>
+<p>Painter Reference is a small service built on other companies' infrastructure. These providers handle the data described below to deliver specific app features.</p>
 <table><thead><tr>
 <th>Provider</th>
 <th>What they handle</th>
@@ -112,6 +112,11 @@
 <td><strong>OpenAI</strong></td>
 <td>Optional AI image analysis and AI image editing</td>
 <td>Only when you ask for it — see below</td>
+</tr>
+<tr>
+<td><strong>Geoapify</strong></td>
+<td>GPS coordinates from a photo, when its place-name field is empty</td>
+<td>Suggests an approximate human-readable location when you open that photo's details</td>
 </tr>
 </tbody></table>
 <p><strong>About the AI features.</strong> There are two, both optional, and neither ever runs on its own — each happens only when you ask for it, for the specific image you ask about.</p>

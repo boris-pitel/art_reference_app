@@ -75,3 +75,6 @@ verify_jwt = false
 
 [functions.list-app-announcements]
 verify_jwt = false
+
+[functions.reverse-geocode-photo]
+verify_jwt = true
