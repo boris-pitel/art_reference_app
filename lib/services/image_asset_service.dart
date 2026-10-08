@@ -902,6 +902,17 @@ class ImageAssetService {
     final artwork = data['finished_artwork_count'];
     final ids = data['image_ids'];
 
+    final documents = await _supabase
+        .from('reference_documents')
+        .select('reference_categories(code)');
+    for (final document in documents) {
+      final category = document['reference_categories'];
+      if (category is Map && category['code'] is String) {
+        final code = category['code'] as String;
+        counts[code] = (counts[code] ?? 0) + 1;
+      }
+    }
+
     return ImageCategoryCounts(
       byCategoryCode: counts,
       finishedArtwork: artwork is int ? artwork : int.tryParse('$artwork') ?? 0,

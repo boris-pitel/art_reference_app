@@ -6,6 +6,7 @@ import '../services/app_image_cache.dart';
 import '../services/library_home_cache.dart';
 import '../services/library_image_cache.dart';
 import '../services/local_user_session.dart';
+import '../services/document_file_cache.dart';
 import '../services/offline_upload_queue.dart';
 import '../services/user_activity_logger.dart';
 import '../widgets/home_button.dart';
@@ -336,6 +337,7 @@ class _AccountScreenState extends State<AccountScreen> {
         await AppImageCache.clearForUser(deletedUserId);
         await LibraryHomeCache.clear(deletedUserId);
         await LibraryImageCache.clearUser(deletedUserId);
+        await DocumentFileCache.instance.clearUser(deletedUserId);
         await LocalUserSession.forget(userId: deletedUserId);
       }
 

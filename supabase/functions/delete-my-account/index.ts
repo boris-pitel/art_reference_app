@@ -42,6 +42,7 @@ function jsonResponse(body: unknown, status = 200) {
 async function storagePaths(authUserId: string, dataUserId: string) {
   const paths: Record<string, string[]> = {
     'reference-images': [],
+    'reference-documents': [],
     'category-covers': [],
     'feedback-attachments': [],
     'message-images': [],
@@ -106,6 +107,7 @@ async function storagePaths(authUserId: string, dataUserId: string) {
   // own folders.
   for (const [bucket, root] of [
     ['reference-images', dataUserId],
+    ['reference-documents', authUserId],
     ['category-covers', authUserId],
   ] as const) {
     for (const folder of ['originals', 'thumbnails', '']) {

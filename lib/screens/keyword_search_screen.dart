@@ -7,6 +7,9 @@ import '../services/image_search_service.dart';
 import '../widgets/cached_image.dart';
 import '../widgets/home_button.dart';
 import 'image_details_screen.dart';
+import '../models/reference_document.dart';
+import '../services/document_service.dart';
+import 'document_screen.dart';
 
 class KeywordSearchScreen extends StatefulWidget {
   const KeywordSearchScreen({super.key, required this.categories});
@@ -28,11 +31,14 @@ class _KeywordSearchScreenState extends State<KeywordSearchScreen> {
   String? _errorMessage;
   String _lastQuery = '';
   List<ImageSearchResult> _results = const <ImageSearchResult>[];
+  List<ReferenceDocument> _documents = [];
+  late final DocumentService _documentService;
 
   @override
   void initState() {
     super.initState();
     _searchService = ImageSearchService(Supabase.instance.client);
+    _documentService = DocumentService(Supabase.instance.client);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _searchFocusNode.requestFocus();
     });
@@ -54,6 +60,7 @@ class _KeywordSearchScreenState extends State<KeywordSearchScreen> {
         _hasSearched = false;
         _lastQuery = '';
         _results = const <ImageSearchResult>[];
+        _documents = [];
         _errorMessage = null;
       });
       _searchFocusNode.requestFocus();
@@ -66,6 +73,7 @@ class _KeywordSearchScreenState extends State<KeywordSearchScreen> {
       _hasSearched = true;
       _lastQuery = query;
       _results = const <ImageSearchResult>[];
+      _documents = [];
       _errorMessage = null;
     });
 
@@ -74,9 +82,14 @@ class _KeywordSearchScreenState extends State<KeywordSearchScreen> {
         query,
         favoritesOnly: _favoritesOnly,
       );
+      final documents = await _documentService.search(
+        query,
+        favoritesOnly: _favoritesOnly,
+      );
       if (!mounted) return;
       setState(() {
         _results = results;
+        _documents = documents;
         _isSearching = false;
       });
     } catch (error) {
@@ -95,6 +108,7 @@ class _KeywordSearchScreenState extends State<KeywordSearchScreen> {
       _hasSearched = false;
       _lastQuery = '';
       _results = const <ImageSearchResult>[];
+      _documents = [];
       _errorMessage = null;
     });
     _searchFocusNode.requestFocus();
@@ -232,7 +246,7 @@ class _KeywordSearchScreenState extends State<KeywordSearchScreen> {
               ),
               SizedBox(height: 8),
               Text(
-                'Search checks saved keywords, image titles, and notes. '
+                'Search checks saved keywords, reference titles, and notes. '
                 'Partial words work too.',
                 textAlign: TextAlign.center,
               ),
@@ -243,10 +257,10 @@ class _KeywordSearchScreenState extends State<KeywordSearchScreen> {
     }
 
     if (_isSearching) {
-      return const Center(child: Text('Searching your image library...'));
+      return const Center(child: Text('Searching your reference library...'));
     }
 
-    if (_results.isEmpty) {
+    if (_results.isEmpty && _documents.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(28),
@@ -256,7 +270,7 @@ class _KeywordSearchScreenState extends State<KeywordSearchScreen> {
               const Icon(Icons.search_off_outlined, size: 58),
               const SizedBox(height: 16),
               Text(
-                'No images found for “$_lastQuery”.',
+                'No references found for “$_lastQuery”.',
                 style: const TextStyle(
                   fontSize: 19,
                   fontWeight: FontWeight.w600,
@@ -284,15 +298,53 @@ class _KeywordSearchScreenState extends State<KeywordSearchScreen> {
 
         return GridView.builder(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
-          itemCount: _results.length,
+          itemCount: _results.length + _documents.length,
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: columnCount,
             crossAxisSpacing: 14,
             mainAxisSpacing: 14,
             childAspectRatio: 0.72,
           ),
-          itemBuilder: (context, index) =>
-              _buildResultCard(context, _results[index]),
+          itemBuilder: (context, index) {
+            if (index < _documents.length) {
+              final doc = _documents[index];
+              return Card(
+                child: InkWell(
+                  onTap: () async {
+                    await Navigator.of(context).push<void>(
+                      MaterialPageRoute(
+                        builder: (_) => DocumentScreen(
+                          document: doc,
+                          service: _documentService,
+                        ),
+                      ),
+                    );
+                    if (mounted) await _search();
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.description_outlined, size: 56),
+                        const SizedBox(height: 16),
+                        Text(
+                          doc.title,
+                          maxLines: 4,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Chip(label: Text(doc.fileType.toUpperCase())),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }
+            return _buildResultCard(
+              context,
+              _results[index - _documents.length],
+            );
+          },
         );
       },
     );

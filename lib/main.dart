@@ -1515,7 +1515,7 @@ class _CollectionsScreenState extends State<CollectionsScreen>
         content: Text(
           count == 0
               ? 'The category will be permanently removed.'
-              : 'The category will be removed from its $count images. The images themselves will not be deleted.',
+              : 'The category will be removed from its $count references. The references themselves will not be deleted; documents will move to Inbox.',
         ),
         actions: [
           TextButton(
@@ -2192,7 +2192,7 @@ class CollectionCard extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    '$imageCount ${imageCount == 1 ? 'image' : 'images'}',
+                    '$imageCount ${imageCount == 1 ? 'reference' : 'references'}',
                     style: Theme.of(
                       context,
                     ).textTheme.bodyMedium?.copyWith(color: Colors.white70),

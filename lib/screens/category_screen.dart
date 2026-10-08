@@ -29,12 +29,17 @@ import '../widgets/image_delivery.dart';
 import 'help_screen.dart';
 import 'image_details_screen.dart';
 import 'recipient_picker_screen.dart';
+import 'package:file_selector/file_selector.dart' as file_selector;
+import '../models/reference_document.dart';
+import '../services/document_service.dart';
+import 'document_screen.dart';
 
 class _LoadedImage {
   const _LoadedImage({
     required this.id,
     required this.imageUrl,
     required this.thumbnailUrl,
+    required this.dateAdded,
     this.displayUrl,
     this.parentImageId,
     this.parentImageUrl,
@@ -44,6 +49,7 @@ class _LoadedImage {
   });
 
   final String id;
+  final DateTime dateAdded;
   final String imageUrl;
   final String? thumbnailUrl;
   final String? displayUrl;
@@ -121,6 +127,8 @@ class _CategoryScreenState extends State<CategoryScreen>
   late final ImageAssetService _imageAssetService;
 
   final List<_LoadedImage> _images = [];
+  final List<ReferenceDocument> _documents = [];
+  late final DocumentService _documentService;
 
   /// Every image URL on this screen is signed and stops working after an hour.
   /// Listing them again is the only way to get working ones.
@@ -294,6 +302,7 @@ class _CategoryScreenState extends State<CategoryScreen>
     WidgetsBinding.instance.addObserver(this);
 
     _imageAssetService = ImageAssetService(Supabase.instance.client);
+    _documentService = DocumentService(Supabase.instance.client);
 
     _lastReadOnly = _isReadOnly;
     ConnectivityMonitor.instance.addListener(_handleConnectivityChange);
@@ -437,6 +446,7 @@ class _CategoryScreenState extends State<CategoryScreen>
         .map(
           (imageInfo) => _LoadedImage(
             id: imageInfo.id,
+            dateAdded: imageInfo.dateAdded,
             imageUrl: imageInfo.imageUrl,
             thumbnailUrl: imageInfo.thumbnailUrl,
             displayUrl: imageInfo.displayUrl,
@@ -458,6 +468,7 @@ class _CategoryScreenState extends State<CategoryScreen>
 
     try {
       final loadedImages = await _fetchImages();
+      final loadedDocuments = await _documentService.list(widget.category);
 
       if (!mounted) {
         return;
@@ -467,6 +478,9 @@ class _CategoryScreenState extends State<CategoryScreen>
         _images
           ..clear()
           ..addAll(loadedImages);
+        _documents
+          ..clear()
+          ..addAll(loadedDocuments);
 
         // A fresh batch of signatures, so the clock restarts and the tiles
         // that failed against the old ones are worth reporting again.
@@ -1708,6 +1722,206 @@ class _CategoryScreenState extends State<CategoryScreen>
   }
 
   Widget _buildAddButtons() {
+    return Wrap(
+      spacing: 12,
+      runSpacing: 12,
+      alignment: WrapAlignment.end,
+      children: [
+        _buildImageAddButtons(),
+        FloatingActionButton.extended(
+          heroTag: 'documentButton',
+          onPressed: _isBusy || _isReadOnly ? null : _addDocuments,
+          icon: const Icon(Icons.note_add_outlined),
+          label: const Text('Add document'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _addDocuments() async {
+    if (_rejectWhileBusy() || _isReadOnly) return;
+    setState(() {
+      _isUploading = true;
+      _uploadStatus = 'Choosing documents…';
+    });
+    var saved = 0;
+    final failures = <String>[];
+    try {
+      final files = await file_selector.openFiles(
+        acceptedTypeGroups: [
+          const file_selector.XTypeGroup(
+            label: 'Documents',
+            extensions: ['pdf', 'txt', 'rtf', 'doc', 'docx'],
+            uniformTypeIdentifiers: [
+              'com.adobe.pdf',
+              'public.plain-text',
+              'public.rtf',
+              'com.microsoft.word.doc',
+              'org.openxmlformats.wordprocessingml.document',
+            ],
+          ),
+        ],
+      );
+      for (final file in files) {
+        if (!mounted) break;
+        setState(() => _uploadStatus = 'Uploading ${file.name}…');
+        try {
+          DocumentFormat.validate(file.name, await file.length());
+          await _documentService.upload(
+            widget.category,
+            file.name,
+            await file.readAsBytes(),
+          );
+          saved++;
+        } catch (error) {
+          failures.add('${file.name}: $error');
+        }
+      }
+      if (mounted && (saved > 0 || failures.isNotEmpty)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              failures.isEmpty
+                  ? 'Saved $saved document${saved == 1 ? '' : 's'}.'
+                  : 'Saved $saved. ${failures.join('\n')}',
+            ),
+          ),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.toString())));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isUploading = false);
+        await _loadImages();
+      }
+    }
+  }
+
+  Widget _buildDocument(ReferenceDocument doc) => Card(
+    clipBehavior: Clip.antiAlias,
+    child: InkWell(
+      onTap: _isSelecting
+          ? null
+          : () async {
+              await Navigator.of(context).push<void>(
+                MaterialPageRoute(
+                  builder: (_) =>
+                      DocumentScreen(document: doc, service: _documentService),
+                ),
+              );
+              if (mounted) await _loadImages(showLoading: false);
+            },
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: FutureBuilder<Uint8List?>(
+                      future: _documentService.thumbnail(doc),
+                      builder: (context, snapshot) => snapshot.data == null
+                          ? Icon(
+                              doc.fileType == 'pdf'
+                                  ? Icons.picture_as_pdf_outlined
+                                  : Icons.description_outlined,
+                              size: 56,
+                            )
+                          : Image.memory(snapshot.data!, fit: BoxFit.contain),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    doc.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.secondaryContainer,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          child: Text(doc.fileType.toUpperCase()),
+                        ),
+                      ),
+                      if (doc.isFavorite)
+                        const Padding(
+                          padding: EdgeInsets.only(left: 8),
+                          child: Icon(Icons.star, size: 18),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Positioned(
+            top: 4,
+            right: 4,
+            child: IconButton(
+              tooltip: 'Delete document',
+              icon: const Icon(Icons.delete_outline),
+              onPressed: _isReadOnly || _isBusy
+                  ? null
+                  : () async {
+                      final confirmed = await showDialog<bool>(
+                        context: context,
+                        builder: (context) => AlertDialog(
+                          title: const Text('Delete document?'),
+                          content: Text(
+                            'Remove ${doc.filename} from your library?',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context, false),
+                              child: const Text('Cancel'),
+                            ),
+                            FilledButton(
+                              onPressed: () => Navigator.pop(context, true),
+                              child: const Text('Delete'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirmed != true) return;
+                      try {
+                        await _documentService.remove(doc);
+                        if (mounted) await _loadImages(showLoading: false);
+                      } catch (error) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text(error.toString())),
+                          );
+                        }
+                      }
+                    },
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _buildImageAddButtons() {
     if (!_cameraIsAvailable) {
       return FloatingActionButton.extended(
         heroTag: 'galleryButton',
@@ -1793,7 +2007,10 @@ class _CategoryScreenState extends State<CategoryScreen>
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (_errorMessage != null && _pendingUploads.isEmpty && _images.isEmpty) {
+    if (_errorMessage != null &&
+        _pendingUploads.isEmpty &&
+        _images.isEmpty &&
+        _documents.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -1820,15 +2037,25 @@ class _CategoryScreenState extends State<CategoryScreen>
       );
     }
 
-    if (_images.isEmpty && _pendingUploads.isEmpty) {
+    if (_images.isEmpty && _pendingUploads.isEmpty && _documents.isEmpty) {
       return const Center(
-        child: Text('No photo references yet.', style: TextStyle(fontSize: 20)),
+        child: Text(
+          'No references yet. Add images or documents.',
+          style: TextStyle(fontSize: 20),
+        ),
       );
     }
 
+    final references = <Object>[..._images, ..._documents]
+      ..sort((a, b) {
+        DateTime date(Object item) => item is ReferenceDocument
+            ? item.dateAdded
+            : (item as _LoadedImage).dateAdded;
+        return date(b).compareTo(date(a));
+      });
     return GridView.builder(
       padding: const EdgeInsets.all(16),
-      itemCount: _pendingUploads.length + _images.length,
+      itemCount: _pendingUploads.length + references.length,
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
         maxCrossAxisExtent: 240,
         crossAxisSpacing: 12,
@@ -1839,7 +2066,9 @@ class _CategoryScreenState extends State<CategoryScreen>
         if (index < _pendingUploads.length) {
           return _buildPendingUpload(_pendingUploads[index]);
         }
-        final image = _images[index - _pendingUploads.length];
+        final reference = references[index - _pendingUploads.length];
+        if (reference is ReferenceDocument) return _buildDocument(reference);
+        final image = reference as _LoadedImage;
 
         final isOpening = _openingImageId == image.id;
         final isRemoving = _removingImageId == image.id;
