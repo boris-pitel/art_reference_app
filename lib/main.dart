@@ -1,3 +1,5 @@
+import 'package:flutter/services.dart';
+import 'services/resume_diagnostics.dart';
 import 'screens/upload_queue_screen.dart';
 import 'screens/continuous_camera_screen.dart';
 import 'dart:async';
@@ -46,6 +48,7 @@ import 'utils/performance_profiler.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  await ResumeDiagnostics.instance.initialize();
   await dotenv.load(fileName: 'env');
 
   final supabaseUrl = dotenv.env['SUPABASE_URL'];
@@ -144,6 +147,9 @@ class _ArtReferenceAppState extends State<ArtReferenceApp>
           return;
         }
 
+        ResumeDiagnostics.instance.record(
+          'auth event=${authState.event.name} session=${authState.session != null}',
+        );
         final wasSignedIn = _isSignedIn;
 
         setState(() {
@@ -354,6 +360,7 @@ class _ArtReferenceAppState extends State<ArtReferenceApp>
   }
 
   void _closeScreensAfterLogout() {
+    ResumeDiagnostics.instance.record('navigation reset reason=logout');
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
@@ -376,6 +383,7 @@ class _ArtReferenceAppState extends State<ArtReferenceApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    ResumeDiagnostics.instance.record('lifecycle ${state.name}');
     if (state == AppLifecycleState.resumed) {
       unawaited(ConnectivityMonitor.instance.checkNow());
     }
@@ -385,6 +393,7 @@ class _ArtReferenceAppState extends State<ArtReferenceApp>
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: rootNavigatorKey,
+      navigatorObservers: [ResumeDiagnostics.instance],
       title: 'Painter Reference',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -650,7 +659,15 @@ class _AuthenticationLoadingScreen extends StatelessWidget {
   }
 }
 
-enum _AccountMenuAction { help, about, feedback, privacy, account, signOut }
+enum _AccountMenuAction {
+  help,
+  about,
+  diagnostics,
+  feedback,
+  privacy,
+  account,
+  signOut,
+}
 
 class CollectionsScreen extends StatefulWidget {
   const CollectionsScreen({super.key});
@@ -1246,6 +1263,12 @@ class _CollectionsScreenState extends State<CollectionsScreen>
       case _AccountMenuAction.help:
         await _openHelp(initialTabIndex: 0);
         return;
+      case _AccountMenuAction.diagnostics:
+        await Clipboard.setData(
+          ClipboardData(text: ResumeDiagnostics.instance.export()),
+        );
+        if (mounted) _showCategoryMessage('Sleep/wake log copied.');
+        break;
       case _AccountMenuAction.about:
         await _openHelp(initialTabIndex: 2);
         return;
@@ -1722,6 +1745,14 @@ class _CollectionsScreenState extends State<CollectionsScreen>
                     leading: Icon(Icons.help_outline),
                     title: Text('Help'),
                     subtitle: Text('Introduction and how to use the app'),
+                  ),
+                ),
+                const PopupMenuItem<_AccountMenuAction>(
+                  value: _AccountMenuAction.diagnostics,
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(Icons.bug_report_outlined),
+                    title: Text('Copy sleep/wake log'),
                   ),
                 ),
                 const PopupMenuItem<_AccountMenuAction>(

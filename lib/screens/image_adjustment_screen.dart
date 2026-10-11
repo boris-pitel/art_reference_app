@@ -1,3 +1,4 @@
+import '../services/resume_diagnostics.dart';
 import '../widgets/offline_editing_body.dart';
 import 'dart:async';
 import 'dart:math' as math;
@@ -182,6 +183,7 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen>
   @override
   void initState() {
     super.initState();
+    ResumeDiagnostics.instance.record('screen editor opened');
     widget.controller?._apply = _done;
     _readImageSize();
     _loadSavedRatios();
@@ -210,6 +212,7 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen>
     }
     _widthController.dispose();
     _heightController.dispose();
+    ResumeDiagnostics.instance.record('screen editor disposed');
     super.dispose();
   }
 
