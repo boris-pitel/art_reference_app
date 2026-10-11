@@ -303,118 +303,141 @@ class _ContinuousCameraScreenState extends State<ContinuousCameraScreen>
           ),
         ],
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: _camera?.value.isInitialized == true
-                ? ValueListenableBuilder<CameraValue>(
-                    valueListenable: _camera!,
-                    builder: (context, value, _) {
-                      final orientation = value.isCaptureOrientationLocked
-                          ? value.lockedCaptureOrientation
-                          : value.deviceOrientation;
-                      final landscape =
-                          orientation == DeviceOrientation.landscapeLeft ||
-                          orientation == DeviceOrientation.landscapeRight;
-                      final aspectRatio = landscape
-                          ? value.aspectRatio
-                          : 1 / value.aspectRatio;
-                      return ClipRect(
-                        child: SizedBox.expand(
-                          child: GestureDetector(
-                            onScaleStart: (_) => _pinchStart = _zoom,
-                            onScaleUpdate: (details) {
-                              if (details.pointerCount >= 2) {
-                                // Camera zoom ranges can be very wide. Damp the
-                                // gesture so a small pinch makes a precise change.
-                                _setZoom(
-                                  (_pinchStart *
-                                          math.pow(
-                                            details.scale,
-                                            _pinchSensitivity,
-                                          ))
-                                      .toDouble(),
-                                );
-                              }
-                            },
-                            child: FittedBox(
-                              fit: BoxFit.cover,
-                              child: SizedBox(
-                                width: aspectRatio * 1000,
-                                height: 1000,
-                                child: CameraPreview(_camera!),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final landscape = constraints.maxWidth > constraints.maxHeight;
+          final sections = <Widget>[
+            Expanded(
+              child: _camera?.value.isInitialized == true
+                  ? ValueListenableBuilder<CameraValue>(
+                      valueListenable: _camera!,
+                      builder: (context, value, _) {
+                        final orientation = value.isCaptureOrientationLocked
+                            ? value.lockedCaptureOrientation
+                            : value.deviceOrientation;
+                        final landscape =
+                            orientation == DeviceOrientation.landscapeLeft ||
+                            orientation == DeviceOrientation.landscapeRight;
+                        final aspectRatio = landscape
+                            ? value.aspectRatio
+                            : 1 / value.aspectRatio;
+                        return ClipRect(
+                          child: SizedBox.expand(
+                            child: GestureDetector(
+                              onScaleStart: (_) => _pinchStart = _zoom,
+                              onScaleUpdate: (details) {
+                                if (details.pointerCount >= 2) {
+                                  // Camera zoom ranges can be very wide. Damp the
+                                  // gesture so a small pinch makes a precise change.
+                                  _setZoom(
+                                    (_pinchStart *
+                                            math.pow(
+                                              details.scale,
+                                              _pinchSensitivity,
+                                            ))
+                                        .toDouble(),
+                                  );
+                                }
+                              },
+                              child: FittedBox(
+                                fit: BoxFit.cover,
+                                child: SizedBox(
+                                  width: aspectRatio * 1000,
+                                  height: 1000,
+                                  child: CameraPreview(_camera!),
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      );
-                    },
-                  )
-                : Center(
-                    child: _error == null
-                        ? const CircularProgressIndicator()
-                        : const Icon(Icons.no_photography),
-                  ),
-          ),
-          if (_camera != null && _maxZoom > _minZoom)
-            Row(
-              children: [
-                const SizedBox(width: 16),
-                Text('${_zoom.toStringAsFixed(1)}×'),
-                Expanded(
-                  child: Slider(
-                    min: 0,
-                    max: 1,
-                    divisions: 100,
-                    value: _zoomSliderValue.clamp(0, 1),
-                    label: '${_zoom.toStringAsFixed(1)}×',
-                    onChanged: (value) => _setZoom(_zoomFromSlider(value)),
-                  ),
-                ),
-              ],
+                        );
+                      },
+                    )
+                  : Center(
+                      child: _error == null
+                          ? const CircularProgressIndicator()
+                          : const Icon(Icons.no_photography),
+                    ),
             ),
-          if (_error != null)
-            Padding(padding: const EdgeInsets.all(12), child: Text(_error!)),
-          SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  const Text(
-                    'Photos are saved on this device. Uploads resume when you finish.',
-                  ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Allow location to save where each photo was taken. Photos still work without it.',
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: _busy || (_camera == null && _unsaved == null)
-                        ? null
-                        : _capture,
-                    icon: Icon(
-                      _unsaved == null ? Icons.camera_alt : Icons.refresh,
+            SizedBox(
+              width: landscape ? 240 : null,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_camera != null && _maxZoom > _minZoom)
+                      Row(
+                        children: [
+                          const SizedBox(width: 16),
+                          Text('${_zoom.toStringAsFixed(1)}×'),
+                          Expanded(
+                            child: Slider(
+                              min: 0,
+                              max: 1,
+                              divisions: 100,
+                              value: _zoomSliderValue.clamp(0, 1),
+                              label: '${_zoom.toStringAsFixed(1)}×',
+                              onChanged: (value) =>
+                                  _setZoom(_zoomFromSlider(value)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    if (_error != null)
+                      Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Text(_error!),
+                      ),
+                    SafeArea(
+                      top: false,
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          children: [
+                            const Text(
+                              'Photos are saved on this device. Uploads resume when you finish.',
+                            ),
+                            const SizedBox(height: 4),
+                            const Text(
+                              'Allow location to save where each photo was taken. Photos still work without it.',
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 12),
+                            FilledButton.icon(
+                              onPressed:
+                                  _busy || (_camera == null && _unsaved == null)
+                                  ? null
+                                  : _capture,
+                              icon: Icon(
+                                _unsaved == null
+                                    ? Icons.camera_alt
+                                    : Icons.refresh,
+                              ),
+                              label: Text(
+                                _busy
+                                    ? 'Saving…'
+                                    : _unsaved == null
+                                    ? 'Take photo'
+                                    : 'Retry saving',
+                              ),
+                            ),
+                            if (_camera == null && !_initializing)
+                              TextButton(
+                                onPressed: _initialize,
+                                child: const Text('Retry camera'),
+                              ),
+                          ],
+                        ),
+                      ),
                     ),
-                    label: Text(
-                      _busy
-                          ? 'Saving…'
-                          : _unsaved == null
-                          ? 'Take photo'
-                          : 'Retry saving',
-                    ),
-                  ),
-                  if (_camera == null && !_initializing)
-                    TextButton(
-                      onPressed: _initialize,
-                      child: const Text('Retry camera'),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ];
+          return landscape
+              ? Row(children: sections)
+              : Column(children: sections);
+        },
       ),
     ),
   );

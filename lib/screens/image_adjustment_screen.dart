@@ -582,7 +582,11 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen>
 
   void _startCropDrag(PointerDownEvent event, Size area) {
     if (_activeCropPointer != null) return;
-    final target = _cropTargetAt(event.localPosition, area, event.kind);
+    final target = _cropTargetAt(
+      event.localPosition - const Offset(32, 32),
+      area,
+      event.kind,
+    );
     if (target == null) return;
     setState(() {
       _activeCropPointer = event.pointer;
@@ -755,44 +759,55 @@ class _ImageAdjustmentScreenState extends State<ImageAdjustmentScreen>
           final fitted = applyBoxFit(
             BoxFit.contain,
             Size(rotatedWidth, rotatedHeight),
-            constraints.biggest,
+            Size(
+              math.max(1, constraints.maxWidth - 64),
+              math.max(1, constraints.maxHeight - 64),
+            ),
           ).destination;
           return Center(
             child: SizedBox(
-              width: fitted.width,
-              height: fitted.height,
+              width: fitted.width + 64,
+              height: fitted.height + 64,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  ClipRect(
-                    child: Transform.rotate(
-                      angle: radians,
-                      child: _monochrome
-                          ? ColorFiltered(
-                              colorFilter: monochromeFilter,
-                              child: Image.memory(
+                  Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: ClipRect(
+                      child: Transform.rotate(
+                        angle: radians,
+                        child: _monochrome
+                            ? ColorFiltered(
+                                colorFilter: monochromeFilter,
+                                child: Image.memory(
+                                  widget.imageBytes,
+                                  fit: BoxFit.contain,
+                                  gaplessPlayback: true,
+                                  cacheWidth: 1600,
+                                ),
+                              )
+                            : Image.memory(
                                 widget.imageBytes,
                                 fit: BoxFit.contain,
                                 gaplessPlayback: true,
                                 cacheWidth: 1600,
                               ),
-                            )
-                          : Image.memory(
-                              widget.imageBytes,
-                              fit: BoxFit.contain,
-                              gaplessPlayback: true,
-                              cacheWidth: 1600,
-                            ),
+                      ),
                     ),
                   ),
-                  CustomPaint(painter: _CropOverlayPainter(_crop, _grid)),
+                  Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: CustomPaint(
+                      painter: _CropOverlayPainter(_crop, _grid),
+                    ),
+                  ),
                   Positioned.fill(
                     child: MouseRegion(
                       cursor: _cropCursor,
                       onHover: (event) {
                         if (_activeCropPointer != null) return;
                         final target = _cropTargetAt(
-                          event.localPosition,
+                          event.localPosition - const Offset(32, 32),
                           fitted,
                           event.kind,
                         );
