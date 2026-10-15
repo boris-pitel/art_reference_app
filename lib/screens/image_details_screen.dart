@@ -4002,7 +4002,8 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen>
           leading: BackButton(onPressed: _finishImageWindow),
           title: Text(_editingBytes == null ? 'Image' : 'Edit sketch'),
           actions: [
-            if (_editingBytes == null &&
+            if (unisonMatchingAvailable &&
+                _editingBytes == null &&
                 Supabase
                         .instance
                         .client

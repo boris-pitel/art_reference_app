@@ -7,6 +7,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/unison_matching.dart';
 
+bool get unisonMatchingAvailable =>
+    !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+
 Map<String, Object> _prepare(Uint8List bytes) {
   var image = img.decodeImage(bytes);
   if (image == null) {
@@ -44,6 +47,7 @@ class _UnisonMatchScreenState extends State<UnisonMatchScreen> {
   Color? _sample;
   Offset? _point;
   bool get _allowed =>
+      unisonMatchingAvailable &&
       _client.auth.currentUser?.appMetadata['is_admin'] == true &&
       (_owner == null || _owner == _client.auth.currentUser?.id);
 
@@ -56,12 +60,14 @@ class _UnisonMatchScreenState extends State<UnisonMatchScreen> {
   Future<void> _load() async {
     if (!_allowed) throw StateError('Administrator access required.');
     _owner = _client.auth.currentUser!.id;
-    final rows = await _client.rpc('admin_unison_catalogue');
+    final rows = await _client
+        .from('pastel_swatches')
+        .select()
+        .eq('brand', 'Unison')
+        .order('id');
     final prepared = await compute(_prepare, await widget.loadImage());
     if (!_allowed) throw StateError('Account changed. Reopen this tool.');
-    _catalogue = (rows as List)
-        .map((r) => Map<String, dynamic>.from(r as Map))
-        .toList();
+    _catalogue = rows.map((r) => Map<String, dynamic>.from(r as Map)).toList();
     if (_catalogue.isEmpty) throw StateError('The Unison catalogue is empty.');
     _image = prepared;
   }
