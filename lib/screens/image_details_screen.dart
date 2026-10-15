@@ -1,3 +1,4 @@
+import 'unison_match_screen.dart';
 import '../services/offline_upload_queue.dart';
 import 'continuous_camera_screen.dart';
 import '../widgets/offline_editing_body.dart';
@@ -4001,6 +4002,26 @@ class _ZoomableImageScreenState extends State<_ZoomableImageScreen>
           leading: BackButton(onPressed: _finishImageWindow),
           title: Text(_editingBytes == null ? 'Image' : 'Edit sketch'),
           actions: [
+            if (_editingBytes == null &&
+                Supabase
+                        .instance
+                        .client
+                        .auth
+                        .currentUser
+                        ?.appMetadata['is_admin'] ==
+                    true)
+              IconButton(
+                tooltip: 'Match Unison colour (admin)',
+                icon: const Icon(Icons.colorize),
+                onPressed: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute(
+                    builder: (_) => UnisonMatchScreen(
+                      loadImage: () async =>
+                          (await _downloadExportImage(_imageUrl)).bytes,
+                    ),
+                  ),
+                ),
+              ),
             HomeButton(enabled: !_isApplyingEdit && !_isEditorProcessing),
             if (_editingBytes != null) ...[
               TextButton(
