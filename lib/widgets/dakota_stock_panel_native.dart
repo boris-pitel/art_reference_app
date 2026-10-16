@@ -102,13 +102,10 @@ class _DakotaStockPanelState extends State<DakotaStockPanel> {
         _checking = false;
         _message = 'Dakota stock checked at $time';
       });
-      // Do not keep displaying old stock indefinitely or poll the retailer.
+      // Renew the public stock snapshot while this matching screen stays open.
       _expiry = Timer(const Duration(minutes: 5), () {
         if (!mounted) return;
-        widget.onChanged({});
-        setState(
-          () => _message = 'Stock check expired. Refresh to check again.',
-        );
+        unawaited(_refresh());
       });
     } catch (_) {
       if (mounted && generation == _generation) _failed();
