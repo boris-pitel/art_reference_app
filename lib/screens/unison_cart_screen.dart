@@ -16,6 +16,24 @@ class _UnisonCartScreenState extends State<UnisonCartScreen> {
   late final UnisonCart _cart = UnisonCart(widget.userId);
   late Future<List<Map<String, dynamic>>> _rows;
   bool _busy = false;
+  final Map<String, Future<String>> _swatches = {};
+  Future<String> _swatchUrl(Map<String, dynamic> row) async {
+    if (!_allowed) throw StateError('Administrator access required.');
+    final client = Supabase.instance.client;
+    var path = row['swatch_path'] as String?;
+    if (path == null) {
+      final swatch = await client
+          .from('pastel_swatches')
+          .select('swatch_path')
+          .eq('brand', 'Unison')
+          .eq('retailer_sku', row['sku'])
+          .single();
+      path = swatch['swatch_path'] as String;
+    }
+    if (!_allowed) throw StateError('Account changed.');
+    return client.storage.from('pastel-catalogue').createSignedUrl(path, 3600);
+  }
+
   Future<void> _shop(List<Map<String, dynamic>> rows) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -111,6 +129,49 @@ class _UnisonCartScreenState extends State<UnisonCartScreen> {
                             children: [
                               for (final row in rows)
                                 ListTile(
+                                  leading: SizedBox(
+                                    width: 64,
+                                    height: 64,
+                                    child: FutureBuilder<String>(
+                                      future: _swatches.putIfAbsent(
+                                        row['sku'] as String,
+                                        () => _swatchUrl(row),
+                                      ),
+                                      builder: (context, snapshot) =>
+                                          snapshot.hasData
+                                          ? Image.network(
+                                              snapshot.data!,
+                                              fit: BoxFit.contain,
+                                              errorBuilder: (_, _, _) =>
+                                                  const Tooltip(
+                                                    message:
+                                                        'Swatch preview unavailable',
+                                                    child: Icon(
+                                                      Icons
+                                                          .broken_image_outlined,
+                                                    ),
+                                                  ),
+                                            )
+                                          : snapshot.hasError
+                                          ? const Tooltip(
+                                              message:
+                                                  'Swatch preview unavailable',
+                                              child: Icon(
+                                                Icons.broken_image_outlined,
+                                              ),
+                                            )
+                                          : const Center(
+                                              child: SizedBox(
+                                                width: 20,
+                                                height: 20,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                    ),
+                                              ),
+                                            ),
+                                    ),
+                                  ),
                                   title: Text(
                                     '${row['code']} · ${row['name']}',
                                   ),

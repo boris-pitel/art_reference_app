@@ -49,6 +49,7 @@ class UnisonCart {
           'sku': sku,
           'code': swatch['code'],
           'name': swatch['display_name'],
+          'swatch_path': swatch['swatch_path'],
           'quantity': 1,
         });
       }
@@ -88,10 +89,11 @@ String dakotaCartScript(
    if(!input || !row.querySelector('a.buy-sku')) missing.push(item.sku);
    else ready.push([input,item]);
  }
- if(missing.length) return JSON.stringify({missing,submitted:false});
+ if(missing.length && ${submit ? 'false' : 'true'}) return JSON.stringify({missing,submitted:false});
+ if(!ready.length) return JSON.stringify({missing,submitted:false});
  const button=document.querySelector('a.add-to-cart');
  if(!button) throw new Error('Dakota cart controls changed. Nothing was added.');
  ${submit ? "if(window.__painterCartSent) throw new Error('Already submitted. Check Dakota cart before trying again.'); for(const input of document.querySelectorAll('tr.sku input.qty')) input.value=''; for(const [input,item] of ready) { input.value=String(item.quantity); input.dispatchEvent(new Event('change',{bubbles:true})); } window.__painterCartSent=true; button.click();" : ''}
- return JSON.stringify({missing:[],submitted:${submit ? 'true' : 'false'}});
+ return JSON.stringify({missing,submitted:${submit ? 'true' : 'false'}});
 })()
 ''';

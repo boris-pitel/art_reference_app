@@ -74,16 +74,59 @@ class _DakotaCartScreenState extends State<DakotaCartScreen> {
       final result = jsonDecode(check as String) as Map;
       final missing = result['missing'] as List;
       if (missing.isNotEmpty) {
-        throw StateError(
-          'Unavailable or missing: ${missing.join(', ')}. Nothing added. Remove these from your list or choose alternatives.',
+        if (!mounted) return;
+        final unavailable = widget.items
+            .where((item) => missing.contains(item['sku']))
+            .map((item) => '${item['code']} — ${item['name']}')
+            .join('\n');
+        final available = widget.items.length - missing.length;
+        final proceed = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Some colours are unavailable'),
+            content: SingleChildScrollView(
+              child: Text(
+                '$unavailable\n\n${available > 0 ? '$available other colours can be added to Dakota.' : 'None of these colours can be added right now.'} Unavailable colours will remain in your Painter Reference cart.',
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Keep shopping list'),
+              ),
+              if (available > 0)
+                FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Add available sticks'),
+                ),
+            ],
+          ),
         );
+        if (proceed != true || !mounted) return;
       }
       _sent = true;
-      await _web.executeScript(dakotaCartScript(widget.items, submit: true));
+      final submitted =
+          jsonDecode(
+                await _web.executeScript(
+                      dakotaCartScript(widget.items, submit: true),
+                    )
+                    as String,
+              )
+              as Map;
+      if (submitted['submitted'] != true) {
+        _sent = false;
+        if (mounted) {
+          setState(
+            () => _message =
+                'These colours are no longer available. Nothing was added. Your shopping list is saved.',
+          );
+        }
+        return;
+      }
       if (mounted) {
         setState(
           () => _message =
-              'Cart request sent. Review the Dakota cart before ordering. You control checkout and payment. Your Painter Reference list is retained.',
+              'Available sticks sent to Dakota. Review the Dakota cart before ordering. Your local list, including unavailable colours, is retained.',
         );
       }
     } catch (error) {

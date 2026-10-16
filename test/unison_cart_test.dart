@@ -5,6 +5,35 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   test(
+    'partial transfer adds available colours and all-unavailable submits nothing',
+    () async {
+      final items = [
+        {'sku': 'UNSBE14', 'quantity': 2},
+        {'sku': 'UNSGREY17', 'quantity': 1},
+      ];
+      final result = await Process.run('node', [
+        '-e',
+        '''
+const assert=require('node:assert/strict');
+const window={},location={origin:'https://dakotapastels.com',pathname:'/products/Soft-Unison-Individual'};
+class Event {constructor(type,options){}}
+let clicks=0,available=true;
+const input={value:'',dispatchEvent(){}};
+const row={querySelector(s){return s==='.sku-code-inner'?{textContent:'UNSBE14'}:s==='input.qty'&&available?input:s==='a.buy-sku'&&available?{}:null;}};
+const document={querySelectorAll(s){return s==='tr.sku'?[row]:[input]},querySelector(){return {click(){clicks++}}}};
+const check=${dakotaCartScript(items)};
+assert.deepEqual(JSON.parse(check).missing,['UNSGREY17']);assert.equal(clicks,0);assert.equal(input.value,'');
+const sent=${dakotaCartScript(items, submit: true)};
+assert.equal(JSON.parse(sent).submitted,true);assert.equal(input.value,'2');assert.equal(clicks,1);
+delete window.__painterCartSent;available=false;
+const none=${dakotaCartScript(items, submit: true)};
+assert.equal(JSON.parse(none).submitted,false);assert.equal(clicks,1);
+''',
+      ]);
+      expect(result.exitCode, 0, reason: '${result.stdout}\n${result.stderr}');
+    },
+  );
+  test(
     'Dakota adapter fills only selected quantities and submits once',
     () async {
       final script = dakotaCartScript([
