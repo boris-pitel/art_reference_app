@@ -1,3 +1,4 @@
+import 'screens/unison_cart_screen.dart';
 import 'package:flutter/services.dart';
 import 'services/resume_diagnostics.dart';
 import 'screens/upload_queue_screen.dart';
@@ -1646,6 +1647,26 @@ class _CollectionsScreenState extends State<CollectionsScreen>
         title: const Text('Painter Reference'),
         centerTitle: false,
         actions: [
+          if (!kIsWeb &&
+              defaultTargetPlatform == TargetPlatform.windows &&
+              Supabase
+                      .instance
+                      .client
+                      .auth
+                      .currentUser
+                      ?.appMetadata['is_admin'] ==
+                  true)
+            IconButton(
+              tooltip: 'Unison shopping cart',
+              icon: const Icon(Icons.shopping_cart_outlined),
+              onPressed: () => Navigator.of(context).push<void>(
+                MaterialPageRoute(
+                  builder: (_) => UnisonCartScreen(
+                    userId: Supabase.instance.client.auth.currentUser!.id,
+                  ),
+                ),
+              ),
+            ),
           IconButton(
             tooltip: 'Upload queue',
             icon: const Icon(Icons.cloud_upload_outlined),

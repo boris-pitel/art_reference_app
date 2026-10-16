@@ -6,6 +6,8 @@ import 'package:image/image.dart' as img;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/unison_matching.dart';
+import '../services/unison_cart.dart';
+import 'unison_cart_screen.dart';
 
 bool get unisonMatchingAvailable =>
     !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
@@ -46,6 +48,24 @@ class _UnisonMatchScreenState extends State<UnisonMatchScreen> {
   final Map<String, Future<String>> _urls = {};
   Color? _sample;
   Offset? _point;
+  Future<void> _addToCart(Map<String, dynamic> row) async {
+    if (!_allowed || _owner == null) return;
+    try {
+      await UnisonCart(_owner!).add(row);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${row['code']} added to shopping cart')),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Unable to add colour: $error')));
+      }
+    }
+  }
+
   bool get _allowed =>
       unisonMatchingAvailable &&
       _client.auth.currentUser?.appMetadata['is_admin'] == true &&
@@ -136,7 +156,7 @@ class _UnisonMatchScreenState extends State<UnisonMatchScreen> {
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         const Text(
-          'Tap the image to sample a small area. Pinch or scroll to zoom. Matches use the original colours, without viewer overlays. Scan colours are approximate; names are provisional.',
+          'Tap the image to sample a small area. Pinch or scroll to zoom. Matches use the original colours, without viewer overlays. Scan colours are approximate. Names are from Dakota. Tap a match or its cart icon to add a stick.',
         ),
         if (_sample != null)
           Padding(
@@ -152,6 +172,7 @@ class _UnisonMatchScreenState extends State<UnisonMatchScreen> {
         for (final row in _matches)
           Card(
             child: ListTile(
+              onTap: () => _addToCart(row),
               leading: SizedBox(
                 width: 48,
                 height: 48,
@@ -180,15 +201,10 @@ class _UnisonMatchScreenState extends State<UnisonMatchScreen> {
               subtitle: Text(
                 'ΔE00 ${(row['distance'] as double).toStringAsFixed(1)}${row['verification_status'] == 'label_needs_review' ? ' · Label needs review' : ''}',
               ),
-              trailing: Container(
-                width: 32,
-                height: 32,
-                color: Color.fromARGB(
-                  255,
-                  row['rgb_r'] as int,
-                  row['rgb_g'] as int,
-                  row['rgb_b'] as int,
-                ),
+              trailing: IconButton(
+                tooltip: 'Add to shopping cart',
+                onPressed: () => _addToCart(row),
+                icon: const Icon(Icons.add_shopping_cart),
               ),
             ),
           ),
@@ -198,7 +214,22 @@ class _UnisonMatchScreenState extends State<UnisonMatchScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Match Unison colour')),
+    appBar: AppBar(
+      title: const Text('Match Unison colour'),
+      actions: [
+        IconButton(
+          tooltip: 'Shopping cart',
+          icon: const Icon(Icons.shopping_cart_outlined),
+          onPressed: _allowed && _owner != null
+              ? () => Navigator.of(context).push<void>(
+                  MaterialPageRoute(
+                    builder: (_) => UnisonCartScreen(userId: _owner!),
+                  ),
+                )
+              : null,
+        ),
+      ],
+    ),
     body: FutureBuilder<void>(
       future: _loading,
       builder: (context, snapshot) {
