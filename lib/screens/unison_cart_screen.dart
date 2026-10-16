@@ -93,6 +93,23 @@ class _UnisonCartScreenState extends State<UnisonCartScreen> {
     }
   }
 
+  Future<void> _clear() async {
+    if (!_allowed || _busy) return;
+    setState(() => _busy = true);
+    try {
+      await _cart.clear();
+      if (mounted) setState(() => _rows = _cart.load());
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Unable to clear cart: $error')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Unison shopping cart')),
@@ -225,6 +242,13 @@ class _UnisonCartScreenState extends State<UnisonCartScreen> {
                       child: Wrap(
                         spacing: 12,
                         children: [
+                          OutlinedButton.icon(
+                            onPressed: rows.isEmpty || _busy ? null : _clear,
+                            icon: const Icon(
+                              Icons.remove_shopping_cart_outlined,
+                            ),
+                            label: const Text('Clear cart'),
+                          ),
                           OutlinedButton(
                             onPressed: rows.isEmpty
                                 ? null

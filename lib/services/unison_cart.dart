@@ -71,6 +71,8 @@ class UnisonCart {
       }
     });
   }
+
+  Future<void> clear() => _change((rows) => rows.clear());
 }
 
 /// Acts only on Dakota's public product rows, and never on checkout controls.

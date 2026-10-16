@@ -76,6 +76,13 @@ assert.equal(clicks,1);
       expect((await a.load()).single['quantity'], 3);
       await a.quantity('UNSBE14', 0);
       expect(await a.load(), isEmpty);
+      final b = UnisonCart('b');
+      await b.add(row);
+      await a.add(row);
+      await a.add({...row, 'retailer_sku': 'UNSGREY14', 'code': 'GREY14'});
+      await a.clear();
+      expect(await UnisonCart('a').load(), isEmpty);
+      expect((await b.load()).single['quantity'], 1);
     },
   );
   test('rejects invalid SKU and quantity', () async {

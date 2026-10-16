@@ -44,7 +44,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('0'), findsOneWidget);
-      await cart.quantity('UNSBE14', 0);
+    await cart.clear();
       await tester.pumpAndSettle();
       expect(find.text('0'), findsOneWidget);
       expect(tester.takeException(), isNull);
