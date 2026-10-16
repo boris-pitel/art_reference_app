@@ -6,7 +6,7 @@ import '../services/dakota_stock.dart';
 
 class DakotaStockPanel extends StatefulWidget {
   const DakotaStockPanel({super.key, required this.onChanged});
-  final ValueChanged<Map<String, DakotaStock>> onChanged;
+  final ValueChanged<Map<String, DakotaOffer>> onChanged;
   @override
   State<DakotaStockPanel> createState() => _DakotaStockPanelState();
 }
@@ -17,7 +17,7 @@ class _DakotaStockPanelState extends State<DakotaStockPanel> {
   Timer? _timeout, _expiry;
   bool _ready = false, _checking = true;
   int _generation = 0;
-  String _message = 'Checking Dakota stock…';
+  String _message = 'Checking Dakota prices and stock…';
 
   @override
   void initState() {
@@ -57,7 +57,8 @@ class _DakotaStockPanelState extends State<DakotaStockPanel> {
     widget.onChanged({});
     setState(() {
       _checking = false;
-      _message = 'Stock unknown. Refresh or expand the Dakota page below.';
+      _message =
+          'Prices and stock unknown. Refresh or expand the Dakota page below.';
     });
   }
 
@@ -69,7 +70,7 @@ class _DakotaStockPanelState extends State<DakotaStockPanel> {
     widget.onChanged({});
     setState(() {
       _checking = true;
-      _message = 'Checking Dakota stock…';
+      _message = 'Checking Dakota prices and stock…';
     });
     _timeout = Timer(const Duration(seconds: 30), _failed);
     try {
@@ -89,10 +90,10 @@ class _DakotaStockPanelState extends State<DakotaStockPanel> {
         _failed();
         return;
       }
-      final stock = <String, DakotaStock>{};
+      final stock = <String, DakotaOffer>{};
       for (final rawRow in rows) {
         final row = Map<String, dynamic>.from(rawRow as Map);
-        stock[row['sku'] as String] = classifyDakotaStock(row);
+        stock[row['sku'] as String] = DakotaOffer.fromRow(row);
       }
       _timeout?.cancel();
       _expiry?.cancel();
@@ -100,7 +101,7 @@ class _DakotaStockPanelState extends State<DakotaStockPanel> {
       final time = TimeOfDay.now().format(context);
       setState(() {
         _checking = false;
-        _message = 'Dakota stock checked at $time';
+        _message = 'Dakota prices and stock checked at $time';
       });
       // Renew the public stock snapshot while this matching screen stays open.
       _expiry = Timer(const Duration(minutes: 5), () {

@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/unison_cart.dart';
+import '../services/dakota_stock.dart';
+import '../widgets/dakota_stock_panel.dart';
 import 'dakota_cart_screen.dart';
+import 'unison_catalogue_screen.dart';
 
 class UnisonCartScreen extends StatefulWidget {
   const UnisonCartScreen({super.key, required this.userId});
@@ -16,6 +19,25 @@ class _UnisonCartScreenState extends State<UnisonCartScreen> {
   late final UnisonCart _cart = UnisonCart(widget.userId);
   late Future<List<Map<String, dynamic>>> _rows;
   bool _busy = false;
+  Map<String, DakotaOffer> _offers = {};
+
+  Future<void> _browse() async {
+    if (!_allowed || _busy) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => UnisonCatalogueScreen(userId: widget.userId),
+      ),
+    );
+    if (mounted && _allowed) setState(() => _rows = _cart.load());
+  }
+
+  String _details(Map<String, dynamic> row) {
+    final offer = _offers[row['sku']] ?? const DakotaOffer();
+    final price = offer.unitCents;
+    return '${row['sku']} · ${offer.availability}\n${offer.priceLabel}'
+        '${price == null ? '' : ' · ${row['quantity']} × ${usd(price)} = ${usd(price * (row['quantity'] as int))}'}';
+  }
+
   final Map<String, Future<String>> _swatches = {};
   Future<String> _swatchUrl(Map<String, dynamic> row) async {
     if (!_allowed) throw StateError('Administrator access required.');
@@ -137,6 +159,14 @@ class _UnisonCartScreenState extends State<UnisonCartScreen> {
                       'Saved on this computer for your account. Add colours from image matches. Prices and availability are confirmed at Dakota.',
                     ),
                   ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: DakotaStockPanel(
+                      onChanged: (offers) {
+                        if (mounted) setState(() => _offers = offers);
+                      },
+                    ),
+                  ),
                   Expanded(
                     child: rows.isEmpty
                         ? const Center(
@@ -192,7 +222,7 @@ class _UnisonCartScreenState extends State<UnisonCartScreen> {
                                   title: Text(
                                     '${row['code']} · ${row['name']}',
                                   ),
-                                  subtitle: Text(row['sku'] as String),
+                                  subtitle: Text(_details(row)),
                                   trailing: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
@@ -239,49 +269,71 @@ class _UnisonCartScreenState extends State<UnisonCartScreen> {
                     top: false,
                     child: Padding(
                       padding: const EdgeInsets.all(16),
-                      child: Wrap(
-                        spacing: 12,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          OutlinedButton.icon(
-                            onPressed: rows.isEmpty || _busy ? null : _clear,
-                            icon: const Icon(
-                              Icons.remove_shopping_cart_outlined,
-                            ),
-                            label: const Text('Clear cart'),
+                          Text(
+                            DakotaCartEstimate(rows, _offers).label,
+                            style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
-                          OutlinedButton(
-                            onPressed: rows.isEmpty
-                                ? null
-                                : () async {
-                                    await Clipboard.setData(
-                                      ClipboardData(
-                                        text: rows
-                                            .map(
-                                              (r) =>
-                                                  "${r['sku']} × ${r['quantity']} — ${r['name']}",
-                                            )
-                                            .join('\n'),
-                                      ),
-                                    );
-                                    if (context.mounted) {
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        const SnackBar(
-                                          content: Text(
-                                            'Shopping list copied.',
+                          const Text(
+                            'Before tax and shipping. Final prices are confirmed at Dakota.',
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 12,
+                            runSpacing: 8,
+                            children: [
+                              OutlinedButton.icon(
+                                onPressed: _busy ? null : _browse,
+                                icon: const Icon(Icons.palette_outlined),
+                                label: const Text('Add pastels'),
+                              ),
+                              OutlinedButton.icon(
+                                onPressed: rows.isEmpty || _busy
+                                    ? null
+                                    : _clear,
+                                icon: const Icon(
+                                  Icons.remove_shopping_cart_outlined,
+                                ),
+                                label: const Text('Clear cart'),
+                              ),
+                              OutlinedButton(
+                                onPressed: rows.isEmpty
+                                    ? null
+                                    : () async {
+                                        await Clipboard.setData(
+                                          ClipboardData(
+                                            text: rows
+                                                .map(
+                                                  (r) =>
+                                                      "${r['sku']} × ${r['quantity']} — ${r['name']}",
+                                                )
+                                                .join('\n'),
                                           ),
-                                        ),
-                                      );
-                                    }
-                                  },
-                            child: const Text('Copy list'),
-                          ),
-                          FilledButton(
-                            onPressed: rows.isEmpty || _busy
-                                ? null
-                                : () => _shop(rows),
-                            child: const Text('Shop at Dakota'),
+                                        );
+                                        if (context.mounted) {
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            const SnackBar(
+                                              content: Text(
+                                                'Shopping list copied.',
+                                              ),
+                                            ),
+                                          );
+                                        }
+                                      },
+                                child: const Text('Copy list'),
+                              ),
+                              FilledButton(
+                                onPressed: rows.isEmpty || _busy
+                                    ? null
+                                    : () => _shop(rows),
+                                child: const Text('Shop at Dakota'),
+                              ),
+                            ],
                           ),
                         ],
                       ),

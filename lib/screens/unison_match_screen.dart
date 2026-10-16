@@ -51,7 +51,7 @@ class _UnisonMatchScreenState extends State<UnisonMatchScreen> {
   final Map<String, Future<String>> _urls = {};
   Color? _sample;
   Offset? _point;
-  Map<String, DakotaStock> _stock = {};
+  Map<String, DakotaOffer> _stock = {};
   Future<void> _addToCart(Map<String, dynamic> row) async {
     if (!_allowed || _owner == null) return;
     try {
@@ -208,7 +208,7 @@ class _UnisonMatchScreenState extends State<UnisonMatchScreen> {
               ),
               title: Text('${row['code']} · ${row['display_name']}'),
               subtitle: Text(
-                '${(_stock[row['retailer_sku']] ?? DakotaStock.unknown).label}\nΔE00 ${(row['distance'] as double).toStringAsFixed(1)}${row['verification_status'] == 'label_needs_review' ? ' · Label needs review' : ''}',
+                '${(_stock[row['retailer_sku']] ?? const DakotaOffer()).availability}\n${(_stock[row['retailer_sku']] ?? const DakotaOffer()).priceLabel}\nΔE00 ${(row['distance'] as double).toStringAsFixed(1)}${row['verification_status'] == 'label_needs_review' ? ' · Label needs review' : ''}',
               ),
               trailing: IconButton(
                 tooltip: 'Add to shopping cart',
