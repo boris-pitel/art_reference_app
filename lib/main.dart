@@ -1,4 +1,5 @@
 import 'screens/unison_cart_screen.dart';
+import 'widgets/unison_cart_button.dart';
 import 'package:flutter/services.dart';
 import 'services/resume_diagnostics.dart';
 import 'screens/upload_queue_screen.dart';
@@ -1656,9 +1657,8 @@ class _CollectionsScreenState extends State<CollectionsScreen>
                       .currentUser
                       ?.appMetadata['is_admin'] ==
                   true)
-            IconButton(
-              tooltip: 'Unison shopping cart',
-              icon: const Icon(Icons.shopping_cart_outlined),
+            UnisonCartButton(
+              userId: Supabase.instance.client.auth.currentUser!.id,
               onPressed: () => Navigator.of(context).push<void>(
                 MaterialPageRoute(
                   builder: (_) => UnisonCartScreen(

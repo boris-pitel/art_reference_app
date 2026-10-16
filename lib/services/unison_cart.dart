@@ -1,10 +1,12 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class UnisonCart {
   UnisonCart(this.userId);
   final String userId;
   static Future<void> _writes = Future.value();
+  static final changes = ValueNotifier<int>(0);
   String get _key => 'unison_cart_v1:$userId';
   Future<List<Map<String, dynamic>>> load() async {
     await _writes;
@@ -28,6 +30,7 @@ class UnisonCart {
       if (!await prefs.setString(_key, jsonEncode(rows))) {
         throw StateError('Unable to save shopping cart.');
       }
+      changes.value++;
     });
     _writes = operation.catchError((Object _) {});
     return operation;
