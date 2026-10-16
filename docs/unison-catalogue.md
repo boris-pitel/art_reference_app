@@ -14,3 +14,5 @@ Created in linked Supabase project on 15 October 2026.
 Verification: database counts 380 rows, five sources, 385 stored files; zero missing swatch or source paths. Contact sheet visually checked for cell/label alignment. App matching UI is not implemented.
 
 Reproduce extraction with tool/catalogue/extract_unison.py and generate migration with tool/catalogue/build_unison_migration.py using bundled Python/Pillow. Generated assets and contact sheet are in output/unison-catalogue. Migration has already been applied; do not regenerate or reapply an edited copy to the live database.
+
+16 October 2026: Imported exact Dakota product listing names for all 380 swatches from https://dakotapastels.com/products/Soft-Unison-Individual. Prior generated names retained in approximate_name; retailer_sku and name_source_url record provenance. Product SKU families GREEN and ORANGE map to chart GRN and ORG. Dakota confirms YGE14; printed_code still records YGR14. All colour samples still await review. Reopen the Windows matching tool to fetch current names; no client update required.
