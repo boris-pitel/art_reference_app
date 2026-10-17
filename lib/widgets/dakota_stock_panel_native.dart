@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:webview_windows/webview_windows.dart';
+import 'retailer_webview_native.dart';
 import '../services/dakota_stock.dart';
 
 class DakotaStockPanel extends StatefulWidget {
@@ -12,7 +12,7 @@ class DakotaStockPanel extends StatefulWidget {
 }
 
 class _DakotaStockPanelState extends State<DakotaStockPanel> {
-  final _web = WebviewController();
+  final _web = RetailerWebController();
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   Timer? _timeout, _expiry;
   bool _ready = false, _checking = true;
@@ -34,12 +34,14 @@ class _DakotaStockPanelState extends State<DakotaStockPanel> {
       }
       _subscriptions.add(
         _web.loadingState.listen((state) {
-          if (state == LoadingState.loading) {
+          if (state == RetailerLoadingState.loading) {
             // An unrelated page must never retain stock from the previous page.
             _generation++;
             widget.onChanged({});
           }
-          if (state == LoadingState.navigationCompleted) unawaited(_read());
+          if (state == RetailerLoadingState.navigationCompleted) {
+            unawaited(_read());
+          }
         }),
       );
       _subscriptions.add(_web.onLoadError.listen((_) => _failed()));
@@ -144,7 +146,7 @@ class _DakotaStockPanelState extends State<DakotaStockPanel> {
         ExpansionTile(
           title: const Text('Dakota stock page'),
           maintainState: true,
-          children: [SizedBox(height: 260, child: Webview(_web))],
+          children: [SizedBox(height: 260, child: RetailerWebView(_web))],
         ),
     ],
   );

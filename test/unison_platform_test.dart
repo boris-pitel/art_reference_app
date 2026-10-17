@@ -4,10 +4,13 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   tearDown(() => debugDefaultTargetPlatformOverride = null);
-  test('matching is available only on native Windows', () {
+  test('matching is available only on native Windows and iOS', () {
     for (final platform in TargetPlatform.values) {
       debugDefaultTargetPlatformOverride = platform;
-      expect(unisonMatchingAvailable, platform == TargetPlatform.windows);
+      expect(
+        unisonMatchingAvailable,
+        platform == TargetPlatform.windows || platform == TargetPlatform.iOS,
+      );
     }
   });
 }

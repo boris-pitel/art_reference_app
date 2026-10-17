@@ -1,3 +1,4 @@
+import 'services/unison_platform.dart';
 import 'screens/unison_cart_screen.dart';
 import 'widgets/unison_cart_button.dart';
 import 'package:flutter/services.dart';
@@ -1648,8 +1649,7 @@ class _CollectionsScreenState extends State<CollectionsScreen>
         title: const Text('Painter Reference'),
         centerTitle: false,
         actions: [
-          if (!kIsWeb &&
-              defaultTargetPlatform == TargetPlatform.windows &&
+          if (unisonPlatformAvailable &&
               Supabase
                       .instance
                       .client

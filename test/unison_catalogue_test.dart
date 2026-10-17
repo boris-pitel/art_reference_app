@@ -43,6 +43,10 @@ void main() {
   testWidgets(
     'no-match search clears results; clear search restores rows and cart controls',
     (tester) async {
+      tester.view.physicalSize = const Size(375, 812);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       String? added;
       int? changed;
       await tester.pumpWidget(

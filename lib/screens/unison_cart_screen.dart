@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import '../services/unison_platform.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -87,8 +87,7 @@ class _UnisonCartScreenState extends State<UnisonCartScreen> {
   }
 
   bool get _allowed =>
-      !kIsWeb &&
-      defaultTargetPlatform == TargetPlatform.windows &&
+      unisonPlatformAvailable &&
       Supabase.instance.client.auth.currentUser?.id == widget.userId &&
       Supabase.instance.client.auth.currentUser?.appMetadata['is_admin'] ==
           true;
@@ -136,7 +135,7 @@ class _UnisonCartScreenState extends State<UnisonCartScreen> {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Unison shopping cart')),
     body: !_allowed
-        ? const Center(child: Text('Windows administrator access required.'))
+        ? const Center(child: Text('Administrator access required.'))
         : FutureBuilder<List<Map<String, dynamic>>>(
             future: _rows,
             builder: (context, snapshot) {
@@ -222,42 +221,53 @@ class _UnisonCartScreenState extends State<UnisonCartScreen> {
                                   title: Text(
                                     '${row['code']} · ${row['name']}',
                                   ),
-                                  subtitle: Text(_details(row)),
-                                  trailing: Row(
-                                    mainAxisSize: MainAxisSize.min,
+                                  subtitle: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      IconButton(
-                                        tooltip: 'Decrease quantity',
-                                        onPressed: _busy
-                                            ? null
-                                            : () => _quantity(
-                                                row['sku'] as String,
-                                                (row['quantity'] as int) - 1,
-                                              ),
-                                        icon: const Icon(Icons.remove),
-                                      ),
-                                      Text('${row['quantity']}'),
-                                      IconButton(
-                                        tooltip: 'Increase quantity',
-                                        onPressed:
-                                            _busy ||
-                                                (row['quantity'] as int) >= 99
-                                            ? null
-                                            : () => _quantity(
-                                                row['sku'] as String,
-                                                (row['quantity'] as int) + 1,
-                                              ),
-                                        icon: const Icon(Icons.add),
-                                      ),
-                                      IconButton(
-                                        tooltip: 'Remove colour',
-                                        onPressed: _busy
-                                            ? null
-                                            : () => _quantity(
-                                                row['sku'] as String,
-                                                0,
-                                              ),
-                                        icon: const Icon(Icons.delete_outline),
+                                      Text(_details(row)),
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          IconButton(
+                                            tooltip: 'Decrease quantity',
+                                            onPressed: _busy
+                                                ? null
+                                                : () => _quantity(
+                                                    row['sku'] as String,
+                                                    (row['quantity'] as int) -
+                                                        1,
+                                                  ),
+                                            icon: const Icon(Icons.remove),
+                                          ),
+                                          Text('${row['quantity']}'),
+                                          IconButton(
+                                            tooltip: 'Increase quantity',
+                                            onPressed:
+                                                _busy ||
+                                                    (row['quantity'] as int) >=
+                                                        99
+                                                ? null
+                                                : () => _quantity(
+                                                    row['sku'] as String,
+                                                    (row['quantity'] as int) +
+                                                        1,
+                                                  ),
+                                            icon: const Icon(Icons.add),
+                                          ),
+                                          IconButton(
+                                            tooltip: 'Remove colour',
+                                            onPressed: _busy
+                                                ? null
+                                                : () => _quantity(
+                                                    row['sku'] as String,
+                                                    0,
+                                                  ),
+                                            icon: const Icon(
+                                              Icons.delete_outline,
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ],
                                   ),

@@ -1,5 +1,5 @@
+import '../services/unison_platform.dart';
 import 'dart:async';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/dakota_stock.dart';
@@ -24,8 +24,7 @@ class _UnisonCatalogueScreenState extends State<UnisonCatalogueScreen> {
   Map<String, int> _quantities = {};
   bool _busy = false;
   bool get _allowed =>
-      !kIsWeb &&
-      defaultTargetPlatform == TargetPlatform.windows &&
+      unisonPlatformAvailable &&
       Supabase.instance.client.auth.currentUser?.id == widget.userId &&
       Supabase.instance.client.auth.currentUser?.appMetadata['is_admin'] ==
           true;
@@ -38,7 +37,7 @@ class _UnisonCatalogueScreenState extends State<UnisonCatalogueScreen> {
   }
 
   Future<List<Map<String, dynamic>>> _load() async {
-    if (!_allowed) throw StateError('Windows administrator access required.');
+    if (!_allowed) throw StateError('Administrator access required.');
     final data = await Supabase.instance.client
         .from('pastel_swatches')
         .select()
@@ -110,7 +109,7 @@ class _UnisonCatalogueScreenState extends State<UnisonCatalogueScreen> {
       ],
     ),
     body: !_allowed
-        ? const Center(child: Text('Windows administrator access required.'))
+        ? const Center(child: Text('Administrator access required.'))
         : Column(
             children: [
               Padding(

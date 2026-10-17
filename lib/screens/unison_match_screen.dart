@@ -1,3 +1,4 @@
+import '../services/unison_platform.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -12,8 +13,7 @@ import '../widgets/dakota_stock_panel.dart';
 import '../widgets/unison_cart_button.dart';
 import 'unison_cart_screen.dart';
 
-bool get unisonMatchingAvailable =>
-    !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+bool get unisonMatchingAvailable => unisonPlatformAvailable;
 
 Map<String, Object> _prepare(Uint8List bytes) {
   var image = img.decodeImage(bytes);

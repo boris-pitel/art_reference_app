@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:webview_windows/webview_windows.dart';
+import '../widgets/retailer_webview_native.dart';
 import '../services/unison_cart.dart';
 
 class DakotaCartScreen extends StatefulWidget {
@@ -12,7 +12,7 @@ class DakotaCartScreen extends StatefulWidget {
 }
 
 class _DakotaCartScreenState extends State<DakotaCartScreen> {
-  final _web = WebviewController();
+  final _web = RetailerWebController();
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   bool _ready = false, _loaded = false, _sent = false, _busy = false;
   String _message =
@@ -26,7 +26,7 @@ class _DakotaCartScreenState extends State<DakotaCartScreen> {
 
   Future<void> _initialize() async {
     try {
-      if (await WebviewController.getWebViewVersion() == null) {
+      if (await RetailerWebController.getWebViewVersion() == null) {
         throw StateError('Microsoft Edge WebView2 Runtime is required.');
       }
       await _web.initialize();
@@ -42,7 +42,9 @@ class _DakotaCartScreenState extends State<DakotaCartScreen> {
       _subscriptions.add(
         _web.loadingState.listen((state) {
           if (mounted) {
-            setState(() => _loaded = state == LoadingState.navigationCompleted);
+            setState(
+              () => _loaded = state == RetailerLoadingState.navigationCompleted,
+            );
           }
         }),
       );
@@ -200,7 +202,7 @@ class _DakotaCartScreenState extends State<DakotaCartScreen> {
         ),
         Expanded(
           child: _ready
-              ? Webview(_web)
+              ? RetailerWebView(_web)
               : const Center(child: Text('Preparing Dakota browser…')),
         ),
       ],
