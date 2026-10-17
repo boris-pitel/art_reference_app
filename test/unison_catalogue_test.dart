@@ -23,6 +23,8 @@ void main() {
       'be14',
       'UNSBE14',
       'brown earth',
+      'BROWN EARTH',
+      'bRoWn EaRtH',
       'Be 14',
       'warm beige',
     ]) {

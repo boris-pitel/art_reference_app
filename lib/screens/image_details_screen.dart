@@ -2406,13 +2406,34 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
           label: 'Thumbnail path',
           value: _thumbnailStoragePath!,
         ),
+      _buildTechnicalDetailRow(
+        context,
+        icon: Icons.aspect_ratio_outlined,
+        label: 'Dimensions',
+        value: _imageWidth != null && _imageHeight != null
+            ? '$_imageWidth × $_imageHeight px'
+            : 'Not recorded',
+      ),
+      ValueListenableBuilder<TextEditingValue>(
+        valueListenable: _shotLocationController,
+        builder: (context, value, _) {
+          final place = value.text.trim();
+          final gps = _photoMetadata?.hasLocation == true
+              ? '${_photoMetadata!.latitude!.toStringAsFixed(5)}, ${_photoMetadata!.longitude!.toStringAsFixed(5)}'
+              : '';
+          final location = [
+            place,
+            gps,
+          ].where((part) => part.isNotEmpty).join(' · ');
+          return _buildTechnicalDetailRow(
+            context,
+            icon: Icons.place_outlined,
+            label: 'Location',
+            value: location.isEmpty ? 'Not recorded' : location,
+          );
+        },
+      ),
       if (_imageWidth != null && _imageHeight != null) ...[
-        _buildTechnicalDetailRow(
-          context,
-          icon: Icons.aspect_ratio_outlined,
-          label: 'Dimensions',
-          value: '$_imageWidth × $_imageHeight px',
-        ),
         _buildTechnicalDetailRow(
           context,
           icon: Icons.crop_outlined,

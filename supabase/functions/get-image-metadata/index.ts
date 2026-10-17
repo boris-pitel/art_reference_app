@@ -84,6 +84,8 @@ Deno.serve(async (request) => {
       storage_path: string | null;
       thumbnail_storage_path: string | null;
       image_hash: string | null;
+      width: number | null;
+      height: number | null;
       is_favorite: boolean;
       is_finished_artwork: boolean;
 
@@ -113,6 +115,8 @@ Deno.serve(async (request) => {
         storage_path,
         thumbnail_storage_path,
         image_hash,
+        width,
+        height,
         is_favorite,
         is_finished_artwork,
 
@@ -158,6 +162,8 @@ Deno.serve(async (request) => {
       storage_path: row.storage_path,
       thumbnail_storage_path: row.thumbnail_storage_path,
       image_hash: row.image_hash,
+      width: row.width,
+      height: row.height,
       is_favorite: row.is_favorite,
       is_finished_artwork: row.is_finished_artwork,
 
