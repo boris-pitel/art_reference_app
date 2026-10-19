@@ -12,6 +12,7 @@ class UnisonCatalogueList extends StatefulWidget {
     required this.onAdd,
     required this.onQuantity,
     this.busy = false,
+    this.photoSearch,
   });
   final List<Map<String, dynamic>> rows;
   final Map<String, DakotaOffer> offers;
@@ -19,6 +20,7 @@ class UnisonCatalogueList extends StatefulWidget {
   final ValueChanged<Map<String, dynamic>> onAdd;
   final void Function(String sku, int quantity) onQuantity;
   final bool busy;
+  final Widget? photoSearch;
   @override
   State<UnisonCatalogueList> createState() => _UnisonCatalogueListState();
 }
@@ -56,6 +58,14 @@ class _UnisonCatalogueListState extends State<UnisonCatalogueList> {
             ),
           ),
         ),
+        if (widget.photoSearch != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: widget.photoSearch,
+            ),
+          ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           child: Align(
