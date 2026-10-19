@@ -1,3 +1,6 @@
+# Legacy developer ADB installer. Normal Android updates use Codemagic's
+# Android Firebase Testers workflow -> Firebase App Distribution -> android-testers.
+# See docs/deployment-flow.md. A USB device is not required for normal releases.
 [CmdletBinding()]
 param(
     [string]$DeviceId,
