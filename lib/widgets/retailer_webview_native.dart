@@ -25,6 +25,8 @@ class RetailerWebController {
       ? win.WebviewController.getWebViewVersion()
       : defaultTargetPlatform == TargetPlatform.iOS
       ? 'WKWebView'
+      : defaultTargetPlatform == TargetPlatform.android
+      ? 'Android WebView'
       : null;
 
   Future<void> initialize() async {
@@ -56,7 +58,8 @@ class RetailerWebController {
           if (!_disposed) _errors.add(value);
         }),
       );
-    } else if (defaultTargetPlatform == TargetPlatform.iOS) {
+    } else if (defaultTargetPlatform == TargetPlatform.iOS ||
+        defaultTargetPlatform == TargetPlatform.android) {
       final web = _iphone = ios.WebViewController();
       await web.setJavaScriptMode(ios.JavaScriptMode.unrestricted);
       await web.setNavigationDelegate(
@@ -77,7 +80,9 @@ class RetailerWebController {
         ),
       );
     } else {
-      throw UnsupportedError('Dakota browsing requires Windows or iPhone.');
+      throw UnsupportedError(
+        'Dakota browsing requires Windows, iPhone or Android.',
+      );
     }
   }
 
@@ -91,7 +96,7 @@ class RetailerWebController {
 
   Future<Object?> executeScript(String script) async {
     if (_windows != null) return _windows!.executeScript(script);
-    // WKWebView returns a JSON.stringify result as a Dart String directly.
+    // Both mobile WebViews return JSON.stringify results as a Dart String.
     final result = await _iphone!.runJavaScriptReturningResult(script);
     return result is String ? result : jsonEncode(result);
   }

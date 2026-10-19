@@ -27,7 +27,9 @@ class _UnisonCatalogueScreenState extends State<UnisonCatalogueScreen> {
   Map<String, DakotaOffer> _offers = {};
   Map<String, int> _quantities = {};
   bool _busy = false;
-  bool get _usesCamera => defaultTargetPlatform == TargetPlatform.iOS;
+  bool get _usesCamera =>
+      defaultTargetPlatform == TargetPlatform.iOS ||
+      defaultTargetPlatform == TargetPlatform.android;
 
   Future<Uint8List?> _capturePhoto() async {
     if (!_allowed) return null;
