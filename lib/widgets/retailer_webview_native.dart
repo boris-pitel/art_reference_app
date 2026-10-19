@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:convert';
+import '../services/retailer_script_result.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart' as ios;
@@ -96,9 +96,8 @@ class RetailerWebController {
 
   Future<Object?> executeScript(String script) async {
     if (_windows != null) return _windows!.executeScript(script);
-    // Both mobile WebViews return JSON.stringify results as a Dart String.
     final result = await _iphone!.runJavaScriptReturningResult(script);
-    return result is String ? result : jsonEncode(result);
+    return retailerScriptResult(result);
   }
 
   Future<void> reload() async {
