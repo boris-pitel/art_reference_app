@@ -15,6 +15,11 @@ if (-not $versionMatch.Success) {
 
 $appVersion = $versionMatch.Groups['version'].Value
 $buildNumber = $versionMatch.Groups['build'].Value
+$displayVersionSource = Get-Content -LiteralPath (Join-Path $projectRoot 'lib\app_version.dart') -Raw
+$displayVersionMatch = [regex]::Match($displayVersionSource, "const String appVersion = '([^']+)';")
+if (-not $displayVersionMatch.Success -or $displayVersionMatch.Groups[1].Value -ne "$appVersion+$buildNumber") {
+    throw 'The displayed app version does not match pubspec.yaml. Update lib/app_version.dart before packaging.'
+}
 $releaseDir = Join-Path $projectRoot 'build\windows\x64\runner\Release'
 $appExecutable = Join-Path $releaseDir 'art_reference_app.exe'
 $installerScript = Join-Path $projectRoot 'installer\painter-reference.iss'
