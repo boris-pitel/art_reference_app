@@ -1,4 +1,5 @@
 import 'unison_match_screen.dart';
+import 'reference_chat_screen.dart';
 import '../services/offline_upload_queue.dart';
 import 'continuous_camera_screen.dart';
 import '../widgets/offline_editing_body.dart';
@@ -2038,6 +2039,20 @@ class _ImageDetailsScreenState extends State<ImageDetailsScreen>
               enabled: !_isLoadingMetadata && !_isSavingMetadata,
               onPressed: _goHome,
             ),
+            if (Supabase.instance.client.auth.currentUser?.appMetadata['is_admin'] == true &&
+                (!widget.isAssociatedImage || _currentParentImageId != null))
+              IconButton(
+                tooltip: widget.isAssociatedImage ? 'Discuss in chat' : 'Chat about reference',
+                icon: const Icon(Icons.chat_bubble_outline),
+                onPressed: editorOffline ? null : () async {
+                  await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) =>
+                    ReferenceChatScreen(
+                      referenceId: widget.isAssociatedImage ? _currentParentImageId! : _currentImageId,
+                      selectedImageId: _currentImageId,
+                    )));
+                  if (mounted && !widget.isAssociatedImage) await _loadAssociatedImages();
+                },
+              ),
             if (widget.isAssociatedImage)
               TextButton.icon(
                 onPressed:
